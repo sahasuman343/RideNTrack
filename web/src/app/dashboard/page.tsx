@@ -2,20 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Ride, Profile } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
-
-interface Ride {
-  id: string;
-  name: string;
-  ride_code: string;
-  origin: string;
-  destination: string;
-  status: string;
-}
 
 export default function DashboardPage() {
   const [rides, setRides] = useState<Ride[]>([]);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -39,7 +31,7 @@ export default function DashboardPage() {
 
     const { data } = await supabase
       .from('ride_participants')
-      .select('ride_id, rides(id, name, ride_code, origin, destination, status)')
+      .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
       .eq('user_id', session.user.id)
       .order('joined_at', { ascending: false });
 

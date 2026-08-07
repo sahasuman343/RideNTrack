@@ -1,20 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-interface Alert {
-  id: string;
-  ride_id: string;
-  user_id: string;
-  display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical';
-  message?: string;
-  lat: number;
-  lng: number;
-  created_at: string;
-  acknowledged_at?: string;
-}
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { Alert, AlertType, ALERT_LABELS } from '@ridentrack/shared';
+import { supabase } from '../lib/supabase';
+import { enqueueAlert } from '../lib/offlineQueue';
 
-export type AlertType = 'emergency' | 'break' | 'fuel' | 'mechanical';
+export type { AlertType };
+export { ALERT_LABELS };
 
 export function useAlerts(rideId: string, userId: string, displayName: string) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -27,9 +18,9 @@ export function useAlerts(rideId: string, userId: string, displayName: string) {
     const channel = supabase.channel(`alerts:${rideId}`);
 
     channel
-      .on('broadcast', { event: 'alert' }, (payload) => {
+      .on('broadcast', { event: 'alert' }, (payload: { payload: Alert }) => {
         const alert = payload.payload as Alert;
-        setAlerts((prev) => [alert, ...prev]);
+        setAlerts((prev: Alert[]) => [alert, ...prev]);
         setLatestAlert(alert);
       })
       .subscribe();
@@ -41,40 +32,67 @@ export function useAlerts(rideId: string, userId: string, displayName: string) {
     };
   }, [rideId]);
 
-  const sendAlert = useCallback(async (type: AlertType, lat: number, lng: number, message?: string) => {
-    if (!channelRef.current) return;
+  const sendAlert = useCallback(
+    async (type: AlertType, lat: number, lng: number, message?: string) => {
+      const alertId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const createdAt = new Date().toISOString();
 
-    const alert: Alert = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-      ride_id: rideId,
-      user_id: userId,
-      display_name: displayName,
-      type,
-      message,
-      lat,
-      lng,
-      created_at: new Date().toISOString(),
-    };
+      const alert: Alert = {
+        id: alertId,
+        ride_id: rideId,
+        user_id: userId,
+        display_name: displayName,
+        type,
+        message,
+        lat,
+        lng,
+        created_at: createdAt,
+      };
 
-    // Broadcast to all participants
-    await channelRef.current.send({
-      type: 'broadcast',
-      event: 'alert',
-      payload: alert,
-    });
+      // Always enqueue to local offline queue first for resilience
+      await enqueueAlert({
+        id: alertId,
+        ride_id: rideId,
+        user_id: userId,
+        type,
+        message,
+        lat,
+        lng,
+        created_at: createdAt,
+      });
 
-    // Persist to database
-    await supabase.from('alerts').insert({
-      ride_id: rideId,
-      user_id: userId,
-      type,
-      message,
-      lat,
-      lng,
-    });
+      // Attempt live broadcast
+      if (channelRef.current) {
+        try {
+          await channelRef.current.send({
+            type: 'broadcast',
+            event: 'alert',
+            payload: alert,
+          });
+        } catch (err) {
+          console.warn('Realtime alert broadcast failed, offline queue will sync:', err);
+        }
+      }
 
-    setAlerts((prev) => [alert, ...prev]);
-  }, [rideId, userId, displayName]);
+      // Attempt immediate database insertion
+      try {
+        await supabase.from('alerts').insert({
+          id: alertId,
+          ride_id: rideId,
+          user_id: userId,
+          type,
+          message,
+          lat,
+          lng,
+        });
+      } catch (err) {
+        console.warn('Alert DB insert failed, offline queue will sync upon reconnect:', err);
+      }
+
+      setAlerts((prev: Alert[]) => [alert, ...prev]);
+    },
+    [rideId, userId, displayName]
+  );
 
   const dismissAlert = useCallback(() => {
     setLatestAlert(null);

@@ -45,15 +45,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username,
+          display_name: displayName,
+        },
+      },
+    });
     if (error) throw error;
-    if (data.user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: data.user.id,
-        username,
-        display_name: displayName,
-      });
-      if (profileError) throw profileError;
+
+    // If an authenticated session is created immediately, ensure profile is populated
+    if (data?.session && data?.user) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          username,
+          display_name: displayName,
+        });
+      } catch (err) {
+        console.warn('Profile fallback insert note:', err);
+      }
     }
   }
 

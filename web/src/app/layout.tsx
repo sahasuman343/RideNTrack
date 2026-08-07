@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   description: "Track and manage group motorcycle rides across India",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="en"

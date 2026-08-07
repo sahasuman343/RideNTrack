@@ -1,9 +1,68 @@
+# Dependencies & Package Managers
 node_modules/
+.npm/
+.npm-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment Variables & Secrets
 .env
-.env.local
-.expo/
-dist/
+.env.*
+.env*.local
+*.env
+!.env.example
+!*.env.example
+
+# Next.js Build Outputs (Web)
 .next/
 out/
-*.log
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Expo & React Native (Mobile)
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Native Builds & Generated Folders
+android/
+ios/
+
+# Keystores, Certificates & Secrets
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.keystore
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+
+# IDE, Editors & AI Agent Caches
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.claude/
+.cortex/
+
+# Operating System Files
 .DS_Store
+.DS_Store?
+._*
+[Tt]humbs.db
+ehthumbs.db
+
+# Logs & Temporary Files
+*.log
+*.tmp
+*.bak

@@ -1,15 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase';
-interface LocationUpdate {
-  user_id: string;
-  display_name: string;
-  lat: number;
-  lng: number;
-  speed: number;
-  heading: number;
-  timestamp: string;
-}
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { LocationUpdate } from '@ridentrack/shared';
+import { supabase } from '../lib/supabase';
 
 export function useRealtimeLocation(rideId: string, userId: string, displayName: string) {
   const [participants, setParticipants] = useState<Map<string, LocationUpdate>>(new Map());
@@ -26,8 +18,8 @@ export function useRealtimeLocation(rideId: string, userId: string, displayName:
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const updated = new Map<string, LocationUpdate>();
-        Object.entries(state).forEach(([key, presences]) => {
-          const latest = presences[presences.length - 1] as any;
+        Object.entries(state).forEach(([key, presences]: [string, any]) => {
+          const latest = presences[presences.length - 1];
           if (latest?.lat && latest?.lng) {
             updated.set(key, {
               user_id: key,
@@ -51,17 +43,24 @@ export function useRealtimeLocation(rideId: string, userId: string, displayName:
     };
   }, [rideId, userId]);
 
-  const broadcastLocation = async (lat: number, lng: number, speed: number, heading: number) => {
-    if (!channelRef.current) return;
-    await channelRef.current.track({
-      display_name: displayName,
-      lat,
-      lng,
-      speed,
-      heading,
-      timestamp: new Date().toISOString(),
-    });
-  };
+  const broadcastLocation = useCallback(
+    async (lat: number, lng: number, speed: number, heading: number) => {
+      if (!channelRef.current) return;
+      try {
+        await channelRef.current.track({
+          display_name: displayName,
+          lat,
+          lng,
+          speed,
+          heading,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Realtime presence track error (buffered locally):', err);
+      }
+    },
+    [displayName]
+  );
 
   return { participants, broadcastLocation };
 }

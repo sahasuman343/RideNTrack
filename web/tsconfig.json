@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@ridentrack/shared": ["../shared/types.ts"]
     }
   },
   "include": [

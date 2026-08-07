@@ -12,7 +12,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "RideNTrack needs your location to share it with your ride group."
+          "locationAlwaysAndWhenInUsePermission": "RideNTrack needs your location to share it with your ride group even when the screen is locked.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
@@ -26,8 +28,13 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ridentrack.app",
       "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
         "NSLocationWhenInUseUsageDescription": "RideNTrack needs your location to show you on the ride map.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "RideNTrack needs your location to share it with your ride group even when the app is in the background."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "RideNTrack needs your location to share it with your ride group even when the app is in the background or device is mounted in a tank bag.",
+        "NSLocationAlwaysUsageDescription": "RideNTrack continuously tracks your group ride location in the background."
       }
     },
     "android": {
@@ -41,7 +48,10 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "WAKE_LOCK"
       ]
     },
     "web": {

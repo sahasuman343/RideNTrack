@@ -1,0 +1,20 @@
+{
+  "name": "ridentrack-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "mobile",
+    "web"
+  ],
+  "scripts": {
+    "mobile": "npm --workspace=mobile run start",
+    "web": "npm --workspace=web run dev",
+    "lint": "npm --workspace=web run lint"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.19",
+    "@types/react": "^19.0.8",
+    "typescript": "^5.7.3"
+  }
+}

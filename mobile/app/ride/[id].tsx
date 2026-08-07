@@ -1,18 +1,14 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import MapboxGL from '@rnmapbox/maps';
-import * as Location from 'expo-location';
+import { Ride, LocationUpdate, AlertType, ALERT_LABELS } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRealtimeLocation } from '../../src/hooks/useRealtimeLocation';
-import { useAlerts, AlertType } from '../../src/hooks/useAlerts';
-const ALERT_LABELS: Record<string, string> = {
-  emergency: '🚨 Emergency',
-  break: '☕ Break',
-  fuel: '⛽ Fuel Stop',
-  mechanical: '🔧 Mechanical Issue',
-};
+import { useAlerts } from '../../src/hooks/useAlerts';
+import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
 MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '');
 
@@ -22,11 +18,11 @@ const PARTICIPANT_PANEL_WIDTH = 160;
 export default function LiveRideScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
-  const [ride, setRide] = useState<any>(null);
+  const [ride, setRide] = useState<Ride | null>(null);
   const [routeGeoJSON, setRouteGeoJSON] = useState<any>(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
-  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const [isBackgroundTracking, setIsBackgroundTracking] = useState(false);
 
   const { participants, broadcastLocation } = useRealtimeLocation(
     id || '',
@@ -40,21 +36,52 @@ export default function LiveRideScreen() {
     profile?.display_name || 'Rider'
   );
 
+  const {
+    isOnline,
+    pendingLocationsCount,
+    pendingAlertsCount,
+    isSyncing,
+    flushQueue,
+  } = useOfflineSync(id);
+
+  const startTracking = useCallback(async () => {
+    if (!id || !user) return;
+    try {
+      const result = await startBackgroundLocationUpdates({
+        rideId: id,
+        userId: user.id,
+        displayName: profile?.display_name || 'Rider',
+        broadcastFn: (lat: number, lng: number, speed: number, heading: number) => {
+          broadcastLocation(lat, lng, speed, heading);
+        },
+        onLocationUpdate: (coords: { lat: number; lng: number; speed: number; heading: number }) => {
+          setMyLocation({ lat: coords.lat, lng: coords.lng });
+        },
+      });
+      setIsBackgroundTracking(result.isBackgroundEnabled);
+    } catch (err) {
+      console.warn('Failed to start location tracking:', err);
+    }
+  }, [id, user, profile, broadcastLocation]);
+
   useEffect(() => {
-    if (id) fetchRide();
-    startLocationTracking();
+    if (id) {
+      fetchRide();
+    }
+    startTracking();
+
     return () => {
-      locationSubscription.current?.remove();
+      stopBackgroundLocationUpdates();
     };
-  }, [id]);
+  }, [id, startTracking]);
 
   async function fetchRide() {
     const { data } = await supabase.from('rides').select('*').eq('id', id).single();
     if (data) {
-      setRide(data);
-      if (!data.route_geometry) {
+      setRide(data as Ride);
+      if (!data.route_geometry && data.origin_coords && data.destination_coords) {
         fetchRoute(data.origin_coords, data.destination_coords);
-      } else {
+      } else if (data.route_geometry) {
         setRouteGeoJSON(data.route_geometry);
       }
     }
@@ -75,7 +102,6 @@ export default function LiveRideScreen() {
           properties: {},
         };
         setRouteGeoJSON(geojson);
-        // Save route to DB
         await supabase.from('rides').update({ route_geometry: geojson }).eq('id', id);
       }
     } catch (err) {
@@ -83,28 +109,14 @@ export default function LiveRideScreen() {
     }
   }
 
-  async function startLocationTracking() {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return;
-
-    locationSubscription.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
-      (location) => {
-        const { latitude, longitude, speed, heading } = location.coords;
-        setMyLocation({ lat: latitude, lng: longitude });
-        broadcastLocation(latitude, longitude, speed || 0, heading || 0);
-      }
-    );
-  }
-
   async function handleStartRide() {
     await supabase.from('rides').update({ status: 'active' }).eq('id', id);
-    setRide((prev: any) => ({ ...prev, status: 'active' }));
+    setRide((prev: Ride | null) => (prev ? { ...prev, status: 'active' } : null));
   }
 
   async function handleEndRide() {
     await supabase.from('rides').update({ status: 'completed' }).eq('id', id);
-    setRide((prev: any) => ({ ...prev, status: 'completed' }));
+    setRide((prev: Ride | null) => (prev ? { ...prev, status: 'completed' } : null));
   }
 
   function handleSendAlert(type: AlertType) {
@@ -112,20 +124,55 @@ export default function LiveRideScreen() {
     setShowAlertModal(false);
   }
 
-  const participantList = Array.from(participants.values());
+  const participantList: LocationUpdate[] = Array.from(participants.values());
   const isAdmin = ride?.admin_id === user?.id;
+  const totalPending = pendingLocationsCount + pendingAlertsCount;
 
   return (
     <View style={styles.container}>
       {/* Left-side participant panel */}
       <View style={styles.participantPanel}>
         <Text style={styles.panelTitle}>Riders ({participantList.length})</Text>
+
+        {/* Sync Status Badge in Panel */}
+        <View style={styles.syncStatusCard}>
+          <View style={styles.syncStatusHeader}>
+            <View
+              style={[
+                styles.syncStatusDot,
+                { backgroundColor: !isOnline ? '#F59E0B' : isSyncing ? '#3B82F6' : '#10B981' },
+              ]}
+            />
+            <Text style={styles.syncStatusTitle}>
+              {!isOnline
+                ? 'Offline Mode'
+                : isSyncing
+                ? 'Syncing...'
+                : isBackgroundTracking
+                ? 'Bg GPS Active'
+                : 'GPS Active'}
+            </Text>
+          </View>
+          {totalPending > 0 && (
+            <TouchableOpacity onPress={flushQueue} style={styles.pendingBadge}>
+              <Text style={styles.pendingText}>
+                {totalPending} buffered {isOnline ? '(tap to sync)' : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         <FlatList
           data={participantList}
-          keyExtractor={(item) => item.user_id}
-          renderItem={({ item }) => (
+          keyExtractor={(item: LocationUpdate) => item.user_id}
+          renderItem={({ item }: { item: LocationUpdate }) => (
             <View style={styles.participantItem}>
-              <View style={[styles.dot, { backgroundColor: item.user_id === user?.id ? '#FF6B00' : '#4CAF50' }]} />
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: item.user_id === user?.id ? '#FF6B00' : '#4CAF50' },
+                ]}
+              />
               <View style={styles.participantInfo}>
                 <Text style={styles.participantName} numberOfLines={1}>
                   {item.display_name}
@@ -146,7 +193,7 @@ export default function LiveRideScreen() {
             centerCoordinate={
               myLocation.lng !== 0
                 ? [myLocation.lng, myLocation.lat]
-                : ride?.origin_coords || [78.9629, 20.5937] // Default: center of India
+                : ride?.origin_coords || [78.9629, 20.5937]
             }
             zoomLevel={12}
           />
@@ -162,7 +209,7 @@ export default function LiveRideScreen() {
           )}
 
           {/* Participant markers */}
-          {participantList.map((p) => (
+          {participantList.map((p: LocationUpdate) => (
             <MapboxGL.PointAnnotation
               key={p.user_id}
               id={p.user_id}
@@ -196,8 +243,13 @@ export default function LiveRideScreen() {
 
         {/* Ride info overlay */}
         <View style={styles.rideInfo}>
-          <Text style={styles.rideName}>{ride?.name || 'Loading...'}</Text>
-          <Text style={styles.rideRoute}>{ride?.origin} → {ride?.destination}</Text>
+          <View style={styles.rideHeaderRow}>
+            <Text style={styles.rideName}>{ride?.name || 'Loading...'}</Text>
+            {isSyncing && <ActivityIndicator size="small" color="#FF6B00" />}
+          </View>
+          <Text style={styles.rideRoute}>
+            {ride?.origin} → {ride?.destination}
+          </Text>
           {ride?.ride_code && <Text style={styles.rideCode}>Code: {ride.ride_code}</Text>}
         </View>
 
@@ -208,7 +260,10 @@ export default function LiveRideScreen() {
           </TouchableOpacity>
         )}
         {isAdmin && ride?.status === 'active' && (
-          <TouchableOpacity style={[styles.startButton, { backgroundColor: '#e74c3c' }]} onPress={handleEndRide}>
+          <TouchableOpacity
+            style={[styles.startButton, { backgroundColor: '#e74c3c' }]}
+            onPress={handleEndRide}
+          >
             <Text style={styles.startButtonText}>End Ride</Text>
           </TouchableOpacity>
         )}
@@ -234,7 +289,7 @@ export default function LiveRideScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Send Alert</Text>
-            {(Object.keys(ALERT_LABELS) as AlertType[]).map((type) => (
+            {(Object.keys(ALERT_LABELS) as AlertType[]).map((type: AlertType) => (
               <TouchableOpacity
                 key={type}
                 style={[styles.alertOption, type === 'emergency' && styles.emergencyOption]}
@@ -262,7 +317,19 @@ const styles = StyleSheet.create({
     borderRightColor: '#0f3460',
     paddingTop: 8,
   },
-  panelTitle: { color: '#FF6B00', fontSize: 14, fontWeight: '700', padding: 12, paddingBottom: 8 },
+  panelTitle: { color: '#FF6B00', fontSize: 14, fontWeight: '700', padding: 12, paddingBottom: 4 },
+  syncStatusCard: {
+    backgroundColor: '#0f3460',
+    marginHorizontal: 8,
+    marginBottom: 8,
+    borderRadius: 8,
+    padding: 8,
+  },
+  syncStatusHeader: { flexDirection: 'row', alignItems: 'center' },
+  syncStatusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  syncStatusTitle: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  pendingBadge: { marginTop: 4, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 3 },
+  pendingText: { color: '#F59E0B', fontSize: 9, textAlign: 'center' },
   participantItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8 },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   participantInfo: { flex: 1 },
@@ -296,10 +363,11 @@ const styles = StyleSheet.create({
     top: 12,
     left: 12,
     right: 12,
-    backgroundColor: 'rgba(22, 33, 62, 0.9)',
+    backgroundColor: 'rgba(22, 33, 62, 0.92)',
     borderRadius: 12,
     padding: 12,
   },
+  rideHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rideName: { color: '#fff', fontSize: 16, fontWeight: '700' },
   rideRoute: { color: '#ccc', fontSize: 12, marginTop: 2 },
   rideCode: { color: '#FF6B00', fontSize: 11, marginTop: 2, fontFamily: 'monospace' },

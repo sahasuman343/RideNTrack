@@ -11,31 +11,51 @@ export default function RegisterPage() {
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const router = useRouter();
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccessMsg('');
 
-    const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+    // 1. Sign up with user metadata so the database trigger creates the profile
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username,
+          display_name: displayName,
+        },
+      },
+    });
+
     if (signUpError) {
       setError(signUpError.message);
       setLoading(false);
       return;
     }
 
-    if (data.user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: data.user.id,
-        username,
-        display_name: displayName,
-      });
-      if (profileError) {
-        setError(profileError.message);
-        setLoading(false);
-        return;
+    // 2. If a session is active immediately (email confirmation disabled), upsert profile
+    if (data?.session && data?.user) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          username,
+          display_name: displayName,
+        });
+      } catch (err) {
+        console.warn('Profile upsert fallback note:', err);
       }
+    }
+
+    if (data?.user && !data?.session) {
+      setSuccessMsg('Account registered! If confirmation is required, please check your email, then log in.');
+      setLoading(false);
+      setTimeout(() => router.push('/login'), 2500);
+      return;
     }
 
     router.push('/login');
@@ -51,6 +71,11 @@ export default function RegisterPage() {
           {error && (
             <div className="bg-red-500/10 border border-red-500 rounded-lg p-3 text-red-400 text-sm">
               {error}
+            </div>
+          )}
+          {successMsg && (
+            <div className="bg-emerald-500/10 border border-emerald-500 rounded-lg p-3 text-emerald-400 text-sm">
+              {successMsg}
             </div>
           )}
           <input

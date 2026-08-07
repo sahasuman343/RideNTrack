@@ -1,21 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ride } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 
-interface RideItem {
-  id: string;
-  name: string;
-  ride_code: string;
-  origin: string;
-  destination: string;
-  status: string;
-  admin_id: string;
-}
-
 export default function MyRidesScreen() {
-  const [rides, setRides] = useState<RideItem[]>([]);
+  const [rides, setRides] = useState<Ride[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
@@ -28,7 +19,7 @@ export default function MyRidesScreen() {
     if (!user) return;
     const { data } = await supabase
       .from('ride_participants')
-      .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id)')
+      .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
       .eq('user_id', user.id)
       .order('joined_at', { ascending: false });
 
