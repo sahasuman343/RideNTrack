@@ -1,8 +1,11 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { enqueueLocation } from '../lib/offlineQueue';
 
 export const BACKGROUND_LOCATION_TASK = 'RIDENTRACK_BACKGROUND_LOCATION_TASK';
+
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient || (Constants as any).appOwnership === 'expo';
 
 interface ActiveRideContext {
   rideId: string;
@@ -86,16 +89,18 @@ export async function startBackgroundLocationUpdates(params: {
     throw new Error('Location permission is required for group ride tracking.');
   }
 
-  // 2. Check and request background permissions
+  // 2. Check and request background permissions (Skip in Expo Go to avoid warning popup)
   let isBackgroundAvailable = false;
-  try {
-    const isAvailable = await Location.isBackgroundLocationAvailableAsync();
-    if (isAvailable) {
-      const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-      isBackgroundAvailable = bgStatus === 'granted';
+  if (!isExpoGo) {
+    try {
+      const isAvailable = await Location.isBackgroundLocationAvailableAsync();
+      if (isAvailable) {
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        isBackgroundAvailable = bgStatus === 'granted';
+      }
+    } catch (e) {
+      console.warn('Background location check error:', e);
     }
-  } catch (e) {
-    console.warn('Background location check error:', e);
   }
 
   if (isBackgroundAvailable) {

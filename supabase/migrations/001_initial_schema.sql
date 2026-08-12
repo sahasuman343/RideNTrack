@@ -132,11 +132,24 @@ CREATE POLICY "Users can update own profile" ON public.profiles
 CREATE POLICY "Users can insert own profile" ON public.profiles
   FOR INSERT WITH CHECK (auth.uid() = id);
 
+-- Helper function to check ride participation without RLS recursion
+CREATE OR REPLACE FUNCTION public.is_ride_participant(p_ride_id uuid, p_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.ride_participants
+    WHERE ride_id = p_ride_id AND user_id = p_user_id
+  );
+$$;
+
 -- Rides: participants can view, anyone authenticated can create
 CREATE POLICY "Rides viewable by participants" ON public.rides
   FOR SELECT USING (
-    auth.uid() IN (SELECT user_id FROM public.ride_participants WHERE ride_id = id)
-    OR admin_id = auth.uid()
+    admin_id = auth.uid()
+    OR public.is_ride_participant(id, auth.uid())
   );
 CREATE POLICY "Authenticated users can create rides" ON public.rides
   FOR INSERT WITH CHECK (auth.uid() = admin_id);
@@ -146,7 +159,9 @@ CREATE POLICY "Admin can update ride" ON public.rides
 -- Ride participants: viewable by other participants
 CREATE POLICY "Participants viewable by ride members" ON public.ride_participants
   FOR SELECT USING (
-    auth.uid() IN (SELECT user_id FROM public.ride_participants rp WHERE rp.ride_id = ride_id)
+    user_id = auth.uid()
+    OR public.is_ride_participant(ride_id, auth.uid())
+    OR EXISTS (SELECT 1 FROM public.rides WHERE id = ride_id AND admin_id = auth.uid())
   );
 CREATE POLICY "Users can join rides" ON public.ride_participants
   FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -156,7 +171,8 @@ CREATE POLICY "Users can leave rides" ON public.ride_participants
 -- Location updates: viewable by ride participants
 CREATE POLICY "Location viewable by ride members" ON public.location_updates
   FOR SELECT USING (
-    auth.uid() IN (SELECT user_id FROM public.ride_participants WHERE ride_id = location_updates.ride_id)
+    user_id = auth.uid()
+    OR public.is_ride_participant(ride_id, auth.uid())
   );
 CREATE POLICY "Users can insert own location" ON public.location_updates
   FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -164,7 +180,8 @@ CREATE POLICY "Users can insert own location" ON public.location_updates
 -- Alerts: viewable by ride participants
 CREATE POLICY "Alerts viewable by ride members" ON public.alerts
   FOR SELECT USING (
-    auth.uid() IN (SELECT user_id FROM public.ride_participants WHERE ride_id = alerts.ride_id)
+    user_id = auth.uid()
+    OR public.is_ride_participant(ride_id, auth.uid())
   );
 CREATE POLICY "Participants can create alerts" ON public.alerts
   FOR INSERT WITH CHECK (auth.uid() = user_id);

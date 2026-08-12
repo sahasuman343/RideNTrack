@@ -20,28 +20,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
-    });
+    let isMounted = true;
+
+    // Safety timeout: Ensure loading finishes within 3 seconds even if network is offline/slow
+    const timeout = setTimeout(() => {
+      if (isMounted) setLoading(false);
+    }, 3000);
+
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (!isMounted) return;
+        setSession(session);
+        if (session?.user) fetchProfile(session.user.id);
+      })
+      .catch((err) => {
+        console.warn('Error fetching session:', err);
+      })
+      .finally(() => {
+        if (isMounted) {
+          clearTimeout(timeout);
+          setLoading(false);
+        }
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
       setSession(session);
       if (session?.user) fetchProfile(session.user.id);
       else setProfile(null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function fetchProfile(userId: string) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    setProfile(data);
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      setProfile(data);
+    } catch (err) {
+      console.warn('Profile fetch error:', err);
+    }
   }
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
@@ -72,13 +98,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    if (data?.session) {
+      setSession(data.session);
+      if (data.user) fetchProfile(data.user.id);
+    }
   }
 
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    setSession(null);
+    setProfile(null);
   }
 
   return (

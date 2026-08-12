@@ -17,9 +17,10 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await signIn(email, password);
+      await signIn(email.trim(), password);
+      router.replace('/(tabs)');
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message);
+      Alert.alert('Login Failed', error.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }

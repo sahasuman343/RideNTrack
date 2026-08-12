@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import MapboxGL from '@rnmapbox/maps';
 import { Ride, LocationUpdate, AlertType, ALERT_LABELS } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -10,7 +9,18 @@ import { useAlerts } from '../../src/hooks/useAlerts';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
-MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '');
+let MapboxGL: any = null;
+let isMapboxAvailable = false;
+
+try {
+  MapboxGL = require('@rnmapbox/maps').default;
+  if (MapboxGL && typeof MapboxGL.setAccessToken === 'function') {
+    MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '');
+    isMapboxAvailable = true;
+  }
+} catch (e) {
+  console.warn('@rnmapbox/maps native module not available in Expo Go fallback mode');
+}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PARTICIPANT_PANEL_WIDTH = 160;
@@ -188,58 +198,71 @@ export default function LiveRideScreen() {
 
       {/* Map */}
       <View style={styles.mapContainer}>
-        <MapboxGL.MapView style={styles.map} styleURL={MapboxGL.StyleURL.Dark}>
-          <MapboxGL.Camera
-            centerCoordinate={
-              myLocation.lng !== 0
-                ? [myLocation.lng, myLocation.lat]
-                : ride?.origin_coords || [78.9629, 20.5937]
-            }
-            zoomLevel={12}
-          />
+        {isMapboxAvailable && MapboxGL ? (
+          <MapboxGL.MapView style={styles.map} styleURL={MapboxGL.StyleURL?.Dark || 'mapbox://styles/mapbox/dark-v10'}>
+            <MapboxGL.Camera
+              centerCoordinate={
+                myLocation.lng !== 0
+                  ? [myLocation.lng, myLocation.lat]
+                  : ride?.origin_coords || [78.9629, 20.5937]
+              }
+              zoomLevel={12}
+            />
 
-          {/* Route line */}
-          {routeGeoJSON && (
-            <MapboxGL.ShapeSource id="routeSource" shape={routeGeoJSON}>
-              <MapboxGL.LineLayer
-                id="routeLine"
-                style={{ lineColor: '#FF6B00', lineWidth: 4, lineOpacity: 0.8 }}
-              />
-            </MapboxGL.ShapeSource>
-          )}
+            {/* Route line */}
+            {routeGeoJSON && (
+              <MapboxGL.ShapeSource id="routeSource" shape={routeGeoJSON}>
+                <MapboxGL.LineLayer
+                  id="routeLine"
+                  style={{ lineColor: '#FF6B00', lineWidth: 4, lineOpacity: 0.8 }}
+                />
+              </MapboxGL.ShapeSource>
+            )}
 
-          {/* Participant markers */}
-          {participantList.map((p: LocationUpdate) => (
-            <MapboxGL.PointAnnotation
-              key={p.user_id}
-              id={p.user_id}
-              coordinate={[p.lng, p.lat]}
-              title={p.display_name}
-            >
-              <View style={styles.marker}>
-                <Text style={styles.markerText}>{p.display_name[0]}</Text>
-              </View>
-            </MapboxGL.PointAnnotation>
-          ))}
+            {/* Participant markers */}
+            {participantList.map((p: LocationUpdate) => (
+              <MapboxGL.PointAnnotation
+                key={p.user_id}
+                id={p.user_id}
+                coordinate={[p.lng, p.lat]}
+                title={p.display_name}
+              >
+                <View style={styles.marker}>
+                  <Text style={styles.markerText}>{p.display_name[0]}</Text>
+                </View>
+              </MapboxGL.PointAnnotation>
+            ))}
 
-          {/* Origin marker */}
-          {ride?.origin_coords && (
-            <MapboxGL.PointAnnotation id="origin" coordinate={ride.origin_coords}>
-              <View style={[styles.locationPin, { backgroundColor: '#4CAF50' }]}>
-                <Text style={styles.pinText}>A</Text>
-              </View>
-            </MapboxGL.PointAnnotation>
-          )}
+            {/* Origin marker */}
+            {ride?.origin_coords && (
+              <MapboxGL.PointAnnotation id="origin" coordinate={ride.origin_coords}>
+                <View style={[styles.locationPin, { backgroundColor: '#4CAF50' }]}>
+                  <Text style={styles.pinText}>A</Text>
+                </View>
+              </MapboxGL.PointAnnotation>
+            )}
 
-          {/* Destination marker */}
-          {ride?.destination_coords && (
-            <MapboxGL.PointAnnotation id="destination" coordinate={ride.destination_coords}>
-              <View style={[styles.locationPin, { backgroundColor: '#e74c3c' }]}>
-                <Text style={styles.pinText}>B</Text>
-              </View>
-            </MapboxGL.PointAnnotation>
-          )}
-        </MapboxGL.MapView>
+            {/* Destination marker */}
+            {ride?.destination_coords && (
+              <MapboxGL.PointAnnotation id="destination" coordinate={ride.destination_coords}>
+                <View style={[styles.locationPin, { backgroundColor: '#e74c3c' }]}>
+                  <Text style={styles.pinText}>B</Text>
+                </View>
+              </MapboxGL.PointAnnotation>
+            )}
+          </MapboxGL.MapView>
+        ) : (
+          <View style={[styles.map, styles.mapFallbackContainer]}>
+            <Text style={styles.mapFallbackTitle}>🗺️ Live Location Hub</Text>
+            <Text style={styles.mapFallbackSub}>
+              {myLocation.lat !== 0 ? `Your GPS: ${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)}` : 'Acquiring GPS Signal...'}
+            </Text>
+            <View style={styles.mapFallbackStats}>
+              <Text style={styles.mapFallbackText}>Active Riders: {participantList.length}</Text>
+              <Text style={styles.mapFallbackText}>GPS Tracking: {isBackgroundTracking ? '🟢 Active' : '⚪ Idle'}</Text>
+            </View>
+          </View>
+        )}
 
         {/* Ride info overlay */}
         <View style={styles.rideInfo}>
@@ -337,6 +360,16 @@ const styles = StyleSheet.create({
   participantSpeed: { color: '#999', fontSize: 10, marginTop: 2 },
   mapContainer: { flex: 1 },
   map: { flex: 1 },
+  mapFallbackContainer: {
+    backgroundColor: '#0f3460',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  mapFallbackTitle: { color: '#FF6B00', fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  mapFallbackSub: { color: '#fff', fontSize: 14, marginBottom: 12 },
+  mapFallbackStats: { backgroundColor: '#16213e', borderRadius: 8, padding: 12, width: '100%', alignItems: 'center' },
+  mapFallbackText: { color: '#ccc', fontSize: 13, marginVertical: 2 },
   marker: {
     width: 30,
     height: 30,

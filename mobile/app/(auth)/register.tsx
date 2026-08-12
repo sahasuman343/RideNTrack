@@ -23,9 +23,8 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await signUp(email, password, username, displayName);
-      Alert.alert('Success', 'Account created! You can now sign in.');
-      router.back();
+      await signUp(email.trim(), password, username.trim(), displayName.trim());
+      router.replace('/(tabs)');
     } catch (error: any) {
       Alert.alert('Registration Failed', error.message);
     } finally {
