@@ -1,13 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
+import type { Profile } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
-  profile: any | null;
+  profile: Profile | null;
   loading: boolean;
-  signUp: (email: string, password: string, username: string, displayName: string) => Promise<void>;
+  signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -16,7 +18,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isMounted) return;
       setSession(session);
       if (session?.user) fetchProfile(session.user.id);
-      else setProfile(null);
+      else { setProfile(null); void stopBackgroundLocationUpdates().catch(console.warn); }
     });
 
     return () => {
@@ -64,7 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .select('*')
         .eq('id', userId)
         .single();
-      setProfile(data);
+      const { data: { session: current } } = await supabase.auth.getSession();
+      if (current?.user.id === userId) setProfile(data as Profile | null);
     } catch (err) {
       console.warn('Profile fetch error:', err);
     }
@@ -83,18 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     if (error) throw error;
 
-    // If an authenticated session is created immediately, ensure profile is populated
-    if (data?.session && data?.user) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          username,
-          display_name: displayName,
-        });
-      } catch (err) {
-        console.warn('Profile fallback insert note:', err);
-      }
-    }
+    return Boolean(data.session);
   }
 
   async function signIn(email: string, password: string) {
@@ -107,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    await stopBackgroundLocationUpdates();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setSession(null);

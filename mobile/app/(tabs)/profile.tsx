@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../../src/hooks/useAuth';
 
 export default function ProfileScreen() {
@@ -24,7 +24,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
+      <TouchableOpacity style={styles.logoutButton} onPress={() => void signOut().catch(e => Alert.alert('Sign out failed', e.message))}>
         <Text style={styles.logoutText}>Sign Out</Text>
       </TouchableOpacity>
     </View>

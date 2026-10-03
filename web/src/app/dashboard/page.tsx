@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Ride, Profile } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
@@ -33,10 +34,11 @@ export default function DashboardPage() {
       .from('ride_participants')
       .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
       .eq('user_id', session.user.id)
+      .eq('is_active', true)
       .order('joined_at', { ascending: false });
 
     if (data) {
-      setRides(data.map((p: any) => p.rides).filter(Boolean));
+      setRides(data.map((p: { rides: unknown }) => p.rides).filter(Boolean) as Ride[]);
     }
     setLoading(false);
   }
@@ -86,7 +88,7 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-4">
             {rides.map((ride) => (
-              <a
+              <Link
                 key={ride.id}
                 href={`/ride?id=${ride.id}`}
                 className="bg-[#16213e] border border-[#0f3460] rounded-xl p-5 hover:border-[#FF6B00] transition block"
@@ -101,7 +103,7 @@ export default function DashboardPage() {
                     {ride.status}
                   </span>
                 </div>
-              </a>
+              </Link>
             ))}
           </div>
         )}

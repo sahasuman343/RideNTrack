@@ -38,19 +38,6 @@ export default function RegisterPage() {
       return;
     }
 
-    // 2. If a session is active immediately (email confirmation disabled), upsert profile
-    if (data?.session && data?.user) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          username,
-          display_name: displayName,
-        });
-      } catch (err) {
-        console.warn('Profile upsert fallback note:', err);
-      }
-    }
-
     if (data?.user && !data?.session) {
       setSuccessMsg('Account registered! If confirmation is required, please check your email, then log in.');
       setLoading(false);

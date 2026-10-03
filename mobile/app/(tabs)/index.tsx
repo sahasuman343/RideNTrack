@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ride } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -11,9 +11,7 @@ export default function MyRidesScreen() {
   const { user } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    fetchRides();
-  }, []);
+  useFocusEffect(useCallback(() => { void fetchRides(); }, [user?.id]));
 
   async function fetchRides() {
     if (!user) return;
@@ -21,6 +19,7 @@ export default function MyRidesScreen() {
       .from('ride_participants')
       .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
       .eq('user_id', user.id)
+      .eq('is_active', true)
       .order('joined_at', { ascending: false });
 
     if (data) {

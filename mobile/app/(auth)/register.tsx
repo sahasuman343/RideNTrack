@@ -23,8 +23,9 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await signUp(email.trim(), password, username.trim(), displayName.trim());
-      router.replace('/(tabs)');
+      const signedIn = await signUp(email.trim(), password, username.trim(), displayName.trim());
+      if (signedIn) router.replace('/(tabs)');
+      else { Alert.alert('Check your email', 'Confirm your account, then sign in.'); router.replace('/(auth)/login'); }
     } catch (error: any) {
       Alert.alert('Registration Failed', error.message);
     } finally {

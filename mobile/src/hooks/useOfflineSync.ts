@@ -1,119 +1,31 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
-import { supabase } from '../lib/supabase';
-import {
-  getQueuedLocations,
-  clearQueuedLocations,
-  getQueuedLocationsCount,
-  getQueuedAlerts,
-  clearQueuedAlert,
-  getQueuedAlertsCount,
-} from '../lib/offlineQueue';
-
-export function useOfflineSync(rideId?: string) {
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendingLocationsCount, setPendingLocationsCount] = useState(0);
-  const [pendingAlertsCount, setPendingAlertsCount] = useState(0);
+import { useEffect, useState, useCallback } from 'react';
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import { useAuth } from './useAuth';
+import { getQueueCounts } from '../lib/offlineQueue';
+import { syncQueue } from '../services/syncQueue';
+export function useOfflineSync(_rideId?: string) {
+  const { user } = useAuth();
+  const userId = user?.id;
+  const [isOnline, setIsOnline] = useState(false);
+  const [counts, setCounts] = useState({ locations: 0, alerts: 0 });
   const [isSyncing, setIsSyncing] = useState(false);
-  const syncingRef = useRef(false);
-
-  const updateCounts = useCallback(async () => {
-    const locCount = await getQueuedLocationsCount();
-    const alertCount = await getQueuedAlertsCount();
-    setPendingLocationsCount(locCount);
-    setPendingAlertsCount(alertCount);
-  }, []);
-
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const updateCounts = useCallback(async () => { if (userId) setCounts(await getQueueCounts(userId)); }, [userId]);
   const flushQueue = useCallback(async () => {
-    if (syncingRef.current) return;
-    syncingRef.current = true;
+    if (!userId) return;
     setIsSyncing(true);
-
-    try {
-      // 1. Flush offline alerts first (highest priority)
-      const alerts = await getQueuedAlerts();
-      for (const alert of alerts) {
-        const { error } = await supabase.from('alerts').insert({
-          id: alert.id,
-          ride_id: alert.ride_id,
-          user_id: alert.user_id,
-          type: alert.type,
-          message: alert.message,
-          lat: alert.lat,
-          lng: alert.lng,
-          created_at: alert.created_at,
-        });
-
-        if (!error) {
-          await clearQueuedAlert(alert.id);
-        }
-      }
-
-      // 2. Flush queued locations in batches
-      let batch = await getQueuedLocations(100);
-      while (batch.length > 0) {
-        const payload = batch.map((item) => ({
-          ride_id: item.ride_id,
-          user_id: item.user_id,
-          lat: item.lat,
-          lng: item.lng,
-          speed: item.speed,
-          heading: item.heading,
-          timestamp: item.timestamp,
-        }));
-
-        const { error } = await supabase.rpc('bulk_insert_location_updates', {
-          updates: payload,
-        });
-
-        if (error) {
-          console.warn('Batch location sync failed:', error.message);
-          break;
-        }
-
-        const timestamps = batch.map((b) => b.timestamp);
-        await clearQueuedLocations(timestamps);
-
-        // Fetch next batch if available
-        batch = await getQueuedLocations(100);
-      }
-    } catch (err) {
-      console.error('Error during offline sync flush:', err);
-    } finally {
-      syncingRef.current = false;
-      setIsSyncing(false);
-      await updateCounts();
-    }
-  }, [updateCounts]);
-
+    try { await syncQueue(); setSyncError(null); }
+    catch (e) { setSyncError(e instanceof Error ? e.message : 'Upload failed; saved locally.'); }
+    finally { setIsSyncing(false); await updateCounts().catch(() => setSyncError('Could not read device storage.')); }
+  }, [userId, updateCounts]);
   useEffect(() => {
-    updateCounts();
-
-    const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
-      const online = Boolean(state.isConnected && (state.isInternetReachable ?? true));
-      setIsOnline(online);
-      if (online) {
-        flushQueue();
-      }
-    });
-
-    // Periodic check interval
-    const interval = setInterval(() => {
-      updateCounts();
-    }, 10000);
-
-    return () => {
-      unsubscribe();
-      clearInterval(interval);
-    };
-  }, [flushQueue, updateCounts, rideId]);
-
-  return {
-    isOnline,
-    pendingLocationsCount,
-    pendingAlertsCount,
-    isSyncing,
-    flushQueue,
-    updateCounts,
-  };
+    let online = false;
+    const check = () => { if (online) void flushQueue(); else void updateCounts().catch(() => setSyncError('Could not read device storage.')); };
+    const unsubscribe = NetInfo.addEventListener(state => { online = Boolean(state.isConnected && state.isInternetReachable !== false); setIsOnline(online); check(); });
+    const timer = setInterval(check, 10000);
+    const app = AppState.addEventListener('change', state => { if (state === 'active') check(); });
+    return () => { unsubscribe(); clearInterval(timer); app.remove(); };
+  }, [flushQueue, updateCounts]);
+  return { isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, isSyncing, syncError, updateCounts, flushQueue };
 }

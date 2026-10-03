@@ -20,7 +20,7 @@ export interface Ride {
   destination: string;
   origin_coords: [number, number]; // [lng, lat]
   destination_coords: [number, number];
-  route_geometry?: any; // GeoJSON LineString
+  route_geometry?: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: number[][] }; properties: Record<string, unknown> }; // GeoJSON LineString
   status: 'planned' | 'active' | 'completed';
   created_at: string;
 }
@@ -39,13 +39,13 @@ export interface LocationUpdate {
   display_name: string;
   lat: number;
   lng: number;
-  speed: number; // m/s or km/h
+  speed: number; // meters per second; convert only for display
   heading: number; // degrees
   timestamp: string;
 }
 
 export interface BufferedLocation {
-  id?: number;
+  id?: string;
   ride_id: string;
   user_id: string;
   lat: number;
@@ -94,3 +94,27 @@ export interface SyncStatus {
   pendingAlertsCount: number;
   lastSyncedAt?: string;
 }
+
+export function validCoordinates(lat: unknown, lng: unknown): boolean {
+  return typeof lat === 'number' && Number.isFinite(lat) && Math.abs(lat) <= 90
+    && typeof lng === 'number' && Number.isFinite(lng) && Math.abs(lng) <= 180;
+}
+export function isStale(timestamp: string, now = Date.now()): boolean {
+  return !Number.isFinite(Date.parse(timestamp)) || now - Date.parse(timestamp) > 30000;
+}
+export function mergeLocations(previous: LocationUpdate[], incoming: LocationUpdate[]): LocationUpdate[] {
+  const result = new Map(previous.map(p => [p.user_id, p]));
+  for (const point of incoming) {
+    if (!validCoordinates(point.lat, point.lng) || !Number.isFinite(Date.parse(point.timestamp))) continue;
+    const old = result.get(point.user_id);
+    if (!old || Date.parse(point.timestamp) >= Date.parse(old.timestamp)) result.set(point.user_id, point);
+  }
+  return [...result.values()];
+}
+export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
+  const result = new Map(previous.map(a => [a.id, a]));
+  incoming.forEach(a => result.set(a.id, a));
+  return [...result.values()].sort((a,b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 100);
+}
+
+export { watchRide, type Connection } from './live';
