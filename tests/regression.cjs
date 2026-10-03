@@ -119,3 +119,34 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
   await assert.rejects(service.syncQueue(),/Alerts saved locally/);
   assert.deepEqual(deleted,['l']);
 });
+test('an in-flight GPS save cannot publish through the next ride callback', async () => {
+  let listener, releaseSave, notifySave;
+  const saving = new Promise(resolve => { notifySave = resolve; });
+  const committed = new Promise(resolve => { releaseSave = resolve; });
+  const storage = new Map(), saved = [], published = [];
+  const service = loader({
+    'expo-constants': { default:{executionEnvironment:'storeClient'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
+    'expo-task-manager': { isTaskDefined:()=>true },
+    'expo-location': {
+      Accuracy:{High:4},requestForegroundPermissionsAsync:async()=>({status:'granted'}),
+      watchPositionAsync:async(_options,callback)=>{listener=callback;return {remove(){}};},
+    },
+    '@react-native-async-storage/async-storage': {
+      getItem:async key=>storage.get(key)||null,
+      setItem:async(key,value)=>{storage.set(key,value);},removeItem:async key=>{storage.delete(key);},
+    },
+    '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
+    '../lib/offlineQueue':{enqueueLocation:async point=>{saved.push(point);notifySave();await committed;}},
+    './syncQueue':{syncQueue:async()=>{}},
+  })('mobile/src/services/backgroundLocation.ts');
+  await service.startBackgroundLocationUpdates({rideId:'first',userId:'u',displayName:'Rider',publish:()=>published.push('first')});
+  listener({coords:{latitude:0,longitude:0,speed:0,heading:0,accuracy:10},timestamp:Date.now()});
+  await saving;
+  await service.stopBackgroundLocationUpdates();
+  await service.startBackgroundLocationUpdates({rideId:'second',userId:'u',displayName:'Rider',publish:()=>published.push('second')});
+  releaseSave();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(saved[0].ride_id,'first');
+  assert.deepEqual(published,[]);
+  await service.stopBackgroundLocationUpdates();
+});

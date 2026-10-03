@@ -34,6 +34,9 @@ async function record(locations: Location.LocationObject[]) {
     const point: LocationUpdate = { user_id: saved.userId, display_name: saved.displayName, lat, lng,
       speed: Math.max(0, speed ?? 0), heading: Math.max(0, heading ?? 0), timestamp: new Date(location.timestamp).toISOString() };
     await enqueueLocation({ ride_id: saved.rideId, user_id: point.user_id, lat, lng, speed: point.speed, heading: point.heading, timestamp: point.timestamp });
+    // A ride/account switch can happen while SQLite commits. Never publish that
+    // previous ride's fix through the newly installed live callback.
+    if (version !== generation) return;
     context?.onLocationUpdate?.(point);
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});

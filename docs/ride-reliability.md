@@ -4,6 +4,7 @@
 1. Back up and apply migrations 001–005 in order to a staging Supabase project.
 2. Deploy the updated web client and mobile development builds together. Migration 005 changes the batch upload contract to require a persistent client_id; old clients should be upgraded before normal use resumes.
 3. Configure the Supabase URL, publishable/anon key, and Mapbox public token in each client.
+   In Supabase Realtime Settings, disable **Allow public access** so ride Presence subscriptions must use the private-channel authorization policies from migration 005.
 4. Build native mobile apps for Mapbox and background GPS. Expo Go provides a foreground-only fallback. The existing Mapbox native download-token placeholder in app.json must be configured securely for a native build.
 5. Verify with two signed-in riders before production rollout. No production migration is applied by this pull request.
 
@@ -16,6 +17,7 @@
 - Alerts are read from the database and refreshed after reconnect. No ephemeral broadcast is needed for delivery.
 - Private Presence channels provide live updates; periodic database snapshots recover missed data. Names come from a restricted membership RPC, not public profile records.
 - Maps retain last-known positions, mark fixes older than 30 seconds as stale, animate movement, and let users pan freely. Follow and fit-group controls are explicit.
+- Camera padding follows the mobile panel height so selected riders remain visible. Web map gestures release follow mode; changing ride URLs resets ride-specific state.
 
 ## Verification
 Run with Node 24:
@@ -25,7 +27,7 @@ Run with Node 24:
 - npm run lint
 - npm --workspace=web run build (with public client environment variables)
 
-The GitHub workflow also applies migrations to disposable PostgreSQL and checks profile privacy, invite-only joins, member access, private Presence policies, and duplicate uploads.
+The GitHub workflow also applies migrations to disposable PostgreSQL and checks profile privacy, invite-only joins, member access, private Presence policies, and duplicate uploads. Chromium checks cover desktop/mobile map size, follow/manual zoom, panel clearance, search, invitation copying, alert dismissal, offline aging, ride switching, and dashboard navigation. Browser tests use mocked Supabase and Mapbox responses; production tile delivery and multi-device Realtime still need staging verification. Screenshots are uploaded as workflow artifacts.
 
 ## Device acceptance checks
 - Two riders: create, join by code, start, pan/follow, alert, end.

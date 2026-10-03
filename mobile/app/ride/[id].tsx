@@ -33,6 +33,8 @@ export default function LiveRideScreen() {
   const [gpsRetry, setGpsRetry] = useState(0);
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(200);
+  const cameraPadding = useMemo(() => ({ paddingTop: insets.top + 135, paddingBottom: sheetHeight + 28, paddingLeft: 45, paddingRight: 45 }), [insets.top,sheetHeight]);
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -68,9 +70,9 @@ export default function LiveRideScreen() {
   }, [id,userId,name,active,sharing,publish,gpsRetry]);
   useEffect(() => {
     if (mapReady && follow && position) camera.current?.setCamera({
-      centerCoordinate: [position.lng,position.lat], zoomLevel: 14, animationMode: 'easeTo', animationDuration: 900,
+      centerCoordinate: [position.lng,position.lat], zoomLevel: 14, padding: cameraPadding, animationMode: 'easeTo', animationDuration: 900,
     });
-  }, [mapReady,follow,position]);
+  }, [mapReady,follow,position,cameraPadding]);
   useEffect(() => {
     if (ride?.route_geometry) { setRoute(ride.route_geometry); return; }
     if (!ride || !process.env.EXPO_PUBLIC_MAPBOX_TOKEN) return;
@@ -95,8 +97,12 @@ export default function LiveRideScreen() {
     setFollow(false);
     const coords = points.length ? points.map(p => [p.lng,p.lat]) : ride ? [ride.origin_coords,ride.destination_coords] : [];
     if (!coords.length) return;
+    if (coords.every(p => p[0] === coords[0][0] && p[1] === coords[0][1])) {
+      camera.current?.setCamera({ centerCoordinate: coords[0],zoomLevel: 14,padding: cameraPadding,animationMode: 'easeTo',animationDuration: 800 });
+      return;
+    }
     camera.current?.fitBounds([Math.max(...coords.map(p => p[0])),Math.max(...coords.map(p => p[1]))],
-      [Math.min(...coords.map(p => p[0])),Math.min(...coords.map(p => p[1]))], [130,55,expanded ? 360 : 215,55],800);
+      [Math.min(...coords.map(p => p[0])),Math.min(...coords.map(p => p[1]))], [cameraPadding.paddingTop,45,cameraPadding.paddingBottom,45],800);
   }
   async function changeStatus(status: 'active' | 'completed') {
     setBusy(true); setMessage(null);
@@ -127,7 +133,7 @@ export default function LiveRideScreen() {
     {Mapbox && process.env.EXPO_PUBLIC_MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL="mapbox://styles/mapbox/streets-v12"
       onDidFinishLoadingMap={() => { setMapReady(true); setMapError(false); }} onMapLoadingError={() => setMapError(true)}
       onCameraChanged={state => { if (state.gestures.isGestureActive) setFollow(false); }}
-      logoPosition={{ bottom: expanded ? 350 : 205,left: 10 }} attributionPosition={{ bottom: expanded ? 350 : 205,right: 10 }} compassEnabled>
+      logoPosition={{ bottom: sheetHeight + 8,left: 10 }} attributionPosition={{ bottom: sheetHeight + 8,right: 10 }} compassEnabled>
       <Mapbox.Camera ref={camera} defaultSettings={{ centerCoordinate: ride.origin_coords,zoomLevel: 11 }} />
       {route && <Mapbox.ShapeSource id="route" shape={route}><Mapbox.LineLayer id="route-edge" style={{ lineColor: '#fff',lineWidth: 8,lineCap: 'round',lineJoin: 'round' }} /><Mapbox.LineLayer id="route-line" style={{ lineColor: '#de7136',lineWidth: 4,lineCap: 'round',lineJoin: 'round' }} /></Mapbox.ShapeSource>}
       <Mapbox.ShapeSource id="endpoints" shape={{ type: 'FeatureCollection',features: [ride.origin_coords,ride.destination_coords].map((coordinates,i) => ({ type: 'Feature',geometry: { type: 'Point',coordinates },properties: { label: i === 0 ? 'A' : 'B' } })) }}>
@@ -143,11 +149,11 @@ export default function LiveRideScreen() {
     <View style={[s.top,{ top: insets.top + 10 }]}><TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={() => router.back()}><Text style={s.text}>‹</Text></TouchableOpacity><View style={s.title}><Text numberOfLines={1} style={s.heading}>{ride.name}</Text><Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text></View><TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}><Text style={s.text}>↗</Text></TouchableOpacity></View>
     <View style={[s.controls,{ top: insets.top + 94 }]}><TouchableOpacity accessibilityLabel="Follow my location" style={[s.control,follow && s.selected]} disabled={!position} onPress={() => setFollow(true)}><Text style={s.text}>◎ Me</Text></TouchableOpacity><TouchableOpacity style={s.control} onPress={fitGroup}><Text style={s.text}>⊞ Group</Text></TouchableOpacity></View>
     {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + 150 }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
-    <View style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
+    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
       <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
       {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{ALERT_LABELS[newest.type]} · {newest.display_name} · tap to dismiss</Text></TouchableOpacity>}
       {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
-      {expanded && <ScrollView style={s.riders}>{points.length === 0 && <Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}{points.map(p => <TouchableOpacity key={p.user_id} style={s.rider} onPress={() => { setFollow(false); camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,animationDuration: 700 }); }}><View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{p.display_name[0]}</Text></View><View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View><Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text></TouchableOpacity>)}</ScrollView>}
+      {expanded && <ScrollView style={s.riders}>{points.length === 0 && <Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}{points.map(p => <TouchableOpacity key={p.user_id} style={s.rider} onPress={() => { setFollow(false); camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,padding: cameraPadding,animationDuration: 700 }); }}><View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{p.display_name[0]}</Text></View><View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View><Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text></TouchableOpacity>)}</ScrollView>}
       <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>

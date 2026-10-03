@@ -43,6 +43,7 @@ ios/
 
 # Testing & Coverage
 coverage/
+test-results/
 .nyc_output/
 
 # IDE, Editors & AI Agent Caches

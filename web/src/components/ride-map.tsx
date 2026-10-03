@@ -1,18 +1,22 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { type Ride, type LocationUpdate, isStale } from '@ridentrack/shared';
-interface Props { ride: Ride; riders: LocationUpdate[]; selected: string | null; fitRequest: number; onSelect: (id: string | null) => void }
-export default function RideMap({ ride,riders,selected,fitRequest,onSelect }: Props) {
+interface Props { ride: Ride; riders: LocationUpdate[]; selected: string | null; fitRequest: number; onSelect: (id: string | null) => void; bottomInset: number; now: number }
+export default function RideMap({ ride,riders,selected,fitRequest,onSelect,bottomInset,now }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef(new Map<string,{ marker: mapboxgl.Marker; element: HTMLButtonElement }>());
-  const latest = useRef({ ride,riders,selected,onSelect });
+  const latest = useRef({ ride,riders,selected,onSelect,bottomInset });
   const [ready,setReady] = useState(false);
   const [error,setError] = useState<string | null>(null);
   const [retry,setRetry] = useState(0);
-  useEffect(() => { latest.current = { ride,riders,selected,onSelect }; }, [ride,riders,selected,onSelect]);
+  useEffect(() => { latest.current = { ride,riders,selected,onSelect,bottomInset }; }, [ride,riders,selected,onSelect,bottomInset]);
+  function viewportPadding(instance: mapboxgl.Map, inset: number) {
+    const height = instance.getContainer().clientHeight;
+    return { top: Math.min(110, height * 0.2), bottom: Math.min(inset + 80, height * 0.65), left: 50, right: 50 };
+  }
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   useEffect(() => {
     if (!container.current || !token) return;
@@ -29,12 +33,12 @@ export default function RideMap({ ride,riders,selected,fitRequest,onSelect }: Pr
     instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }),'top-right');
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }),'bottom-right');
     instance.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }),'bottom-left');
-    instance.on('dragstart',() => latest.current.onSelect(null));
+    instance.on('movestart',event => { if (event.originalEvent) latest.current.onSelect(null); });
     instance.on('error',() => setError('Map tiles could not load. Rider updates are still available.'));
     instance.on('load',() => {
       setReady(true); setError(null);
       const data = latest.current.ride;
-      instance.fitBounds(new mapboxgl.LngLatBounds(data.origin_coords,data.origin_coords).extend(data.destination_coords), { padding: 80,maxZoom: 14,duration: 0 });
+      instance.fitBounds(new mapboxgl.LngLatBounds(data.origin_coords,data.origin_coords).extend(data.destination_coords), { padding: viewportPadding(instance,latest.current.bottomInset),retainPadding:false,maxZoom:14,duration:0 });
       [data.origin_coords,data.destination_coords].forEach((coordinates,i) => {
         const el = document.createElement('div'); el.className = 'endpoint-marker'; el.textContent = i === 0 ? 'A' : 'B';
         new mapboxgl.Marker({ element: el }).setLngLat(coordinates).setPopup(new mapboxgl.Popup().setText(i === 0 ? data.origin : data.destination)).addTo(instance);
@@ -69,9 +73,8 @@ export default function RideMap({ ride,riders,selected,fitRequest,onSelect }: Pr
         const marker = new mapboxgl.Marker({ element }).setLngLat([rider.lng,rider.lat]).addTo(instance);
         entry = { marker,element }; markers.current.set(rider.user_id,entry);
       }
-      entry.element.className = 'rider-marker ' + (isStale(rider.timestamp) ? 'is-stale ' : '') + (selected === rider.user_id ? 'is-selected' : '');
+      entry.element.className = 'rider-marker';
       entry.element.textContent = rider.display_name.slice(0,2).toUpperCase();
-      entry.element.setAttribute('aria-label','Follow ' + rider.display_name + (isStale(rider.timestamp) ? ', last known location' : ''));
       entry.element.title = rider.display_name;
       moves.push({ marker: entry.marker,from: entry.marker.getLngLat(),to: rider });
     }
@@ -86,18 +89,33 @@ export default function RideMap({ ride,riders,selected,fitRequest,onSelect }: Pr
       if (t < 1) frame = requestAnimationFrame(animate);
     };
     frame = requestAnimationFrame(animate);
-    const focus = riders.find(p => p.user_id === selected);
-    if (focus) instance.easeTo({ center:[focus.lng,focus.lat],zoom:Math.max(instance.getZoom(),13),duration:reduced ? 0 : 1000 });
     return () => cancelAnimationFrame(frame);
-  }, [riders,ready,selected]);
+  }, [riders,ready]);
+  useEffect(() => {
+    for (const rider of riders) {
+      const entry = markers.current.get(rider.user_id);
+      if (!entry) continue;
+      const stale = isStale(rider.timestamp,now);
+      entry.element.className = 'rider-marker ' + (stale ? 'is-stale ' : '') + (selected === rider.user_id ? 'is-selected' : '');
+      entry.element.setAttribute('aria-label','Follow ' + rider.display_name + (stale ? ', last known location' : ''));
+      entry.element.setAttribute('aria-pressed',String(selected === rider.user_id));
+    }
+  }, [riders,ready,selected,now]);
+  useEffect(() => {
+    if (!ready || !map.current) return;
+    const focus = riders.find(p => p.user_id === selected);
+    if (focus) map.current.easeTo({ center:[focus.lng,focus.lat],zoom:Math.max(map.current.getZoom(),13),
+      padding:viewportPadding(map.current,bottomInset),retainPadding:false,
+      duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1000 });
+  }, [riders,ready,selected,bottomInset]);
   useEffect(() => {
     if (!ready || !map.current || fitRequest === 0) return;
-    const { ride,riders } = latest.current;
+    const { ride,riders,bottomInset } = latest.current;
     const coords = riders.length ? riders.map(p => [p.lng,p.lat] as [number,number]) : [ride.origin_coords,ride.destination_coords];
     const bounds = new mapboxgl.LngLatBounds(coords[0],coords[0]); coords.forEach(p => bounds.extend(p));
-    map.current.fitBounds(bounds,{ padding:90,maxZoom:15,duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 800 });
+    map.current.fitBounds(bounds,{ padding:viewportPadding(map.current,bottomInset),retainPadding:false,maxZoom:15,duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 800 });
   }, [fitRequest,ready]);
-  return <div className="map-stage"><div ref={container} className="map-canvas" aria-label="Live group ride map" />
+  return <div className="map-stage" style={{ '--panel-inset': bottomInset + 'px' } as CSSProperties}><div ref={container} className="map-canvas" aria-label="Live group ride map" />
     {!token ? <div className="map-message"><span className="map-message-icon">◎</span><h2>The map is almost ready</h2><p>Add your Mapbox token to display roads and rider positions.</p></div>
       : error ? <div className="map-error" role="alert">{error}<button onClick={() => { setReady(false); setError(null); setRetry(v => v+1); }}>Reload map</button></div>
       : !ready && <div className="map-message"><span className="loader" /><p>Finding your group on the map…</p></div>}

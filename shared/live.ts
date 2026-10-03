@@ -46,17 +46,16 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
         incoming.push({ ...entry, user_id: id, display_name: members.get(id)! });
     }
     emit(incoming);
-  }).subscribe(status => {
+  })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refresh())
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides', filter: 'id=eq.' + rideId }, payload => {
+      if (!disposed) observer.ride(payload.new as Ride);
+    }).subscribe(status => {
     if (disposed) return;
     connected = status === 'SUBSCRIBED';
     observer.connection(connected ? 'live' : 'reconnecting');
     if (connected) { void refresh(); if (lastPublished) void presence.track(lastPublished); }
   });
-  const changes = client.channel('ride-data:' + rideId + ':' + userId)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refresh())
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides', filter: 'id=eq.' + rideId }, payload => {
-      if (!disposed) observer.ride(payload.new as Ride);
-    }).subscribe(status => { if (status === 'SUBSCRIBED') void refresh(); });
   void refresh();
   const timer = setInterval(() => void refresh(), 15000);
   return {
@@ -66,6 +65,6 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       if (disposed || !connected) return;
       if (await presence.track(point) !== 'ok' && !disposed) observer.connection('reconnecting');
     },
-    stop() { disposed = true; clearInterval(timer); void client.removeChannel(presence); void client.removeChannel(changes); },
+    stop() { disposed = true; clearInterval(timer); void client.removeChannel(presence); },
   };
 }
