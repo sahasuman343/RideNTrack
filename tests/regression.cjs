@@ -11,7 +11,7 @@ function loader(stubs = {}) {
     filename = path.resolve(filename);
     if (cache.has(filename)) return cache.get(filename).exports;
     const module = { exports: {} }; cache.set(filename,module);
-    const js = ts.transpileModule(fs.readFileSync(filename,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const js = ts.transpileModule(fs.readFileSync(filename,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
     const localRequire = name => {
       if (name in stubs) return stubs[name];
       if (name === '@ridentrack/shared') return load('shared/types.ts');

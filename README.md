@@ -21,7 +21,7 @@ RideNTrack/
 
 ## ⚡ Prerequisites
 
-- **Node.js**: `v18.0.0` or later (tested on Node v20/v22)
+- **Node.js**: `v24` (also used by CI)
 - **npm**: `v9.0.0` or later
 - **Expo Go** (iOS / Android) or a physical mobile device / simulator
 - **Supabase Account**: For PostgreSQL database, Realtime Presence & Broadcast channels
@@ -77,6 +77,11 @@ Execute the SQL migration scripts in your **Supabase SQL Editor** in the followi
 1. `supabase/migrations/001_initial_schema.sql` — Sets up `profiles`, `rides`, `ride_participants`, `location_updates`, `alerts`, indexes, and RLS policies.
 2. `supabase/migrations/002_offline_batch_sync.sql` — Deploys the `bulk_insert_location_updates` RPC for atomic offline breadcrumb syncing.
 3. `supabase/migrations/003_auth_profiles_trigger.sql` — Auto-creates rider profiles upon signup via a `SECURITY DEFINER` trigger, resolving Row Level Security issues.
+
+4. `supabase/migrations/004_fix_rls_recursion.sql` — Non-recursive membership policies.
+5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.
+
+See [deployment and device checks](docs/ride-reliability.md) before updating existing installations.
 
 > [!TIP]
 > **Disable "Confirm Email" for Development / Avoid Rate Limits:**
@@ -143,9 +148,15 @@ node node_modules/typescript/bin/tsc shared/types.ts --noEmit
 - Automatically falls back to high-accuracy foreground watching if background permissions are unavailable.
 
 ### 2. 📶 Offline / Low-Connectivity Buffering Engine
-- **Local FIFO Queue (`offlineQueue.ts`)**: Automatically stores location breadcrumbs and alerts locally in `AsyncStorage` when traveling through dead zones.
-- **Auto Sync Monitor (`useOfflineSync.ts`)**: Detects network connectivity via `@react-native-community/netinfo` and automatically drains the queue in batches via the `bulk_insert_location_updates` Supabase RPC as soon as connectivity resumes.
+- **Transactional SQLite Queue (`offlineQueue.ts`)**: Stores location breadcrumbs and alerts locally, scoped to the signed-in account, and migrates legacy `AsyncStorage` queues when traveling through dead zones.
+- **Auto Sync Monitor (`useOfflineSync.ts`)**: Detects network connectivity via `@react-native-community/netinfo` and automatically drains the queue in batches via the `bulk_insert_location_updates` Supabase RPC on reconnect, app resume, periodic foreground checks, and background GPS callbacks. Persistent IDs make retries safe.
 - **UI Connectivity Badges**: Live indicators on the ride screen show `GPS Active`, `Offline Mode (X buffered)`, or `Syncing...` with a tap-to-flush option.
 
 ### 3. 📦 `@ridentrack/shared` Type Package
 - Single source of truth for `Ride`, `LocationUpdate`, `BufferedLocation`, `Alert`, `AlertType`, `ALERT_LABELS`, and `Profile` models ensuring 100% type synchronicity across client and server.
+
+## Ride map and reliability checks
+
+The ride screens provide smooth rider-marker movement, explicit follow and fit-group controls, stale-location indicators, and collapsible panels on phones. Alerts replay from stored history after reconnection. GPS runs only for active rides and stops when sharing is paused, the ride screen closes, the user signs out, or a completed ride status arrives.
+
+Run `npm test`, `npm run typecheck`, and `npm run lint`. GitHub Actions also runs a production build, disposable PostgreSQL access checks, and browser checks with mocked Supabase/Mapbox services. Native background GPS still requires the device checks in [the rollout guide](docs/ride-reliability.md).

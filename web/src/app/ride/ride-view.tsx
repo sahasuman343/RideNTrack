@@ -22,7 +22,7 @@ export default function RideView() {
   const [copied, setCopied] = useState(false);
   const [query, setQuery] = useState('');
   const [retry, setRetry] = useState(0);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
   useEffect(() => {

@@ -39,7 +39,7 @@ export default function LiveRideScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [route, setRoute] = useState<Ride['route_geometry']>();
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const active = ride?.status === 'active';
   const admin = ride?.admin_id === userId;
