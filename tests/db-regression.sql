@@ -1,4 +1,31 @@
 \set ON_ERROR_STOP on
+DO $
+DECLARE rpc regprocedure;
+BEGIN
+  FOREACH rpc IN ARRAY ARRAY[
+    'public.is_ride_participant(uuid,uuid)'::regprocedure,
+    'public.get_ride_members(uuid)'::regprocedure,
+    'public.get_latest_ride_locations(uuid)'::regprocedure,
+    'public.join_ride_by_code(text)'::regprocedure,
+    'public.bulk_insert_location_updates(jsonb)'::regprocedure
+  ] LOOP
+    IF has_function_privilege('anon',rpc,'EXECUTE') THEN
+      RAISE EXCEPTION 'anonymous RPC access: %',rpc;
+    END IF;
+    IF NOT has_function_privilege('authenticated',rpc,'EXECUTE') THEN
+      RAISE EXCEPTION 'authenticated RPC access missing: %',rpc;
+    END IF;
+  END LOOP;
+  FOREACH rpc IN ARRAY ARRAY[
+    'public.auto_join_admin()'::regprocedure,
+    'public.handle_new_user()'::regprocedure
+  ] LOOP
+    IF has_function_privilege('anon',rpc,'EXECUTE')
+       OR has_function_privilege('authenticated',rpc,'EXECUTE') THEN
+      RAISE EXCEPTION 'trigger function exposed to clients: %',rpc;
+    END IF;
+  END LOOP;
+END $;
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO authenticated,anon;
 GRANT SELECT,INSERT ON realtime.messages TO authenticated;
 INSERT INTO auth.users VALUES

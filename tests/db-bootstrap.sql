@@ -14,3 +14,6 @@ $$;
 CREATE PUBLICATION supabase_realtime;
 GRANT USAGE ON SCHEMA public,auth,realtime TO authenticated,anon;
 GRANT EXECUTE ON FUNCTION auth.uid(),realtime.topic() TO authenticated,anon;
+
+-- Mirror Supabase's explicit default grants to catch ineffective PUBLIC-only revokes.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon,authenticated;
