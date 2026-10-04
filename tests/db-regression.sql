@@ -1,5 +1,5 @@
 \set ON_ERROR_STOP on
-DO $
+DO $$
 DECLARE rpc regprocedure;
 BEGIN
   FOREACH rpc IN ARRAY ARRAY[
@@ -25,7 +25,7 @@ BEGIN
       RAISE EXCEPTION 'trigger function exposed to clients: %',rpc;
     END IF;
   END LOOP;
-END $;
+END $$;
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO authenticated,anon;
 GRANT SELECT,INSERT ON realtime.messages TO authenticated;
 INSERT INTO auth.users VALUES
