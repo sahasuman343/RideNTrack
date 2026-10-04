@@ -1,189 +1,101 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { validCoordinates, type LocationUpdate } from '@ridentrack/shared';
 import { enqueueLocation } from '../lib/offlineQueue';
-
+import { supabase } from '../lib/supabase';
+import { syncQueue } from './syncQueue';
 export const BACKGROUND_LOCATION_TASK = 'RIDENTRACK_BACKGROUND_LOCATION_TASK';
-
-const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient || (Constants as any).appOwnership === 'expo';
-
-interface ActiveRideContext {
-  rideId: string;
-  userId: string;
-  displayName: string;
-  onLocationUpdate?: (coords: { lat: number; lng: number; speed: number; heading: number }) => void;
-  broadcastFn?: (lat: number, lng: number, speed: number, heading: number) => Promise<void> | void;
+const CONTEXT_KEY = '@ridentrack/active-ride';
+interface Context { rideId: string; userId: string; displayName: string }
+interface Params extends Context {
+  onLocationUpdate?: (point: LocationUpdate) => void;
+  publish?: (point: LocationUpdate) => Promise<void> | void;
+  onError?: (message: string) => void;
 }
-
-let activeRideContext: ActiveRideContext | null = null;
-let fallbackSubscription: Location.LocationSubscription | null = null;
-
-// Register background task at module scope
+let context: Params | null = null;
+let fallback: Location.LocationSubscription | null = null;
+let generation = 0, lastSync = 0;
+let operations: Promise<unknown> = Promise.resolve();
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
+}
+async function record(locations: Location.LocationObject[]) {
+  const version = generation;
+  const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+  if (!saved) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user.id !== saved.userId || version !== generation) return;
+  for (const location of locations) {
+    if (version !== generation) return;
+    const { latitude: lat, longitude: lng, speed, heading, accuracy } = location.coords;
+    if (!validCoordinates(lat, lng) || (accuracy !== null && accuracy > 100)) continue;
+    const point: LocationUpdate = { user_id: saved.userId, display_name: saved.displayName, lat, lng,
+      speed: Math.max(0, speed ?? 0), heading: Math.max(0, heading ?? 0), timestamp: new Date(location.timestamp).toISOString() };
+    await enqueueLocation({ ride_id: saved.rideId, user_id: point.user_id, lat, lng, speed: point.speed, heading: point.heading, timestamp: point.timestamp });
+    // A ride/account switch can happen while SQLite commits. Never publish that
+    // previous ride's fix through the newly installed live callback.
+    if (version !== generation) return;
+    context?.onLocationUpdate?.(point);
+    // Presence delivery is best-effort; it must not block saving the next breadcrumb.
+    void Promise.resolve(context?.publish?.(point)).catch(() => {});
+  }
+  if (Date.now() - lastSync > 10000) {
+    lastSync = Date.now();
+    void (async () => {
+      await syncQueue();
+      const { data } = await supabase.from('rides').select('status').eq('id', saved.rideId).maybeSingle();
+      if (version === generation && data?.status === 'completed') await stopBackgroundLocationUpdates();
+    })().catch(e => context?.onError?.(e.message));
+  }
+}
 if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
-  TaskManager.defineTask(
-    BACKGROUND_LOCATION_TASK,
-    async ({ data, error }: { data: any; error: any }) => {
-      if (error) {
-        console.error('Background location task error:', error.message);
-        return;
-      }
-
-      if (data) {
-        const { locations } = data as { locations: Location.LocationObject[] };
-        if (locations && locations.length > 0) {
-          const latest = locations[locations.length - 1];
-          const { latitude, longitude, speed, heading } = latest.coords;
-          const timestamp = new Date(latest.timestamp).toISOString();
-
-          if (activeRideContext) {
-            const { rideId, userId, broadcastFn, onLocationUpdate } = activeRideContext;
-
-            // 1. Always store to local offline queue for durability
-            await enqueueLocation({
-              ride_id: rideId,
-              user_id: userId,
-              lat: latitude,
-              lng: longitude,
-              speed: speed || 0,
-              heading: heading || 0,
-              timestamp,
-            });
-
-            // 2. Broadcast over realtime presence if broadcast function is attached
-            if (broadcastFn) {
-              try {
-                await broadcastFn(latitude, longitude, speed || 0, heading || 0);
-              } catch (err) {
-                console.warn('Realtime broadcast failed in background (offline buffer preserved):', err);
-              }
-            }
-
-            // 3. Notify in-memory listener
-            if (onLocationUpdate) {
-              onLocationUpdate({
-                lat: latitude,
-                lng: longitude,
-                speed: speed || 0,
-                heading: heading || 0,
-              });
-            }
-          }
-        }
-      }
-    }
-  );
+  TaskManager.defineTask<{ locations: Location.LocationObject[] }>(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+    if (error) { context?.onError?.(error.message); return; }
+    try { if (data?.locations) await record(data.locations); }
+    catch (e) { context?.onError?.(e instanceof Error ? e.message : 'Could not save GPS update.'); }
+  });
 }
-
-export async function startBackgroundLocationUpdates(params: {
-  rideId: string;
-  userId: string;
-  displayName: string;
-  broadcastFn?: (lat: number, lng: number, speed: number, heading: number) => Promise<void> | void;
-  onLocationUpdate?: (coords: { lat: number; lng: number; speed: number; heading: number }) => void;
-}): Promise<{ isBackgroundEnabled: boolean }> {
-  activeRideContext = params;
-
-  // 1. Request foreground permissions
-  const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-  if (fgStatus !== 'granted') {
-    throw new Error('Location permission is required for group ride tracking.');
-  }
-
-  // 2. Check and request background permissions (Skip in Expo Go to avoid warning popup)
-  let isBackgroundAvailable = false;
-  if (!isExpoGo) {
-    try {
-      const isAvailable = await Location.isBackgroundLocationAvailableAsync();
-      if (isAvailable) {
-        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-        isBackgroundAvailable = bgStatus === 'granted';
-      }
-    } catch (e) {
-      console.warn('Background location check error:', e);
+export function startBackgroundLocationUpdates(params: Params): Promise<{ isBackgroundEnabled: boolean }> {
+  const version = ++generation;
+  return serialize(async () => {
+    if (version !== generation) return { isBackgroundEnabled: false };
+    if ((await Location.requestForegroundPermissionsAsync()).status !== 'granted')
+      throw new Error('Enable location permission in Settings to share your position.');
+    let background = false;
+    if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient) {
+      try { background = await Location.isBackgroundLocationAvailableAsync()
+        && (await Location.requestBackgroundPermissionsAsync()).status === 'granted'; } catch { background = false; }
     }
-  }
-
-  if (isBackgroundAvailable) {
-    // Check if task already running
-    const hasStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    if (!hasStarted) {
-      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 3000,
-        distanceInterval: 10,
-        showsBackgroundLocationIndicator: true,
-        pausesUpdatesAutomatically: false,
-        foregroundService: {
-          notificationTitle: 'RideNTrack Live Ride',
-          notificationBody: 'Sharing your real-time ride location with your group',
-          notificationColor: '#FF6B00',
-        },
-      });
-    }
-    return { isBackgroundEnabled: true };
-  } else {
-    // Graceful fallback to foreground watchPositionAsync
-    if (fallbackSubscription) {
-      fallbackSubscription.remove();
-    }
-
-    fallbackSubscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 3000,
-        distanceInterval: 10,
-      },
-      async (location: Location.LocationObject) => {
-        const { latitude, longitude, speed, heading } = location.coords;
-        const timestamp = new Date(location.timestamp).toISOString();
-
-        await enqueueLocation({
-          ride_id: params.rideId,
-          user_id: params.userId,
-          lat: latitude,
-          lng: longitude,
-          speed: speed || 0,
-          heading: heading || 0,
-          timestamp,
-        });
-
-        if (params.broadcastFn) {
-          try {
-            await params.broadcastFn(latitude, longitude, speed || 0, heading || 0);
-          } catch (e) {
-            console.warn('Broadcast failed in foreground watcher:', e);
-          }
-        }
-
-        if (params.onLocationUpdate) {
-          params.onLocationUpdate({
-            lat: latitude,
-            lng: longitude,
-            speed: speed || 0,
-            heading: heading || 0,
+    if (version !== generation) return { isBackgroundEnabled: false };
+    context = params;
+    await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({ rideId: params.rideId, userId: params.userId, displayName: params.displayName }));
+    fallback?.remove(); fallback = null;
+    if (background) {
+      try {
+        if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK))
+          await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+            accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10,
+            pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true,
+            foregroundService: { notificationTitle: 'RideNTrack · Sharing location',
+              notificationBody: 'Your group can see your position.', notificationColor: '#FF6B00' },
           });
-        }
-      }
-    );
-
-    return { isBackgroundEnabled: false };
-  }
-}
-
-export async function stopBackgroundLocationUpdates(): Promise<void> {
-  activeRideContext = null;
-
-  if (fallbackSubscription) {
-    fallbackSubscription.remove();
-    fallbackSubscription = null;
-  }
-
-  try {
-    const hasStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    if (hasStarted) {
-      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+        return { isBackgroundEnabled: true };
+      } catch { /* Foreground tracking remains useful if a native background start fails. */ }
     }
-  } catch (err) {
-    console.warn('Error stopping background location task:', err);
-  }
+    fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
+      location => { void record([location]).catch(e => params.onError?.(e.message)); });
+    return { isBackgroundEnabled: false };
+  });
+}
+export function stopBackgroundLocationUpdates(): Promise<void> {
+  ++generation; context = null;
+  return serialize(async () => {
+    fallback?.remove(); fallback = null;
+    await AsyncStorage.removeItem(CONTEXT_KEY);
+    if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient
+      && await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK))
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  });
 }

@@ -1,105 +1,53 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SQLite from 'expo-sqlite';
 import { BufferedLocation, BufferedAlert } from '@ridentrack/shared';
 
-const LOCATION_QUEUE_KEY = '@ridentrack/location_queue';
-const ALERT_QUEUE_KEY = '@ridentrack/alert_queue';
-const MAX_QUEUE_SIZE = 2000; // Keep up to ~2-3 hours of 5-second interval breadcrumbs
-
-export async function enqueueLocation(location: BufferedLocation): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(LOCATION_QUEUE_KEY);
-    const list: BufferedLocation[] = raw ? JSON.parse(raw) : [];
-
-    list.push(location);
-
-    // If exceeding max size, drop oldest non-critical items to protect disk space
-    if (list.length > MAX_QUEUE_SIZE) {
-      list.splice(0, list.length - MAX_QUEUE_SIZE);
-    }
-
-    await AsyncStorage.setItem(LOCATION_QUEUE_KEY, JSON.stringify(list));
-  } catch (error) {
-    console.error('Failed to enqueue location to offline storage:', error);
+let database: Promise<SQLite.SQLiteDatabase> | undefined;
+const uuid = (hex: string) => hex.slice(0,8) + '-' + hex.slice(8,12) + '-4' + hex.slice(13,16) + '-8' + hex.slice(17,20) + '-' + hex.slice(20);
+async function openDatabase() {
+  const db = await SQLite.openDatabaseAsync('ridentrack-queue.db');
+  await db.execAsync("PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, kind TEXT NOT NULL, user_id TEXT NOT NULL, ride_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS queue_user_kind ON queue(user_id,kind,created_at); CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+  if (!await db.getFirstAsync("SELECT key FROM metadata WHERE key = 'legacy-migrated'")) {
+    const entries = await AsyncStorage.multiGet(['@ridentrack/location_queue', '@ridentrack/alert_queue']);
+    await db.withExclusiveTransactionAsync(async txn => {
+      for (const [key, raw] of entries) {
+        if (!raw) continue;
+        for (const item of JSON.parse(raw) as (BufferedLocation | BufferedAlert)[]) {
+          const row = await txn.getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
+          const id = typeof item.id === 'string' && /^[0-9a-f-]{36}$/i.test(item.id) ? item.id : uuid(row!.hex);
+          await txn.runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, key.includes('location') ? 'location' : 'alert', item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
+        }
+      }
+      await txn.runAsync("INSERT OR REPLACE INTO metadata VALUES ('legacy-migrated','1')");
+    });
+    await AsyncStorage.multiRemove(entries.map(([key]) => key));
   }
+  return db;
 }
-
-export async function getQueuedLocations(limit = 100): Promise<BufferedLocation[]> {
-  try {
-    const raw = await AsyncStorage.getItem(LOCATION_QUEUE_KEY);
-    if (!raw) return [];
-    const list: BufferedLocation[] = JSON.parse(raw);
-    return list.slice(0, limit);
-  } catch (error) {
-    console.error('Failed to read queued locations:', error);
-    return [];
-  }
+function getDatabase() {
+  database ??= openDatabase().catch(error => { database = undefined; throw error; });
+  return database;
 }
-
-export async function clearQueuedLocations(timestamps: string[]): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(LOCATION_QUEUE_KEY);
-    if (!raw) return;
-    const list: BufferedLocation[] = JSON.parse(raw);
-    const timestampSet = new Set(timestamps);
-    const remaining = list.filter((item) => !timestampSet.has(item.timestamp));
-    await AsyncStorage.setItem(LOCATION_QUEUE_KEY, JSON.stringify(remaining));
-  } catch (error) {
-    console.error('Failed to clear queued locations:', error);
-  }
+export async function newQueueId() {
+  const row = await (await getDatabase()).getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
+  return uuid(row!.hex);
 }
-
-export async function getQueuedLocationsCount(): Promise<number> {
-  try {
-    const raw = await AsyncStorage.getItem(LOCATION_QUEUE_KEY);
-    if (!raw) return 0;
-    const list: BufferedLocation[] = JSON.parse(raw);
-    return list.length;
-  } catch {
-    return 0;
-  }
+async function enqueue(kind: string, item: BufferedLocation | BufferedAlert) {
+  const id = item.id || await newQueueId();
+  await (await getDatabase()).runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, kind, item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
 }
-
-export async function enqueueAlert(alert: BufferedAlert): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(ALERT_QUEUE_KEY);
-    const list: BufferedAlert[] = raw ? JSON.parse(raw) : [];
-    list.push(alert);
-    await AsyncStorage.setItem(ALERT_QUEUE_KEY, JSON.stringify(list));
-  } catch (error) {
-    console.error('Failed to enqueue alert:', error);
-  }
+export const enqueueLocation = (item: BufferedLocation) => enqueue('location', item);
+export const enqueueAlert = (item: BufferedAlert) => enqueue('alert', item);
+async function read<T>(kind: string, userId: string, limit: number): Promise<T[]> {
+  const rows = await (await getDatabase()).getAllAsync<{ payload: string }>('SELECT payload FROM queue WHERE kind = ? AND user_id = ? ORDER BY created_at LIMIT ?', kind, userId, limit);
+  return rows.map(row => JSON.parse(row.payload) as T);
 }
-
-export async function getQueuedAlerts(): Promise<BufferedAlert[]> {
-  try {
-    const raw = await AsyncStorage.getItem(ALERT_QUEUE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch (error) {
-    console.error('Failed to get queued alerts:', error);
-    return [];
-  }
+export const getQueuedLocations = (userId: string, limit = 100) => read<BufferedLocation>('location', userId, limit);
+export const getQueuedAlerts = (userId: string) => read<BufferedAlert>('alert', userId, 100);
+export async function clearQueuedItems(userId: string, ids: string[]) {
+  if (ids.length) await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ? AND id IN (' + ids.map(() => '?').join(',') + ')', userId, ...ids);
 }
-
-export async function getQueuedAlertsCount(): Promise<number> {
-  try {
-    const raw = await AsyncStorage.getItem(ALERT_QUEUE_KEY);
-    if (!raw) return 0;
-    const list: BufferedAlert[] = JSON.parse(raw);
-    return list.length;
-  } catch {
-    return 0;
-  }
-}
-
-export async function clearQueuedAlert(alertId: string): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(ALERT_QUEUE_KEY);
-    if (!raw) return;
-    const list: BufferedAlert[] = JSON.parse(raw);
-    const remaining = list.filter((a) => a.id !== alertId);
-    await AsyncStorage.setItem(ALERT_QUEUE_KEY, JSON.stringify(remaining));
-  } catch (error) {
-    console.error('Failed to clear queued alert:', error);
-  }
+export async function getQueueCounts(userId: string) {
+  const rows = await (await getDatabase()).getAllAsync<{ kind: string; count: number }>('SELECT kind, count(*) AS count FROM queue WHERE user_id = ? GROUP BY kind', userId);
+  return { locations: rows.find(r => r.kind === 'location')?.count || 0, alerts: rows.find(r => r.kind === 'alert')?.count || 0 };
 }

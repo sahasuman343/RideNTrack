@@ -1,0 +1,78 @@
+name: Verify ride reliability
+on:
+  push:
+    branches: [main, 'fix/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://ridentrack-test.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: test-only-placeholder
+      NEXT_PUBLIC_MAPBOX_TOKEN: pk.test-only-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: TypeScript (mobile and web)
+        run: npm run typecheck
+      - name: Regression tests
+        if: always()
+        run: npm test
+      - name: Web lint
+        if: always()
+        run: npm run lint
+      - name: Start disposable test database
+        run: |
+          test_db_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$test_db_password"
+          echo "PGPASSWORD=$test_db_password" >> "$GITHUB_ENV"
+          export POSTGRES_PASSWORD="$test_db_password"
+          docker run --detach --name ridentrack-test-db \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_PASSWORD --env POSTGRES_DB=ridentrack_test \
+            --health-cmd 'pg_isready -U postgres' \
+            --health-interval 2s --health-timeout 5s --health-retries 30 postgres:16
+          for attempt in {1..30}; do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' ridentrack-test-db)" = healthy ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ridentrack-test-db
+          exit 1
+      - name: Database migrations and access checks
+        if: always()
+        run: |
+          psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f tests/db-bootstrap.sql
+          for migration in supabase/migrations/*.sql; do
+            psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f tests/db-regression.sql
+      - name: Production web build
+        if: always()
+        run: npm --workspace=web run build
+      - name: Browser tools
+        if: success()
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ridentrack-browser-tools" --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/ridentrack-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Browser map checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser.cjs
+      - name: Browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-browser-screenshots
+          path: test-results/
+          if-no-files-found: ignore
+      - name: Remove disposable test database
+        if: always()
+        run: docker rm --force ridentrack-test-db || true

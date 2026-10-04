@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { registerAccount, UsernameUnavailableError } from '@ridentrack/shared';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -12,53 +14,33 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const usernameInput = useRef<HTMLInputElement>(null);
+  const [usernameError, setUsernameError] = useState(false);
   const router = useRouter();
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError('');
     setSuccessMsg('');
-
-    // 1. Sign up with user metadata so the database trigger creates the profile
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username,
-          display_name: displayName,
-        },
-      },
-    });
-
-    if (signUpError) {
-      setError(signUpError.message);
-      setLoading(false);
-      return;
-    }
-
-    // 2. If a session is active immediately (email confirmation disabled), upsert profile
-    if (data?.session && data?.user) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          username,
-          display_name: displayName,
-        });
-      } catch (err) {
-        console.warn('Profile upsert fallback note:', err);
+    setUsernameError(false);
+    try {
+      const data = await registerAccount(supabase, { email, password, username, displayName });
+      if (data.session) {
+        router.replace('/dashboard');
+      } else {
+        setSuccessMsg('Check your email to confirm your account, then sign in.');
       }
-    }
-
-    if (data?.user && !data?.session) {
-      setSuccessMsg('Account registered! If confirmation is required, please check your email, then log in.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Registration failed. Please try again.');
+      if (cause instanceof UsernameUnavailableError) {
+        setUsernameError(true);
+        usernameInput.current?.focus();
+      }
+    } finally {
       setLoading(false);
-      setTimeout(() => router.push('/login'), 2500);
-      return;
     }
-
-    router.push('/login');
   }
 
   return (
@@ -69,26 +51,35 @@ export default function RegisterPage() {
 
         <form onSubmit={handleRegister} className="space-y-4">
           {error && (
-            <div className="bg-red-500/10 border border-red-500 rounded-lg p-3 text-red-400 text-sm">
+            <div id="registration-error" role="alert" className="bg-red-500/10 border border-red-500 rounded-lg p-3 text-red-400 text-sm">
               {error}
             </div>
           )}
           {successMsg && (
-            <div className="bg-emerald-500/10 border border-emerald-500 rounded-lg p-3 text-emerald-400 text-sm">
+            <div role="status" className="bg-emerald-500/10 border border-emerald-500 rounded-lg p-3 text-emerald-400 text-sm">
               {successMsg}
             </div>
           )}
           <input
             type="text"
             placeholder="Username"
+            aria-label="Username"
+            ref={usernameInput}
+            aria-invalid={usernameError}
+            aria-describedby={usernameError ? 'registration-error' : undefined}
+            autoComplete="username"
+            autoCapitalize="none"
+            maxLength={64}
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => { setUsername(e.target.value); if (usernameError) { setUsernameError(false); setError(''); } }}
             className="w-full bg-[#16213e] border border-[#0f3460] rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF6B00]"
             required
           />
           <input
             type="text"
             placeholder="Display Name"
+            aria-label="Display name"
+            autoComplete="nickname"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             className="w-full bg-[#16213e] border border-[#0f3460] rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF6B00]"
@@ -97,6 +88,8 @@ export default function RegisterPage() {
           <input
             type="email"
             placeholder="Email"
+            aria-label="Email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full bg-[#16213e] border border-[#0f3460] rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF6B00]"
@@ -105,6 +98,8 @@ export default function RegisterPage() {
           <input
             type="password"
             placeholder="Password (min 6 characters)"
+            aria-label="Password"
+            autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             minLength={6}
@@ -122,7 +117,7 @@ export default function RegisterPage() {
 
         <p className="text-center mt-6 text-gray-400">
           Already have an account?{' '}
-          <a href="/login" className="text-[#FF6B00] hover:underline">Sign In</a>
+          <Link href="/login" className="text-[#FF6B00] hover:underline">Sign In</Link>
         </p>
       </div>
     </div>

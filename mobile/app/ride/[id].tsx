@@ -1,454 +1,171 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Dimensions, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { Ride, LocationUpdate, AlertType, ALERT_LABELS } from '@ridentrack/shared';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert as Dialog, Share, Linking } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { Camera } from '@rnmapbox/maps';
+import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRealtimeLocation } from '../../src/hooks/useRealtimeLocation';
-import { useAlerts } from '../../src/hooks/useAlerts';
+import { useRide } from '../../src/hooks/useRide';
+import { useAnimatedLocations } from '../../src/hooks/useAnimatedLocations';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
-let MapboxGL: any = null;
-let isMapboxAvailable = false;
-
-try {
-  MapboxGL = require('@rnmapbox/maps').default;
-  if (MapboxGL && typeof MapboxGL.setAccessToken === 'function') {
-    MapboxGL.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '');
-    isMapboxAvailable = true;
-  }
-} catch (e) {
-  console.warn('@rnmapbox/maps native module not available in Expo Go fallback mode');
-}
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const PARTICIPANT_PANEL_WIDTH = 160;
+let Mapbox: typeof import('@rnmapbox/maps').default | null = null;
+try { Mapbox = require('@rnmapbox/maps').default; Mapbox?.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || ''); }
+catch { /* Native maps are unavailable in Expo Go; the rider panel still works. */ }
 
 export default function LiveRideScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id = '' } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
-  const [ride, setRide] = useState<Ride | null>(null);
-  const [routeGeoJSON, setRouteGeoJSON] = useState<any>(null);
-  const [showAlertModal, setShowAlertModal] = useState(false);
-  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number }>({ lat: 0, lng: 0 });
-  const [isBackgroundTracking, setIsBackgroundTracking] = useState(false);
-
-  const { participants, broadcastLocation } = useRealtimeLocation(
-    id || '',
-    user?.id || '',
-    profile?.display_name || 'Rider'
-  );
-
-  const { alerts, latestAlert, sendAlert, dismissAlert } = useAlerts(
-    id || '',
-    user?.id || '',
-    profile?.display_name || 'Rider'
-  );
-
-  const {
-    isOnline,
-    pendingLocationsCount,
-    pendingAlertsCount,
-    isSyncing,
-    flushQueue,
-  } = useOfflineSync(id);
-
-  const startTracking = useCallback(async () => {
-    if (!id || !user) return;
-    try {
-      const result = await startBackgroundLocationUpdates({
-        rideId: id,
-        userId: user.id,
-        displayName: profile?.display_name || 'Rider',
-        broadcastFn: (lat: number, lng: number, speed: number, heading: number) => {
-          broadcastLocation(lat, lng, speed, heading);
-        },
-        onLocationUpdate: (coords: { lat: number; lng: number; speed: number; heading: number }) => {
-          setMyLocation({ lat: coords.lat, lng: coords.lng });
-        },
-      });
-      setIsBackgroundTracking(result.isBackgroundEnabled);
-    } catch (err) {
-      console.warn('Failed to start location tracking:', err);
-    }
-  }, [id, user, profile, broadcastLocation]);
-
+  const userId = user?.id;
+  const name = profile?.display_name || 'Rider';
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { ride, participants, alerts, connection, error, publish, refresh, setRide } = useRide(id, userId || '');
+  const sync = useOfflineSync();
+  const camera = useRef<React.ComponentRef<typeof Camera>>(null);
+  const [position, setPosition] = useState<LocationUpdate | null>(null);
+  const [tracking, setTracking] = useState<'waiting' | 'background' | 'foreground' | 'paused' | 'error'>('waiting');
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(true);
+  const [gpsRetry, setGpsRetry] = useState(0);
+  const [follow, setFollow] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(200);
+  const cameraPadding = useMemo(() => ({ paddingTop: insets.top + 135, paddingBottom: sheetHeight + 28, paddingLeft: 45, paddingRight: 45 }), [insets.top,sheetHeight]);
+  const [modal, setModal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState(false);
+  const [route, setRoute] = useState<Ride['route_geometry']>();
+  const [now, setNow] = useState(() => Date.now());
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const active = ride?.status === 'active';
+  const admin = ride?.admin_id === userId;
+  const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
+  const animated = useAnimatedLocations(points);
+  const features = useMemo(() => ({ type: 'FeatureCollection' as const, features: animated.map(p => ({
+    type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [p.lng,p.lat] },
+    properties: { name: p.display_name, mine: p.user_id === userId, stale: isStale(p.timestamp,now) },
+  })) }), [animated,userId,now]);
+  const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()),5000); return () => clearInterval(timer); }, []);
   useEffect(() => {
-    if (id) {
-      fetchRide();
+    if (!active || !sharing || !userId) {
+      setTracking('paused');
+      void stopBackgroundLocationUpdates().catch(e => setGpsError(e.message));
+      return;
     }
-    startTracking();
-
-    return () => {
-      stopBackgroundLocationUpdates();
+    let cancelled = false;
+    setTracking('waiting'); setGpsError(null);
+    void startBackgroundLocationUpdates({ rideId: id, userId, displayName: name, publish,
+      onLocationUpdate: p => { if (!cancelled) setPosition(p); },
+      onError: e => { if (!cancelled) setGpsError(e); },
+    }).then(result => { if (!cancelled) setTracking(result.isBackgroundEnabled ? 'background' : 'foreground'); })
+      .catch(e => { if (!cancelled) { setTracking('error'); setGpsError(e.message); } });
+    return () => { cancelled = true; void stopBackgroundLocationUpdates().catch(() => {}); };
+  }, [id,userId,name,active,sharing,publish,gpsRetry]);
+  useEffect(() => {
+    if (mapReady && follow && position) camera.current?.setCamera({
+      centerCoordinate: [position.lng,position.lat], zoomLevel: 14, padding: cameraPadding, animationMode: 'easeTo', animationDuration: 900,
+    });
+  }, [mapReady,follow,position,cameraPadding]);
+  useEffect(() => {
+    if (ride?.route_geometry) { setRoute(ride.route_geometry); return; }
+    if (!ride || !process.env.EXPO_PUBLIC_MAPBOX_TOKEN) return;
+    const controller = new AbortController();
+    const load = async () => {
+      const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + ride.origin_coords.join(',') + ';' + ride.destination_coords.join(',') + '?geometries=geojson&overview=full&access_token=' + process.env.EXPO_PUBLIC_MAPBOX_TOKEN, { signal: controller.signal });
+      if (!response.ok) throw new Error('Route unavailable. Rider positions still work.');
+      const data = await response.json();
+      if (!data.routes?.[0]) throw new Error('No driving route found.');
+      const geo: NonNullable<Ride['route_geometry']> = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
+      if (controller.signal.aborted) return;
+      setRoute(geo);
+      if (admin) {
+        const { error } = await supabase.from('rides').update({ route_geometry: geo }).eq('id',id);
+        if (error) throw error;
+      }
     };
-  }, [id, startTracking]);
-
-  async function fetchRide() {
-    const { data } = await supabase.from('rides').select('*').eq('id', id).single();
-    if (data) {
-      setRide(data as Ride);
-      if (!data.route_geometry && data.origin_coords && data.destination_coords) {
-        fetchRoute(data.origin_coords, data.destination_coords);
-      } else if (data.route_geometry) {
-        setRouteGeoJSON(data.route_geometry);
-      }
+    void load().catch(e => { if (!controller.signal.aborted) setMessage(e.message); });
+    return () => controller.abort();
+  }, [ride?.id,ride?.route_geometry,admin,id]);
+  function fitGroup() {
+    setFollow(false);
+    const coords = points.length ? points.map(p => [p.lng,p.lat]) : ride ? [ride.origin_coords,ride.destination_coords] : [];
+    if (!coords.length) return;
+    if (coords.every(p => p[0] === coords[0][0] && p[1] === coords[0][1])) {
+      camera.current?.setCamera({ centerCoordinate: coords[0],zoomLevel: 14,padding: cameraPadding,animationMode: 'easeTo',animationDuration: 800 });
+      return;
     }
+    camera.current?.fitBounds([Math.max(...coords.map(p => p[0])),Math.max(...coords.map(p => p[1]))],
+      [Math.min(...coords.map(p => p[0])),Math.min(...coords.map(p => p[1]))], [cameraPadding.paddingTop,45,cameraPadding.paddingBottom,45],800);
   }
-
-  async function fetchRoute(origin: [number, number], dest: [number, number]) {
-    const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN;
-    if (!token) return;
+  async function changeStatus(status: 'active' | 'completed') {
+    setBusy(true); setMessage(null);
     try {
-      const res = await fetch(
-        `https://api.mapbox.com/directions/v5/mapbox/driving/${origin[0]},${origin[1]};${dest[0]},${dest[1]}?geometries=geojson&overview=full&access_token=${token}`
-      );
-      const data = await res.json();
-      if (data.routes && data.routes.length > 0) {
-        const geojson = {
-          type: 'Feature',
-          geometry: data.routes[0].geometry,
-          properties: {},
-        };
-        setRouteGeoJSON(geojson);
-        await supabase.from('rides').update({ route_geometry: geojson }).eq('id', id);
-      }
-    } catch (err) {
-      console.error('Route fetch error:', err);
-    }
+      const { data,error } = await supabase.from('rides').update({ status }).eq('id',id).select().single();
+      if (error) throw error;
+      setRide(data as Ride);
+      if (status === 'completed') { await stopBackgroundLocationUpdates(); await sync.flushQueue(); }
+    } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not update ride.'); }
+    finally { setBusy(false); }
   }
-
-  async function handleStartRide() {
-    await supabase.from('rides').update({ status: 'active' }).eq('id', id);
-    setRide((prev: Ride | null) => (prev ? { ...prev, status: 'active' } : null));
+  async function sendAlert(type: AlertType) {
+    if (!position || !userId || isStale(position.timestamp)) { setMessage('Wait for a fresh GPS fix before sending an alert.'); return; }
+    setBusy(true);
+    try {
+      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
+      setModal(false); await sync.flushQueue(); await refresh();
+    } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not save alert.'); }
+    finally { setBusy(false); }
   }
-
-  async function handleEndRide() {
-    await supabase.from('rides').update({ status: 'completed' }).eq('id', id);
-    setRide((prev: Ride | null) => (prev ? { ...prev, status: 'completed' } : null));
-  }
-
-  function handleSendAlert(type: AlertType) {
-    sendAlert(type, myLocation.lat, myLocation.lng);
-    setShowAlertModal(false);
-  }
-
-  const participantList: LocationUpdate[] = Array.from(participants.values());
-  const isAdmin = ride?.admin_id === user?.id;
-  const totalPending = pendingLocationsCount + pendingAlertsCount;
-
-  return (
-    <View style={styles.container}>
-      {/* Left-side participant panel */}
-      <View style={styles.participantPanel}>
-        <Text style={styles.panelTitle}>Riders ({participantList.length})</Text>
-
-        {/* Sync Status Badge in Panel */}
-        <View style={styles.syncStatusCard}>
-          <View style={styles.syncStatusHeader}>
-            <View
-              style={[
-                styles.syncStatusDot,
-                { backgroundColor: !isOnline ? '#F59E0B' : isSyncing ? '#3B82F6' : '#10B981' },
-              ]}
-            />
-            <Text style={styles.syncStatusTitle}>
-              {!isOnline
-                ? 'Offline Mode'
-                : isSyncing
-                ? 'Syncing...'
-                : isBackgroundTracking
-                ? 'Bg GPS Active'
-                : 'GPS Active'}
-            </Text>
-          </View>
-          {totalPending > 0 && (
-            <TouchableOpacity onPress={flushQueue} style={styles.pendingBadge}>
-              <Text style={styles.pendingText}>
-                {totalPending} buffered {isOnline ? '(tap to sync)' : ''}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <FlatList
-          data={participantList}
-          keyExtractor={(item: LocationUpdate) => item.user_id}
-          renderItem={({ item }: { item: LocationUpdate }) => (
-            <View style={styles.participantItem}>
-              <View
-                style={[
-                  styles.dot,
-                  { backgroundColor: item.user_id === user?.id ? '#FF6B00' : '#4CAF50' },
-                ]}
-              />
-              <View style={styles.participantInfo}>
-                <Text style={styles.participantName} numberOfLines={1}>
-                  {item.display_name}
-                </Text>
-                <Text style={styles.participantSpeed}>
-                  {Math.round((item.speed || 0) * 3.6)} km/h
-                </Text>
-              </View>
-            </View>
-          )}
-        />
-      </View>
-
-      {/* Map */}
-      <View style={styles.mapContainer}>
-        {isMapboxAvailable && MapboxGL ? (
-          <MapboxGL.MapView style={styles.map} styleURL={MapboxGL.StyleURL?.Dark || 'mapbox://styles/mapbox/dark-v10'}>
-            <MapboxGL.Camera
-              centerCoordinate={
-                myLocation.lng !== 0
-                  ? [myLocation.lng, myLocation.lat]
-                  : ride?.origin_coords || [78.9629, 20.5937]
-              }
-              zoomLevel={12}
-            />
-
-            {/* Route line */}
-            {routeGeoJSON && (
-              <MapboxGL.ShapeSource id="routeSource" shape={routeGeoJSON}>
-                <MapboxGL.LineLayer
-                  id="routeLine"
-                  style={{ lineColor: '#FF6B00', lineWidth: 4, lineOpacity: 0.8 }}
-                />
-              </MapboxGL.ShapeSource>
-            )}
-
-            {/* Participant markers */}
-            {participantList.map((p: LocationUpdate) => (
-              <MapboxGL.PointAnnotation
-                key={p.user_id}
-                id={p.user_id}
-                coordinate={[p.lng, p.lat]}
-                title={p.display_name}
-              >
-                <View style={styles.marker}>
-                  <Text style={styles.markerText}>{p.display_name[0]}</Text>
-                </View>
-              </MapboxGL.PointAnnotation>
-            ))}
-
-            {/* Origin marker */}
-            {ride?.origin_coords && (
-              <MapboxGL.PointAnnotation id="origin" coordinate={ride.origin_coords}>
-                <View style={[styles.locationPin, { backgroundColor: '#4CAF50' }]}>
-                  <Text style={styles.pinText}>A</Text>
-                </View>
-              </MapboxGL.PointAnnotation>
-            )}
-
-            {/* Destination marker */}
-            {ride?.destination_coords && (
-              <MapboxGL.PointAnnotation id="destination" coordinate={ride.destination_coords}>
-                <View style={[styles.locationPin, { backgroundColor: '#e74c3c' }]}>
-                  <Text style={styles.pinText}>B</Text>
-                </View>
-              </MapboxGL.PointAnnotation>
-            )}
-          </MapboxGL.MapView>
-        ) : (
-          <View style={[styles.map, styles.mapFallbackContainer]}>
-            <Text style={styles.mapFallbackTitle}>🗺️ Live Location Hub</Text>
-            <Text style={styles.mapFallbackSub}>
-              {myLocation.lat !== 0 ? `Your GPS: ${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)}` : 'Acquiring GPS Signal...'}
-            </Text>
-            <View style={styles.mapFallbackStats}>
-              <Text style={styles.mapFallbackText}>Active Riders: {participantList.length}</Text>
-              <Text style={styles.mapFallbackText}>GPS Tracking: {isBackgroundTracking ? '🟢 Active' : '⚪ Idle'}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* Ride info overlay */}
-        <View style={styles.rideInfo}>
-          <View style={styles.rideHeaderRow}>
-            <Text style={styles.rideName}>{ride?.name || 'Loading...'}</Text>
-            {isSyncing && <ActivityIndicator size="small" color="#FF6B00" />}
-          </View>
-          <Text style={styles.rideRoute}>
-            {ride?.origin} → {ride?.destination}
-          </Text>
-          {ride?.ride_code && <Text style={styles.rideCode}>Code: {ride.ride_code}</Text>}
-        </View>
-
-        {/* Admin controls */}
-        {isAdmin && ride?.status === 'planned' && (
-          <TouchableOpacity style={styles.startButton} onPress={handleStartRide}>
-            <Text style={styles.startButtonText}>Start Ride</Text>
-          </TouchableOpacity>
-        )}
-        {isAdmin && ride?.status === 'active' && (
-          <TouchableOpacity
-            style={[styles.startButton, { backgroundColor: '#e74c3c' }]}
-            onPress={handleEndRide}
-          >
-            <Text style={styles.startButtonText}>End Ride</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Alert button */}
-        <TouchableOpacity style={styles.alertButton} onPress={() => setShowAlertModal(true)}>
-          <Text style={styles.alertButtonText}>⚠️ Alert</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Latest alert notification */}
-      {latestAlert && latestAlert.user_id !== user?.id && (
-        <TouchableOpacity style={styles.alertBanner} onPress={dismissAlert}>
-          <Text style={styles.alertBannerText}>
-            {ALERT_LABELS[latestAlert.type]} from {latestAlert.display_name}
-          </Text>
-          <Text style={styles.alertDismiss}>Tap to dismiss</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Alert selection modal */}
-      <Modal visible={showAlertModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Send Alert</Text>
-            {(Object.keys(ALERT_LABELS) as AlertType[]).map((type: AlertType) => (
-              <TouchableOpacity
-                key={type}
-                style={[styles.alertOption, type === 'emergency' && styles.emergencyOption]}
-                onPress={() => handleSendAlert(type)}
-              >
-                <Text style={styles.alertOptionText}>{ALERT_LABELS[type]}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowAlertModal(false)}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+  const pending = sync.pendingLocationsCount + sync.pendingAlertsCount;
+  const status = !sync.isOnline ? 'Offline · saved on device' : connection !== 'live' ? 'Reconnecting…' :
+    !active ? ride?.status === 'completed' ? 'Ride completed' : 'Ready to ride' :
+    tracking === 'background' ? 'Live · background GPS' : tracking === 'foreground' ? 'Live · keep app open' :
+    tracking === 'waiting' ? 'Getting GPS fix…' : tracking === 'error' ? 'GPS unavailable' : 'Location sharing paused';
+  if (!ride) return <View style={s.loading}><Text style={s.brand}>RIDEN TRACK</Text>{error ? <Text style={s.text}>{error}</Text> : <ActivityIndicator color="#d66029" />}<TouchableOpacity onPress={() => void refresh()}><Text style={s.link}>Retry connection</Text></TouchableOpacity><TouchableOpacity onPress={() => router.back()}><Text style={s.link}>Back to rides</Text></TouchableOpacity></View>;
+  return <View style={s.screen}>
+    {Mapbox && process.env.EXPO_PUBLIC_MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL="mapbox://styles/mapbox/streets-v12"
+      onDidFinishLoadingMap={() => { setMapReady(true); setMapError(false); }} onMapLoadingError={() => setMapError(true)}
+      onCameraChanged={state => { if (state.gestures.isGestureActive) setFollow(false); }}
+      logoPosition={{ bottom: sheetHeight + 8,left: 10 }} attributionPosition={{ bottom: sheetHeight + 8,right: 10 }} compassEnabled>
+      <Mapbox.Camera ref={camera} defaultSettings={{ centerCoordinate: ride.origin_coords,zoomLevel: 11 }} />
+      {route && <Mapbox.ShapeSource id="route" shape={route}><Mapbox.LineLayer id="route-edge" style={{ lineColor: '#fff',lineWidth: 8,lineCap: 'round',lineJoin: 'round' }} /><Mapbox.LineLayer id="route-line" style={{ lineColor: '#de7136',lineWidth: 4,lineCap: 'round',lineJoin: 'round' }} /></Mapbox.ShapeSource>}
+      <Mapbox.ShapeSource id="endpoints" shape={{ type: 'FeatureCollection',features: [ride.origin_coords,ride.destination_coords].map((coordinates,i) => ({ type: 'Feature',geometry: { type: 'Point',coordinates },properties: { label: i === 0 ? 'A' : 'B' } })) }}>
+        <Mapbox.CircleLayer id="endpoint-dot" style={{ circleColor: '#213e44',circleRadius: 13,circleStrokeWidth: 3,circleStrokeColor: '#fff' }} />
+        <Mapbox.SymbolLayer id="endpoint-label" style={{ textField: ['get','label'],textSize: 12,textColor: '#fff' }} />
+      </Mapbox.ShapeSource>
+      <Mapbox.ShapeSource id="riders" shape={features}>
+        <Mapbox.CircleLayer id="rider-halo" style={{ circleRadius: 18,circleColor: '#e68145',circleOpacity: 0.18 }} />
+        <Mapbox.CircleLayer id="rider-dot" style={{ circleRadius: 8,circleColor: ['case',['get','stale'],'#94a3b8',['get','mine'],'#df7133','#247963'],circleStrokeWidth: 3,circleStrokeColor: '#fff' }} />
+        <Mapbox.SymbolLayer id="rider-label" style={{ textField: ['get','name'],textOffset: [0,1.8],textSize: 12,textColor: '#213e44',textHaloColor: '#fff',textHaloWidth: 2 }} />
+      </Mapbox.ShapeSource>
+    </Mapbox.MapView> : <View style={s.fallback}><Text style={s.heading}>Your ride, together.</Text><Text style={s.muted}>The native map needs a development build and a Mapbox token. Your rider list and foreground GPS remain available.</Text></View>}
+    <View style={[s.top,{ top: insets.top + 10 }]}><TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={() => router.back()}><Text style={s.text}>‹</Text></TouchableOpacity><View style={s.title}><Text numberOfLines={1} style={s.heading}>{ride.name}</Text><Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text></View><TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}><Text style={s.text}>↗</Text></TouchableOpacity></View>
+    <View style={[s.controls,{ top: insets.top + 94 }]}><TouchableOpacity accessibilityLabel="Follow my location" style={[s.control,follow && s.selected]} disabled={!position} onPress={() => setFollow(true)}><Text style={s.text}>◎ Me</Text></TouchableOpacity><TouchableOpacity style={s.control} onPress={fitGroup}><Text style={s.text}>⊞ Group</Text></TouchableOpacity></View>
+    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + 150 }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
+    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
+      <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
+      {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{ALERT_LABELS[newest.type]} · {newest.display_name} · tap to dismiss</Text></TouchableOpacity>}
+      {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
+      {expanded && <ScrollView style={s.riders}>{points.length === 0 && <Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}{points.map(p => <TouchableOpacity key={p.user_id} style={s.rider} onPress={() => { setFollow(false); camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,padding: cameraPadding,animationDuration: 700 }); }}><View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{p.display_name[0]}</Text></View><View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View><Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text></TouchableOpacity>)}</ScrollView>}
+      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
+      {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
-  );
+    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? Dialog.alert('Send emergency alert?', 'Notify your group that you need help.', [{ text: 'Cancel',style: 'cancel' },{ text: 'Send alert',onPress: () => void sendAlert(type) }]) : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+  </View>;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, flexDirection: 'row', backgroundColor: '#1a1a2e' },
-  participantPanel: {
-    width: PARTICIPANT_PANEL_WIDTH,
-    backgroundColor: '#16213e',
-    borderRightWidth: 1,
-    borderRightColor: '#0f3460',
-    paddingTop: 8,
-  },
-  panelTitle: { color: '#FF6B00', fontSize: 14, fontWeight: '700', padding: 12, paddingBottom: 4 },
-  syncStatusCard: {
-    backgroundColor: '#0f3460',
-    marginHorizontal: 8,
-    marginBottom: 8,
-    borderRadius: 8,
-    padding: 8,
-  },
-  syncStatusHeader: { flexDirection: 'row', alignItems: 'center' },
-  syncStatusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  syncStatusTitle: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  pendingBadge: { marginTop: 4, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: 3 },
-  pendingText: { color: '#F59E0B', fontSize: 9, textAlign: 'center' },
-  participantItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  participantInfo: { flex: 1 },
-  participantName: { color: '#fff', fontSize: 12, fontWeight: '500' },
-  participantSpeed: { color: '#999', fontSize: 10, marginTop: 2 },
-  mapContainer: { flex: 1 },
-  map: { flex: 1 },
-  mapFallbackContainer: {
-    backgroundColor: '#0f3460',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  mapFallbackTitle: { color: '#FF6B00', fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  mapFallbackSub: { color: '#fff', fontSize: 14, marginBottom: 12 },
-  mapFallbackStats: { backgroundColor: '#16213e', borderRadius: 8, padding: 12, width: '100%', alignItems: 'center' },
-  mapFallbackText: { color: '#ccc', fontSize: 13, marginVertical: 2 },
-  marker: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#FF6B00',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  markerText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  locationPin: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  pinText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  rideInfo: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    backgroundColor: 'rgba(22, 33, 62, 0.92)',
-    borderRadius: 12,
-    padding: 12,
-  },
-  rideHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rideName: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  rideRoute: { color: '#ccc', fontSize: 12, marginTop: 2 },
-  rideCode: { color: '#FF6B00', fontSize: 11, marginTop: 2, fontFamily: 'monospace' },
-  startButton: {
-    position: 'absolute',
-    bottom: 80,
-    left: 12,
-    right: 12,
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-  },
-  startButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  alertButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 12,
-    backgroundColor: '#e74c3c',
-    borderRadius: 30,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  alertButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  alertBanner: {
-    position: 'absolute',
-    top: 60,
-    left: PARTICIPANT_PANEL_WIDTH + 12,
-    right: 12,
-    backgroundColor: '#e74c3c',
-    borderRadius: 12,
-    padding: 16,
-    zIndex: 100,
-  },
-  alertBannerText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  alertDismiss: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalContent: { backgroundColor: '#16213e', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24 },
-  modalTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16, textAlign: 'center' },
-  alertOption: {
-    backgroundColor: '#0f3460',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  emergencyOption: { backgroundColor: '#e74c3c' },
-  alertOptionText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  cancelButton: { padding: 16, alignItems: 'center' },
-  cancelText: { color: '#999', fontSize: 16 },
+const s = StyleSheet.create({
+  screen:{flex:1,backgroundColor:'#e2e9dc'},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:'#f5f7f1'},brand:{color:'#d66029',fontSize:16,fontWeight:'800',letterSpacing:4},
+  text:{color:'#213e44',fontSize:14,fontWeight:'600'},muted:{color:'#72827e',fontSize:12,lineHeight:18},heading:{color:'#213e44',fontSize:18,fontWeight:'700'},top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},title:{flex:1,padding:13,borderRadius:17,backgroundColor:'#fffffff5'},square:{width:44,height:48,borderRadius:15,backgroundColor:'#fff',alignItems:'center',justifyContent:'center'},
+  controls:{position:'absolute',right:14,flexDirection:'row',gap:8},control:{backgroundColor:'#fff',paddingHorizontal:16,minHeight:44,justifyContent:'center',borderRadius:23,borderWidth:1,borderColor:'#d9e1d4'},selected:{borderColor:'#d66029',backgroundColor:'#fff3e9'},
+  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#fffffff8',borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:'#213e44',shadowOpacity:0.12,shadowRadius:15,elevation:8},sheetHeader:{paddingTop:10,paddingBottom:16},handle:{width:38,height:4,backgroundColor:'#d5ded1',borderRadius:3,alignSelf:'center',marginBottom:14},row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},eyebrow:{color:'#3c7b61',fontSize:11,fontWeight:'600',marginBottom:5},code:{backgroundColor:'#f0f4ec',padding:9,borderRadius:10,letterSpacing:2,fontSize:11,color:'#6a7c69'},
+  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:'#edf1e9'},avatar:{width:36,height:36,borderRadius:18,backgroundColor:'#3c7b61',alignItems:'center',justifyContent:'center'},stale:{backgroundColor:'#94a3a0'},grow:{flex:1},
+  actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:'#d66029',borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:'#eef3e9',borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:'#fff',fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:'#b94936',fontSize:13},
+  warning:{position:'absolute',left:16,right:16,backgroundColor:'#fff5e8',borderRadius:15,padding:12,gap:4},warningText:{color:'#99542d',fontSize:12,lineHeight:18},link:{color:'#c65e2c',fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:'#fff0e8',marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#15313966'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:'#fff',gap:12},alertOption:{padding:20,borderRadius:16,backgroundColor:'#eff4e9'},emergency:{backgroundColor:'#ffeae1'},fallback:{padding:36,paddingTop:225,gap:14},
 });
