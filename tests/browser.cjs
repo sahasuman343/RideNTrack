@@ -25,6 +25,30 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
   try {
     for(let i=0;i<60;i++){try{if((await fetch(origin)).ok)break;}catch{} await new Promise(r=>setTimeout(r,500));}
     browser=await chromium.launch({args:['--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+    const signupContext = await browser.newContext({viewport:{width:390,height:844}});
+    let signupRequests = 0;
+    await signupContext.route('https://ridentrack-test.supabase.co/rest/v1/rpc/is_username_available',route=>
+      route.fulfill({json:route.request().postDataJSON().requested_username !== 'taken-rider'}));
+    await signupContext.route('https://ridentrack-test.supabase.co/auth/v1/signup*',route=>{
+      signupRequests++;
+      return route.fulfill({json:{user:{...session.user,identities:[]},session:null}});
+    });
+    const signupPage = await signupContext.newPage();
+    await signupPage.goto(origin+'/register');
+    await signupPage.getByLabel('Username',{exact:true}).fill('taken-rider');
+    await signupPage.getByLabel('Display name',{exact:true}).fill('New Rider');
+    await signupPage.getByLabel('Email',{exact:true}).fill('new@example.test');
+    await signupPage.getByLabel('Password',{exact:true}).fill('test-only-fixture');
+    await signupPage.getByRole('button',{name:'Register',exact:true}).click();
+    await signupPage.getByRole('alert').filter({hasText:'already taken'}).waitFor();
+    assert.equal(signupRequests,0,'taken handles must not reach Auth signup');
+    assert.equal(await signupPage.getByLabel('Username',{exact:true}).evaluate(el=>el===document.activeElement),true);
+    assert.equal(await signupPage.getByRole('button',{name:'Register',exact:true}).isEnabled(),true);
+    await signupPage.getByLabel('Username',{exact:true}).fill('unused-rider');
+    await signupPage.getByRole('button',{name:'Register',exact:true}).click();
+    await signupPage.getByRole('status').filter({hasText:'Check your email'}).waitFor();
+    assert.equal(signupRequests,1);
+    await signupContext.close();
     const context=await browser.newContext({viewport:{width:1440,height:960},permissions:['clipboard-read','clipboard-write']});
     await context.addInitScript(s=>localStorage.setItem('sb-ridentrack-test-auth-token',JSON.stringify(s)),session);
     await context.route('https://api.mapbox.com/**',route=>{

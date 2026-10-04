@@ -27,6 +27,36 @@ function loader(stubs = {}) {
   return load;
 }
 const shared = loader()('shared/types.ts');
+const signupInput = { email:' new@example.test ',password:'test-only',username:' new-rider ',displayName:' New Rider ' };
+test('taken usernames never reach signup; availability failures remain retryable', async () => {
+  let submissions = 0;
+  const client = { rpc:async()=>({data:false,error:null}),auth:{signUp:async()=>{submissions++;}} };
+  await assert.rejects(shared.registerAccount(client,signupInput),shared.UsernameUnavailableError);
+  assert.equal(submissions,0);
+  client.rpc = async()=>({data:null,error:{message:'offline'}});
+  await assert.rejects(shared.registerAccount(client,signupInput),/check your username/i);
+  assert.equal(submissions,0);
+});
+test('registration trims profile input and preserves the returned auth session', async () => {
+  const data = {user:{id:'new'},session:{access_token:'fixture'}};
+  const client = {
+    rpc:async(name,args)=>{assert.equal(name,'is_username_available');assert.equal(args.requested_username,'new-rider');return {data:true,error:null};},
+    auth:{signUp:async(payload)=>{assert.equal(payload.email,'new@example.test');assert.equal(payload.options.data.username,'new-rider');assert.equal(payload.options.data.display_name,'New Rider');return {data,error:null};}},
+  };
+  assert.equal(await shared.registerAccount(client,signupInput),data);
+});
+test('a concurrent username claim explains the collision without retrying signup', async () => {
+  let checks = 0, submissions = 0;
+  const client = {rpc:async()=>({data:++checks===1,error:null}),auth:{signUp:async()=>{submissions++;return {data:null,error:{message:'Database error saving new user',code:'unexpected_failure',status:500}};}}};
+  await assert.rejects(shared.registerAccount(client,signupInput),shared.UsernameUnavailableError);
+  assert.equal(checks,2); assert.equal(submissions,1);
+});
+test('registration preserves auth validation errors and does not mistake unrelated failures for duplicates', async () => {
+  const client = {rpc:async()=>({data:true,error:null}),auth:{signUp:async()=>({data:null,error:{message:'Password is too weak',code:'weak_password'}})}};
+  await assert.rejects(shared.registerAccount(client,signupInput),/Password is too weak/);
+  client.auth.signUp = async()=>({data:null,error:{message:'Database error',status:500}});
+  await assert.rejects(shared.registerAccount(client,signupInput),/try again shortly/);
+});
 const point = (user,stamp,lat=0,lng=0) => ({ user_id:user,display_name:user,lat,lng,speed:5,heading:0,timestamp:stamp });
 test('equator/prime meridian accepted; invalid coordinates rejected', () => {
   assert.equal(shared.validCoordinates(0,0),true);

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
 import type { Profile } from '@ridentrack/shared';
+import { registerAccount } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
@@ -74,18 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username,
-          display_name: displayName,
-        },
-      },
-    });
-    if (error) throw error;
-
+    const data = await registerAccount(supabase, { email, password, username, displayName });
     return Boolean(data.session);
   }
 
