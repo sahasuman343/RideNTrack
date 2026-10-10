@@ -7,8 +7,8 @@ export function syncQueue(): Promise<void> {
   return running;
 }
 async function flush() {
-  const { data: { session } } = await supabase.auth.getSession();
-  const userId = session?.user.id;
+  const sessionRes = await supabase.auth.getSession().catch(() => null);
+  const userId = sessionRes?.data?.session?.user.id;
   if (!userId) return;
   let alertError: string | null = null;
   for (const alert of await getQueuedAlerts(userId)) {
