@@ -31,10 +31,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 3000);
 
     supabase.auth.getSession()
-      .then(({ data: { session } }) => {
+      .then((res) => {
         if (!isMounted) return;
-        setSession(session);
-        if (session?.user) fetchProfile(session.user.id);
+        const currentSession = res?.data?.session ?? null;
+        setSession(currentSession);
+        if (currentSession?.user) fetchProfile(currentSession.user.id);
       })
       .catch((err) => {
         console.warn('Error fetching session:', err);
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authData } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return;
       setSession(session);
       if (session?.user) fetchProfile(session.user.id);
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isMounted = false;
       clearTimeout(timeout);
-      subscription.unsubscribe();
+      authData?.subscription?.unsubscribe();
     };
   }, []);
 
@@ -67,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .select('*')
         .eq('id', userId)
         .single();
-      const { data: { session: current } } = await supabase.auth.getSession();
+      const current = (await supabase.auth.getSession())?.data?.session;
       if (current?.user.id === userId) setProfile(data as Profile | null);
     } catch (err) {
       console.warn('Profile fetch error:', err);

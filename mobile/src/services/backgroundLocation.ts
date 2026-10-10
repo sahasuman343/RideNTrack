@@ -25,19 +25,46 @@ async function record(locations: Location.LocationObject[]) {
   const version = generation;
   const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
   if (!saved) return;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.user.id !== saved.userId || version !== generation) return;
+  const sessionRes = await supabase.auth.getSession().catch(() => null);
+  const session = sessionRes?.data?.session;
+  if (!session || session.user.id !== saved.userId || version !== generation) return;
   for (const location of locations) {
-    if (version !== generation) return;
+    if (version !== generation || !location || !location.coords) return;
     const { latitude: lat, longitude: lng, speed, heading, accuracy } = location.coords;
     if (!validCoordinates(lat, lng) || (accuracy !== null && accuracy > 100)) continue;
-    const point: LocationUpdate = { user_id: saved.userId, display_name: saved.displayName, lat, lng,
-      speed: Math.max(0, speed ?? 0), heading: Math.max(0, heading ?? 0), timestamp: new Date(location.timestamp).toISOString() };
-    await enqueueLocation({ ride_id: saved.rideId, user_id: point.user_id, lat, lng, speed: point.speed, heading: point.heading, timestamp: point.timestamp });
+    const timestamp = (typeof location.timestamp === 'number' && Number.isFinite(location.timestamp))
+      ? new Date(location.timestamp).toISOString()
+      : new Date().toISOString();
+    const point: LocationUpdate = {
+      user_id: saved.userId,
+      display_name: saved.displayName,
+      lat,
+      lng,
+      speed: Math.max(0, typeof speed === 'number' && Number.isFinite(speed) ? speed : 0),
+      heading: Math.max(0, typeof heading === 'number' && Number.isFinite(heading) ? heading : 0),
+      timestamp,
+    };
+    try {
+      await enqueueLocation({
+        ride_id: saved.rideId,
+        user_id: point.user_id,
+        lat,
+        lng,
+        speed: point.speed,
+        heading: point.heading,
+        timestamp: point.timestamp,
+      });
+    } catch (e) {
+      context?.onError?.(e instanceof Error ? e.message : 'Could not queue location update.');
+    }
     // A ride/account switch can happen while SQLite commits. Never publish that
     // previous ride's fix through the newly installed live callback.
     if (version !== generation) return;
-    context?.onLocationUpdate?.(point);
+    try {
+      context?.onLocationUpdate?.(point);
+    } catch {
+      /* Ignore UI update error */
+    }
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});
   }
@@ -65,8 +92,17 @@ export function startBackgroundLocationUpdates(params: Params): Promise<{ isBack
       throw new Error('Enable location permission in Settings to share your position.');
     let background = false;
     if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient) {
-      try { background = await Location.isBackgroundLocationAvailableAsync()
-        && (await Location.requestBackgroundPermissionsAsync()).status === 'granted'; } catch { background = false; }
+      try {
+        const isAvailable = typeof Location.isBackgroundLocationAvailableAsync === 'function'
+          ? await Location.isBackgroundLocationAvailableAsync()
+          : false;
+        if (isAvailable && typeof Location.getBackgroundPermissionsAsync === 'function') {
+          const bgStatus = await Location.getBackgroundPermissionsAsync();
+          background = bgStatus?.status === 'granted';
+        }
+      } catch {
+        background = false;
+      }
     }
     if (version !== generation) return { isBackgroundEnabled: false };
     context = params;
@@ -84,8 +120,12 @@ export function startBackgroundLocationUpdates(params: Params): Promise<{ isBack
         return { isBackgroundEnabled: true };
       } catch { /* Foreground tracking remains useful if a native background start fails. */ }
     }
-    fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
-      location => { void record([location]).catch(e => params.onError?.(e.message)); });
+    try {
+      fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
+        location => { void record([location]).catch(e => params.onError?.(e.message)); });
+    } catch (e) {
+      params.onError?.(e instanceof Error ? e.message : 'Unable to start foreground location tracker.');
+    }
     return { isBackgroundEnabled: false };
   });
 }

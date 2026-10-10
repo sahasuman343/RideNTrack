@@ -51,12 +51,20 @@
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
         "WAKE_LOCK"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4a989f0f-8f40-49e1-89d0-78fb4169e2a8"
+      }
+    },
+    "owner": "sman147"
   }
 }

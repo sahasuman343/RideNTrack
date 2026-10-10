@@ -19,10 +19,16 @@ export function useAnimatedLocations(points: LocationUpdate[]) {
       if (time - last >= 32 || t === 1) {
         last = time; const eased = t * (2 - t);
         const next = points.map(p => {
-          const old = before.get(p.user_id); if (!old) return p;
+          const old = before.get(p.user_id);
+          if (!old || !Number.isFinite(old.lat) || !Number.isFinite(old.lng) || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return p;
           const delta = ((p.lng - old.lng + 540) % 360) - 180;
-          return { ...p, lat: old.lat + (p.lat - old.lat) * eased,
-            lng: ((old.lng + delta * eased + 540) % 360) - 180 };
+          const lat = old.lat + (p.lat - old.lat) * eased;
+          const lng = ((old.lng + delta * eased + 540) % 360) - 180;
+          return {
+            ...p,
+            lat: Number.isFinite(lat) ? lat : p.lat,
+            lng: Number.isFinite(lng) ? lng : p.lng,
+          };
         });
         current.current = next; setAnimated(next);
       }

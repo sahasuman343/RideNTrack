@@ -4,23 +4,38 @@ import { BufferedLocation, BufferedAlert } from '@ridentrack/shared';
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
 const uuid = (hex: string) => hex.slice(0,8) + '-' + hex.slice(8,12) + '-4' + hex.slice(13,16) + '-8' + hex.slice(17,20) + '-' + hex.slice(20);
+
+function fallbackUuid(): string {
+  const s = '0123456789abcdef';
+  let hex = '';
+  for (let i = 0; i < 32; i++) hex += s[Math.floor(Math.random() * 16)];
+  return uuid(hex);
+}
+
 async function openDatabase() {
   const db = await SQLite.openDatabaseAsync('ridentrack-queue.db');
   await db.execAsync("PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, kind TEXT NOT NULL, user_id TEXT NOT NULL, ride_id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS queue_user_kind ON queue(user_id,kind,created_at); CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
-  if (!await db.getFirstAsync("SELECT key FROM metadata WHERE key = 'legacy-migrated'")) {
-    const entries = await AsyncStorage.multiGet(['@ridentrack/location_queue', '@ridentrack/alert_queue']);
-    await db.withExclusiveTransactionAsync(async txn => {
-      for (const [key, raw] of entries) {
-        if (!raw) continue;
-        for (const item of JSON.parse(raw) as (BufferedLocation | BufferedAlert)[]) {
-          const row = await txn.getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
-          const id = typeof item.id === 'string' && /^[0-9a-f-]{36}$/i.test(item.id) ? item.id : uuid(row!.hex);
-          await txn.runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, key.includes('location') ? 'location' : 'alert', item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
+  try {
+    if (!await db.getFirstAsync("SELECT key FROM metadata WHERE key = 'legacy-migrated'")) {
+      const entries = await AsyncStorage.multiGet(['@ridentrack/location_queue', '@ridentrack/alert_queue']);
+      await db.withExclusiveTransactionAsync(async txn => {
+        for (const [key, raw] of entries) {
+          if (!raw) continue;
+          try {
+            const items = JSON.parse(raw) as (BufferedLocation | BufferedAlert)[];
+            for (const item of items) {
+              const row = await txn.getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
+              const id = typeof item.id === 'string' && /^[0-9a-f-]{36}$/i.test(item.id) ? item.id : (row?.hex ? uuid(row.hex) : fallbackUuid());
+              await txn.runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, key.includes('location') ? 'location' : 'alert', item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
+            }
+          } catch { /* Ignore corrupted legacy queue item */ }
         }
-      }
-      await txn.runAsync("INSERT OR REPLACE INTO metadata VALUES ('legacy-migrated','1')");
-    });
-    await AsyncStorage.multiRemove(entries.map(([key]) => key));
+        await txn.runAsync("INSERT OR REPLACE INTO metadata VALUES ('legacy-migrated','1')");
+      });
+      await AsyncStorage.multiRemove(entries.map(([key]) => key));
+    }
+  } catch {
+    /* If migration check encounters an error, don't block DB usage */
   }
   return db;
 }
@@ -29,8 +44,13 @@ function getDatabase() {
   return database;
 }
 export async function newQueueId() {
-  const row = await (await getDatabase()).getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
-  return uuid(row!.hex);
+  try {
+    const row = await (await getDatabase()).getFirstAsync<{ hex: string }>('SELECT lower(hex(randomblob(16))) AS hex');
+    if (row?.hex) return uuid(row.hex);
+  } catch {
+    /* fallback on random */
+  }
+  return fallbackUuid();
 }
 async function enqueue(kind: string, item: BufferedLocation | BufferedAlert) {
   const id = item.id || await newQueueId();
@@ -45,7 +65,8 @@ async function read<T>(kind: string, userId: string, limit: number): Promise<T[]
 export const getQueuedLocations = (userId: string, limit = 100) => read<BufferedLocation>('location', userId, limit);
 export const getQueuedAlerts = (userId: string) => read<BufferedAlert>('alert', userId, 100);
 export async function clearQueuedItems(userId: string, ids: string[]) {
-  if (ids.length) await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ? AND id IN (' + ids.map(() => '?').join(',') + ')', userId, ...ids);
+  const validIds = ids.filter(Boolean);
+  if (validIds.length) await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ? AND id IN (' + validIds.map(() => '?').join(',') + ')', userId, ...validIds);
 }
 export async function getQueueCounts(userId: string) {
   const rows = await (await getDatabase()).getAllAsync<{ kind: string; count: number }>('SELECT kind, count(*) AS count FROM queue WHERE user_id = ? GROUP BY kind', userId);
