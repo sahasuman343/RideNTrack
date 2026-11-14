@@ -121,7 +121,7 @@ test('lost acknowledgements retain local samples; retry is single-flight', async
   const service = loader({
     '../lib/supabase': { supabase: { auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},rpc:async()=>{calls++;return {data:ack,error:null};} } },
     '../lib/offlineQueue': {
-      getQueuedAlerts:async()=>[],getQueuedLocations:async()=>batch,
+      getQueueCounts:async()=>({locations:batch.length,alerts:0}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>batch,
       clearQueuedItems:async(user,ids)=>{assert.equal(user,'u');batch=batch.filter(p=>!ids.includes(p.id));},
     },
   })('mobile/src/services/syncQueue.ts');
@@ -141,7 +141,7 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
       rpc:async()=>({data:1,error:null}),
     }},
     '../lib/offlineQueue':{
-      getQueuedAlerts:async()=>[{id:'a',user_id:'u'}],
+      getQueueCounts:async()=>({locations:locations.length,alerts:1}),getQueuedAlerts:async()=>[{id:'a',user_id:'u'}],
       getQueuedLocations:async()=>locations,
       clearQueuedItems:async(_user,ids)=>{deleted.push(...ids);locations=[];},
     },
