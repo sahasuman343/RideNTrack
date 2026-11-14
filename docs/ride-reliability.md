@@ -1,12 +1,13 @@
 # Ride reliability and map update
 
 ## Deployment order
-1. Back up and apply migrations 001–005 in order to a staging Supabase project.
+1. Back up and apply migrations 001–006 in order to a staging Supabase project.
 2. Deploy the updated web client and mobile development builds together. Migration 005 changes the batch upload contract to require a persistent client_id; old clients should be upgraded before normal use resumes.
 3. Configure the Supabase URL, publishable/anon key, and Mapbox public token in each client.
    In Supabase Realtime Settings, disable **Allow public access** so ride Presence subscriptions must use the private-channel authorization policies from migration 005.
 4. Build native mobile apps for Mapbox and background GPS. Expo Go provides a foreground-only fallback. The existing Mapbox native download-token placeholder in app.json must be configured securely for a native build.
-5. Verify with two signed-in riders before production rollout. No production migration is applied by this pull request.
+5. Deploy the authenticated `delete-account` Edge Function. It requires the platform-provided `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and server-only `SUPABASE_SERVICE_ROLE_KEY` secrets. Keep Edge Function JWT verification enabled; never put the service-role key in a mobile or web environment variable.
+6. Verify account deletion in staging with an organizer account and a participant account before production rollout. Deleting an organizer removes that organizer's rides and their dependent participants, GPS history, and alerts. Deleting a participant preserves the ride and other riders' records. No production migration is applied by this pull request.
 
 ## Behavior
 - GPS is collected only during an active ride while sharing is enabled. Leaving the ride screen, pausing, signing out, or receiving a completed status stops collection.
@@ -37,3 +38,11 @@ The GitHub workflow also applies migrations to disposable PostgreSQL and checks 
 - End the ride from another device; connected clients stop GPS; offline clients stop after receiving the update.
 - Sign into a different account: the previous account's queue must not be uploaded or removed.
 - Web at phone and desktop widths: rider search, follow marker, fit group, offline banner, alert dismissal, keyboard controls.
+
+## Account deletion (RT-003)
+- The mobile Profile screen requires an explicit destructive confirmation before calling `delete-account`.
+- The Edge Function validates the caller's bearer JWT with Auth, revokes refresh sessions, then deletes only that authenticated user with the Auth Admin API.
+- Migration 006 cascades profile deletion into organizer-owned rides and removes the deleted user's participation, GPS records, and alerts. Ride-owned child rows are removed with the ride; other riders' records in rides they did not organize remain.
+- The app clears the deleted user's local SQLite queue only after the server confirms deletion, then signs out the local session.
+- Supabase access JWTs are stateless and remain valid until expiry even after refresh-session revocation. Keep JWT expiry appropriately short and consider session-ID checks for especially sensitive operations.
+- Before deployment, inspect Supabase Storage for objects owned by Auth users; Auth user deletion can fail while storage objects remain. This repository currently has no user-owned storage cleanup flow.
