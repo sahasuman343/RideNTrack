@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert as Dialog, Share, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
@@ -212,7 +212,22 @@ export default function LiveRideScreen() {
       <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
       {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
       {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
-      {expanded && <ScrollView style={s.riders}>{points.length === 0 && <Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}{points.map(p => <TouchableOpacity key={p.user_id} style={s.rider} onPress={() => { setFollow(false); try { camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,padding: cameraPadding,animationDuration: 700 }); } catch { /* ignore */ } }}><View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text></View><View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View><Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text></TouchableOpacity>)}</ScrollView>}
+      {expanded && <FlatList
+        data={points}
+        style={s.riders}
+        keyExtractor={item => item.user_id}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews
+        ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
+        renderItem={({ item: p }) => <TouchableOpacity style={s.rider} onPress={() => { setFollow(false); try { camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,padding: cameraPadding,animationDuration: 700 }); } catch { /* ignore */ } }}>
+          <View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text></View>
+          <View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View>
+          <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>
+        </TouchableOpacity>}
+      />}
       <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
