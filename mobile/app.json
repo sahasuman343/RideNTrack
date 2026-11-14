@@ -17,12 +17,7 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      [
-        "@rnmapbox/maps",
-        {
-          "RNMapboxMapsDownloadToken": "YOUR_MAPBOX_SECRET_TOKEN"
-        }
-      ]
+      "@rnmapbox/maps"
     ],
     "ios": {
       "supportsTablet": true,
