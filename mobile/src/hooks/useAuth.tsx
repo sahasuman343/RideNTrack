@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
+import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import type { Profile } from '@ridentrack/shared';
 import { registerAccount } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
@@ -13,6 +14,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -97,8 +99,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }
 
+  async function deleteAccount() {
+    const userId = session?.user.id;
+    if (!userId) throw new Error('You must be signed in to delete your account.');
+    await stopBackgroundLocationUpdates();
+    const { error } = await supabase.functions.invoke('delete-account', { body: {} });
+    if (error) throw new Error(error.message || 'Account deletion failed.');
+    await clearQueuedItemsForUser(userId);
+    const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+    if (signOutError) throw new Error('Account deleted, but local sign-out needs attention. Reopen the app and sign in again.');
+    setSession(null);
+    setProfile(null);
+  }
+
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );
