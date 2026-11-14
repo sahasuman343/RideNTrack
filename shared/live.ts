@@ -6,19 +6,71 @@ export interface RideObserver {
   alerts: (alerts: Alert[]) => void; connection: (status: Connection) => void;
   error: (message: string | null) => void;
 }
+
+const RECONCILE_INTERVAL_MS = 60_000;
+
 export function watchRide(client: SupabaseClient, rideId: string, userId: string, observer: RideObserver) {
-  let disposed = false, refreshing = false, connected = false, again = false;
+  let disposed = false;
+  let refreshing = false;
+  let refreshingLocations = false;
+  let refreshingAlerts = false;
+  let connected = false;
+  let refreshAgain = false;
   let points: LocationUpdate[] = [];
   let members = new Map<string, string>();
   let lastPublished: LocationUpdate | null = null;
+
   const emit = (incoming: LocationUpdate[]) => {
-    if (disposed) return;
-    points = mergeLocations(points, incoming).filter(p => members.has(p.user_id));
+    if (disposed || incoming.length === 0) return;
+    const next = mergeLocations(points, incoming).filter(p => members.has(p.user_id));
+    // Avoid waking React and the map when Presence/reconciliation repeats the
+    // exact same rider positions.
+    if (next.length === points.length && next.every(point => {
+      const old = points.find(candidate => candidate.user_id === point.user_id);
+      return old === point || (old?.timestamp === point.timestamp
+        && old.lat === point.lat && old.lng === point.lng
+        && old.speed === point.speed && old.heading === point.heading);
+    })) return;
+    points = next;
     observer.locations(points);
   };
+
+  async function refreshAlerts() {
+    if (disposed || refreshingAlerts) return;
+    refreshingAlerts = true;
+    try {
+      const { data, error } = await client.from('alerts').select('*')
+        .eq('ride_id', rideId).order('created_at', { ascending: false }).limit(100);
+      if (error) throw new Error(error.message);
+      if (disposed) return;
+      observer.alerts((data || []).map(a => ({
+        ...a,
+        display_name: members.get(a.user_id) || 'Rider',
+      })) as Alert[]);
+    } catch (e) {
+      if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to refresh ride alerts.');
+    } finally {
+      refreshingAlerts = false;
+    }
+  }
+
+  async function refreshLocations() {
+    if (disposed || refreshingLocations) return;
+    refreshingLocations = true;
+    try {
+      const { data, error } = await client.rpc('get_latest_ride_locations', { p_ride_id: rideId });
+      if (error) throw new Error(error.message);
+      if (!disposed) emit((data || []) as LocationUpdate[]);
+    } catch (e) {
+      if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to refresh rider locations.');
+    } finally {
+      refreshingLocations = false;
+    }
+  }
+
   async function refresh() {
     if (disposed) return;
-    if (refreshing) { again = true; return; }
+    if (refreshing) { refreshAgain = true; return; }
     refreshing = true;
     try {
       const [ride, names, locations, alerts] = await Promise.all([
@@ -34,9 +86,14 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       emit(locations.data as LocationUpdate[]);
       observer.alerts((alerts.data as Alert[]).map(a => ({ ...a, display_name: members.get(a.user_id) || 'Rider' })));
       observer.error(null);
-    } catch (e) { if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to load this ride.'); }
-    finally { refreshing = false; if (again) { again = false; void refresh(); } }
+    } catch (e) {
+      if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to load this ride.');
+    } finally {
+      refreshing = false;
+      if (refreshAgain) { refreshAgain = false; void refresh(); }
+    }
   }
+
   const presence = client.channel('ride:' + rideId, { config: { private: true, presence: { key: userId } } });
   presence.on('presence', { event: 'sync' }, () => {
     const incoming: LocationUpdate[] = [];
@@ -47,17 +104,24 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
     }
     emit(incoming);
   })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refresh())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refreshAlerts())
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides', filter: 'id=eq.' + rideId }, payload => {
       if (!disposed) observer.ride(payload.new as Ride);
     }).subscribe(status => {
-    if (disposed) return;
-    connected = status === 'SUBSCRIBED';
-    observer.connection(connected ? 'live' : 'reconnecting');
-    if (connected) { void refresh(); if (lastPublished) void presence.track(lastPublished); }
-  });
+      if (disposed) return;
+      connected = status === 'SUBSCRIBED';
+      observer.connection(connected ? 'live' : 'reconnecting');
+      // Reconcile once after subscribe/reconnect. The periodic fallback below
+      // only fetches locations, rather than reloading all ride metadata.
+      if (connected) {
+        void refresh();
+        if (lastPublished) void presence.track(lastPublished);
+      }
+    });
+
   void refresh();
-  const timer = setInterval(() => void refresh(), 15000);
+  const timer = setInterval(() => void refreshLocations(), RECONCILE_INTERVAL_MS);
+
   return {
     refresh,
     async publish(point: LocationUpdate) {
