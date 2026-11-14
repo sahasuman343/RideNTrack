@@ -45,4 +45,5 @@ The GitHub workflow also applies migrations to disposable PostgreSQL and checks 
 - Migration 006 cascades profile deletion into organizer-owned rides and removes the deleted user's participation, GPS records, and alerts. Ride-owned child rows are removed with the ride; other riders' records in rides they did not organize remain.
 - The app clears the deleted user's local SQLite queue only after the server confirms deletion, then signs out the local session.
 - Supabase access JWTs are stateless and remain valid until expiry even after refresh-session revocation. Keep JWT expiry appropriately short and consider session-ID checks for especially sensitive operations.
+- Deploy with `supabase functions deploy delete-account` after linking the target project. Keep the function's default JWT verification enabled. Ensure `SUPABASE_SERVICE_ROLE_KEY` is available only in the Edge Function environment; never add it to `EXPO_PUBLIC_*` or `NEXT_PUBLIC_*` variables.
 - Before deployment, inspect Supabase Storage for objects owned by Auth users; Auth user deletion can fail while storage objects remain. This repository currently has no user-owned storage cleanup flow.
