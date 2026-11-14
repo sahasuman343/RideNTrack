@@ -1,23 +1,53 @@
 import { supabase } from '../lib/supabase';
 import { getQueuedAlerts, getQueuedLocations, clearQueuedItems } from '../lib/offlineQueue';
+
 let running: Promise<void> | null = null;
+const LOCATION_BATCH_SIZE = 100;
+// Bound each pass so background sync does not monopolize the JS thread or
+// radio. The next connectivity/app-state cycle continues from the queue head.
+const MAX_LOCATION_BATCHES_PER_PASS = 5;
+
 export function syncQueue(): Promise<void> {
   if (running) return running;
   running = flush().finally(() => { running = null; });
   return running;
 }
+
 async function flush() {
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const userId = sessionRes?.data?.session?.user.id;
   if (!userId) return;
-  let alertError: string | null = null;
-  for (const alert of await getQueuedAlerts(userId)) {
-    const { error } = await supabase.from('alerts').upsert(alert, { onConflict: 'id', ignoreDuplicates: true });
-    if (error) { alertError = error.message; continue; }
-    await clearQueuedItems(userId, [alert.id]);
+
+  const alerts = await getQueuedAlerts(userId);
+  if (alerts.length) {
+    // One network round trip for the common case instead of one request per
+    // alert. If a malformed row makes the batch fail, isolate rows so a single
+    // bad alert cannot prevent valid alerts from syncing.
+    const { error } = await supabase.from('alerts').upsert(alerts, {
+      onConflict: 'id',
+      ignoreDuplicates: true,
+    });
+    if (!error) {
+      await clearQueuedItems(userId, alerts.map(alert => alert.id));
+    } else {
+      let firstError: string | null = null;
+      for (const alert of alerts) {
+        const result = await supabase.from('alerts').upsert(alert, {
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        });
+        if (result.error) {
+          firstError ||= result.error.message;
+          continue;
+        }
+        await clearQueuedItems(userId, [alert.id]);
+      }
+      if (firstError) throw new Error('Some alerts remain queued: ' + firstError);
+    }
   }
-  for (let i = 0; i < 20; i++) {
-    const batch = await getQueuedLocations(userId);
+
+  for (let i = 0; i < MAX_LOCATION_BATCHES_PER_PASS; i++) {
+    const batch = await getQueuedLocations(userId, LOCATION_BATCH_SIZE);
     if (!batch.length) break;
     const { data, error } = await supabase.rpc('bulk_insert_location_updates', {
       updates: batch.map(({ id, ...item }) => ({ ...item, client_id: id })),
@@ -26,5 +56,4 @@ async function flush() {
     if (data !== batch.length) throw new Error('Incomplete server acknowledgement. GPS data kept locally.');
     await clearQueuedItems(userId, batch.map(item => item.id!));
   }
-  if (alertError) throw new Error('Alerts saved locally; delivery failed: ' + alertError);
 }
