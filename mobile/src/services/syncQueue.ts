@@ -18,6 +18,7 @@ async function flush() {
   const userId = sessionRes?.data?.session?.user.id;
   if (!userId) return;
 
+  let alertError: string | null = null;
   const alerts = await getQueuedAlerts(userId);
   if (alerts.length) {
     // One network round trip for the common case instead of one request per
@@ -42,7 +43,7 @@ async function flush() {
         }
         await clearQueuedItems(userId, [alert.id]);
       }
-      if (firstError) throw new Error('Some alerts remain queued: ' + firstError);
+      alertError = firstError;
     }
   }
 
@@ -56,4 +57,5 @@ async function flush() {
     if (data !== batch.length) throw new Error('Incomplete server acknowledgement. GPS data kept locally.');
     await clearQueuedItems(userId, batch.map(item => item.id!));
   }
+  if (alertError) throw new Error('Some alerts remain queued: ' + alertError);
 }
