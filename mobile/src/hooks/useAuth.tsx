@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
 import type { Profile } from '@ridentrack/shared';
@@ -21,6 +21,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const activeUserId = useRef<string | null>(null);
+  const profileRequest = useRef<{ userId: string; promise: Promise<void> } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -35,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted) return;
         const currentSession = res?.data?.session ?? null;
         setSession(currentSession);
+        activeUserId.current = currentSession?.user.id ?? null;
         if (currentSession?.user) fetchProfile(currentSession.user.id);
       })
       .catch((err) => {
@@ -50,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: authData } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return;
       setSession(session);
+      activeUserId.current = session?.user.id ?? null;
       if (session?.user) fetchProfile(session.user.id);
       else { setProfile(null); void stopBackgroundLocationUpdates().catch(console.warn); }
     });
@@ -61,18 +65,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  async function fetchProfile(userId: string) {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      const current = (await supabase.auth.getSession())?.data?.session;
-      if (current?.user.id === userId) setProfile(data as Profile | null);
-    } catch (err) {
-      console.warn('Profile fetch error:', err);
-    }
+  function fetchProfile(userId: string): Promise<void> {
+    // Auth can emit INITIAL_SESSION while the startup getSession() path is
+    // still resolving. Share one profile request per user instead of issuing
+    // duplicate reads on slower devices and networks.
+    if (profileRequest.current?.userId === userId) return profileRequest.current.promise;
+    const promise = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (error) throw error;
+        if (activeUserId.current === userId) setProfile(data as Profile | null);
+      } catch (err) {
+        console.warn('Profile fetch error:', err);
+      } finally {
+        if (profileRequest.current?.promise === promise) profileRequest.current = null;
+      }
+    })();
+    profileRequest.current = { userId, promise };
+    return promise;
   }
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
@@ -85,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
     if (data?.session) {
       setSession(data.session);
+      activeUserId.current = data.user?.id ?? null;
       if (data.user) fetchProfile(data.user.id);
     }
   }
@@ -93,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await stopBackgroundLocationUpdates();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    activeUserId.current = null;
     setSession(null);
     setProfile(null);
   }
