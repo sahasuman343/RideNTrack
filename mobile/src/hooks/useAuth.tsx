@@ -70,7 +70,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // still resolving. Share one profile request per user instead of issuing
     // duplicate reads on slower devices and networks.
     if (profileRequest.current?.userId === userId) return profileRequest.current.promise;
-    const promise = (async () => {
+    let promise!: Promise<void>;
+    promise = (async () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
