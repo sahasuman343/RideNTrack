@@ -23,7 +23,7 @@ export function useOfflineSync(_rideId?: string) {
     let online = false;
     const check = () => { if (online) void flushQueue(); else void updateCounts().catch(() => setSyncError('Could not read device storage.')); };
     const unsubscribe = NetInfo.addEventListener(state => { online = Boolean(state.isConnected && state.isInternetReachable !== false); setIsOnline(online); check(); });
-    const timer = setInterval(check, 10000);
+    const timer = setInterval(check, 30000);
     const app = AppState.addEventListener('change', state => { if (state === 'active') check(); });
     return () => { unsubscribe(); clearInterval(timer); app.remove(); };
   }, [flushQueue, updateCounts]);
