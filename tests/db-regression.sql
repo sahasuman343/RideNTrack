@@ -86,12 +86,12 @@ RESET ROLE;
 
 -- RT-003: deleting a participant preserves a ride and other riders' records.
 DELETE FROM auth.users WHERE id = '22222222-2222-4222-8222-222222222222';
-DO $ BEGIN
+DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') THEN RAISE EXCEPTION 'participant deletion removed a ride they did not organize'; END IF;
   IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' AND user_id = '11111111-1111-4111-8111-111111111111') THEN RAISE EXCEPTION 'participant deletion removed the organizer'; END IF;
   IF EXISTS (SELECT 1 FROM public.location_updates WHERE user_id = '22222222-2222-4222-8222-222222222222') THEN RAISE EXCEPTION 'participant GPS history remains'; END IF;
   IF EXISTS (SELECT 1 FROM public.alerts WHERE user_id = '22222222-2222-4222-8222-222222222222') THEN RAISE EXCEPTION 'participant alerts remain'; END IF;
-END $;
+END $$;
 
 -- RT-003: deleting an Auth user removes owned rides and the user's dependent rows.
 DELETE FROM auth.users WHERE id = '11111111-1111-4111-8111-111111111111';
