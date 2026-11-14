@@ -80,8 +80,9 @@ Execute the SQL migration scripts in your **Supabase SQL Editor** in the followi
 
 4. `supabase/migrations/004_fix_rls_recursion.sql` — Non-recursive membership policies.
 5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.
+6. `supabase/migrations/006_account_deletion.sql` — Cascading account deletion for organizer-owned rides and the user's participant, GPS, and alert records.
 
-See [deployment and device checks](docs/ride-reliability.md) before updating existing installations.
+Deploy the authenticated `delete-account` Edge Function from `supabase/functions/delete-account` with `SUPABASE_SERVICE_ROLE_KEY` configured as a server-side secret. See [deployment and device checks](docs/ride-reliability.md) before updating existing installations.
 
 > [!TIP]
 > **Disable "Confirm Email" for Development / Avoid Rate Limits:**
