@@ -96,8 +96,15 @@ export function startBackgroundLocationUpdates(params: Params): Promise<{ isBack
         const isAvailable = typeof Location.isBackgroundLocationAvailableAsync === 'function'
           ? await Location.isBackgroundLocationAvailableAsync()
           : false;
-        if (isAvailable && typeof Location.getBackgroundPermissionsAsync === 'function') {
-          const bgStatus = await Location.getBackgroundPermissionsAsync();
+        if (isAvailable && typeof Location.getBackgroundPermissionsAsync === 'function'
+          && typeof Location.requestBackgroundPermissionsAsync === 'function') {
+          let bgStatus = await Location.getBackgroundPermissionsAsync();
+          // Request the additional permission only after foreground access has
+          // been granted. Without it, Android/iOS can only track while the app
+          // remains in the foreground.
+          if (bgStatus?.status !== 'granted') {
+            bgStatus = await Location.requestBackgroundPermissionsAsync();
+          }
           background = bgStatus?.status === 'granted';
         }
       } catch {

@@ -180,3 +180,40 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
   assert.deepEqual(published,[]);
   await service.stopBackgroundLocationUpdates();
 });
+
+test('background tracking waits for the additional permission before starting native updates', async () => {
+  const storage = new Map();
+  let requested = 0, started = 0, resolvePermission;
+  const permissionResult = new Promise(resolve => { resolvePermission = resolve; });
+  const service = loader({
+    'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
+    'expo-task-manager': { isTaskDefined:()=>true },
+    'expo-location': {
+      Accuracy:{High:4},
+      requestForegroundPermissionsAsync:async()=>({status:'granted'}),
+      isBackgroundLocationAvailableAsync:async()=>true,
+      getBackgroundPermissionsAsync:async()=>({status:'undetermined'}),
+      requestBackgroundPermissionsAsync:()=>{requested++;return permissionResult;},
+      hasStartedLocationUpdatesAsync:async()=>false,
+      startLocationUpdatesAsync:async()=>{started++;},
+      stopLocationUpdatesAsync:async()=>{},
+    },
+    '@react-native-async-storage/async-storage': {
+      getItem:async key=>storage.get(key)||null,
+      setItem:async(key,value)=>{storage.set(key,value);},
+      removeItem:async key=>{storage.delete(key);},
+    },
+    '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
+    '../lib/offlineQueue':{enqueueLocation:async()=>{}},
+    './syncQueue':{syncQueue:async()=>{}},
+  })('mobile/src/services/backgroundLocation.ts');
+  const starting = service.startBackgroundLocationUpdates({rideId:'ride',userId:'u',displayName:'Rider'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requested,1);
+  assert.equal(started,0);
+  resolvePermission({status:'granted'});
+  const result = await starting;
+  assert.equal(started,1);
+  assert.equal(result.isBackgroundEnabled,true);
+  await service.stopBackgroundLocationUpdates();
+});
