@@ -105,9 +105,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await stopBackgroundLocationUpdates();
     const { error } = await supabase.functions.invoke('delete-account', { body: {} });
     if (error) throw new Error(error.message || 'Account deletion failed.');
-    await clearQueuedItemsForUser(userId);
-    const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
-    if (signOutError) throw new Error('Account deleted, but local sign-out needs attention. Reopen the app and sign in again.');
+    await clearQueuedItemsForUser(userId).catch(error => console.warn('Could not clear deleted account queue:', error));
+    // The Edge Function has already revoked refresh sessions and deleted the
+    // Auth user. Clear local credentials even if the best-effort server logout
+    // now returns an expected 401 for that deleted account.
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     setSession(null);
     setProfile(null);
   }
