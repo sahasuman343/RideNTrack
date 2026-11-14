@@ -1,9 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../../src/hooks/useAuth';
 
 export default function ProfileScreen() {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, deleteAccount } = useAuth();
+  const [deleting, setDeleting] = useState(false);
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Permanently delete account?',
+      'This cannot be undone. Your profile, all rides you organized, your participation in other rides, GPS history, alerts, and this account’s refreshable sessions will be deleted. Other riders’ data in rides you did not organize will remain.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete account', style: 'destructive', onPress: () => {
+          setDeleting(true);
+          void deleteAccount()
+            .then(() => Alert.alert('Account deleted', 'Your RideNTrack account and associated data have been permanently deleted.'))
+            .catch(error => Alert.alert('Deletion failed', error instanceof Error ? error.message : 'Please try again.'))
+            .finally(() => setDeleting(false));
+        } },
+      ],
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -22,6 +40,14 @@ export default function ProfileScreen() {
           <Text style={styles.infoLabel}>Emergency Contact</Text>
           <Text style={styles.infoValue}>{profile?.emergency_contact || 'Not set'}</Text>
         </View>
+      </View>
+
+      <View style={styles.dangerInfo}>
+        <Text style={styles.dangerTitle}>Delete account</Text>
+        <Text style={styles.dangerDescription}>Permanently remove your account and associated RideNTrack data. Rides you organized will also be deleted for all participants.</Text>
+        <TouchableOpacity accessibilityRole="button" disabled={deleting} style={[styles.deleteButton, deleting && styles.disabled]} onPress={confirmDeleteAccount}>
+          <Text style={styles.deleteText}>{deleting ? 'Deleting account…' : 'Permanently delete account'}</Text>
+        </TouchableOpacity>
       </View>
 
       <TouchableOpacity style={styles.logoutButton} onPress={() => void signOut().catch(e => Alert.alert('Sign out failed', e.message))}>
@@ -63,4 +89,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoutText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  dangerInfo: { width: '100%', marginTop: 28, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#6b3038', backgroundColor: '#241c30' },
+  dangerTitle: { color: '#ffaaa3', fontSize: 16, fontWeight: '700' },
+  dangerDescription: { color: '#c6b6b8', fontSize: 12, lineHeight: 18, marginTop: 6 },
+  deleteButton: { marginTop: 14, borderRadius: 10, padding: 14, alignItems: 'center', backgroundColor: '#7f2e36' },
+  deleteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  disabled: { opacity: 0.55 },
 });
