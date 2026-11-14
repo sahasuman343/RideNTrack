@@ -83,3 +83,13 @@ DO $$ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;
+
+-- RT-003: deleting an Auth user removes owned rides and the user's dependent rows.
+DELETE FROM auth.users WHERE id = '11111111-1111-4111-8111-111111111111';
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = '11111111-1111-4111-8111-111111111111') THEN RAISE EXCEPTION 'deleted user's profile remains'; END IF;
+  IF EXISTS (SELECT 1 FROM public.rides WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') THEN RAISE EXCEPTION 'organizer-owned ride remains after account deletion'; END IF;
+  IF EXISTS (SELECT 1 FROM public.ride_participants WHERE user_id = '11111111-1111-4111-8111-111111111111') THEN RAISE EXCEPTION 'deleted user's ride participation remains'; END IF;
+  IF EXISTS (SELECT 1 FROM public.location_updates WHERE user_id = '22222222-2222-4222-8222-222222222222') THEN RAISE EXCEPTION 'GPS history from deleted organizer ride remains'; END IF;
+  IF EXISTS (SELECT 1 FROM public.alerts WHERE ride_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') THEN RAISE EXCEPTION 'alerts from deleted organizer ride remain'; END IF;
+END $$;
