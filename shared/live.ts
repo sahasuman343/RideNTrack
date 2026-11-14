@@ -58,9 +58,16 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
     if (disposed || refreshingLocations) return;
     refreshingLocations = true;
     try {
-      const { data, error } = await client.rpc('get_latest_ride_locations', { p_ride_id: rideId });
-      if (error) throw new Error(error.message);
-      if (!disposed) emit((data || []) as LocationUpdate[]);
+      const [names, locations] = await Promise.all([
+        client.rpc('get_ride_members', { p_ride_id: rideId }),
+        client.rpc('get_latest_ride_locations', { p_ride_id: rideId }),
+      ]);
+      if (names.error) throw new Error(names.error.message);
+      if (locations.error) throw new Error(locations.error.message);
+      if (!disposed) {
+        members = new Map((names.data as { user_id: string; display_name: string }[]).map(p => [p.user_id, p.display_name]));
+        emit((locations.data || []) as LocationUpdate[]);
+      }
     } catch (e) {
       if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to refresh rider locations.');
     } finally {
