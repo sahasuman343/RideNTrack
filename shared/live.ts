@@ -15,7 +15,6 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   let refreshingLocations = false;
   let refreshingAlerts = false;
   let connected = false;
-  let refreshAgain = false;
   let points: LocationUpdate[] = [];
   let members = new Map<string, string>();
   let lastPublished: LocationUpdate | null = null;
@@ -79,7 +78,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
 
   async function refresh() {
     if (disposed) return;
-    if (refreshing) { refreshAgain = true; return; }
+    if (refreshing) return;
     refreshing = true;
     try {
       const [ride, names, locations, alerts] = await Promise.all([
@@ -99,7 +98,6 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to load this ride.');
     } finally {
       refreshing = false;
-      if (refreshAgain) { refreshAgain = false; void refresh(); }
     }
   }
 
