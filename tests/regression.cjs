@@ -146,7 +146,7 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
       clearQueuedItems:async(_user,ids)=>{deleted.push(...ids);locations=[];},
     },
   })('mobile/src/services/syncQueue.ts');
-  await assert.rejects(service.syncQueue(),/Alerts saved locally/);
+  await assert.rejects(service.syncQueue(),/Some alerts remain queued/);
   assert.deepEqual(deleted,['l']);
 });
 test('an in-flight GPS save cannot publish through the next ride callback', async () => {
