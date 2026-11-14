@@ -181,9 +181,10 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
   await service.stopBackgroundLocationUpdates();
 });
 
-test('background tracking requests the additional permission before starting native updates', async () => {
+test('background tracking waits for the additional permission before starting native updates', async () => {
   const storage = new Map();
-  let requested = 0, started = 0;
+  let requested = 0, started = 0, resolvePermission;
+  const permissionResult = new Promise(resolve => { resolvePermission = resolve; });
   const service = loader({
     'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
     'expo-task-manager': { isTaskDefined:()=>true },
@@ -192,7 +193,7 @@ test('background tracking requests the additional permission before starting nat
       requestForegroundPermissionsAsync:async()=>({status:'granted'}),
       isBackgroundLocationAvailableAsync:async()=>true,
       getBackgroundPermissionsAsync:async()=>({status:'undetermined'}),
-      requestBackgroundPermissionsAsync:async()=>{requested++;return {status:'granted'};},
+      requestBackgroundPermissionsAsync:()=>{requested++;return permissionResult;},
       hasStartedLocationUpdatesAsync:async()=>false,
       startLocationUpdatesAsync:async()=>{started++;},
       stopLocationUpdatesAsync:async()=>{},
@@ -206,8 +207,12 @@ test('background tracking requests the additional permission before starting nat
     '../lib/offlineQueue':{enqueueLocation:async()=>{}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
-  const result = await service.startBackgroundLocationUpdates({rideId:'ride',userId:'u',displayName:'Rider'});
+  const starting = service.startBackgroundLocationUpdates({rideId:'ride',userId:'u',displayName:'Rider'});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(requested,1);
+  assert.equal(started,0);
+  resolvePermission({status:'granted'});
+  const result = await starting;
   assert.equal(started,1);
   assert.equal(result.isBackgroundEnabled,true);
   await service.stopBackgroundLocationUpdates();
