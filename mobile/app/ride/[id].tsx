@@ -104,7 +104,7 @@ export default function LiveRideScreen() {
     if (!ride || !Array.isArray(ride.origin_coords) || !Array.isArray(ride.destination_coords) || !MAPBOX_TOKEN) return;
     const controller = new AbortController();
     const load = async () => {
-      const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + ride.origin_coords.join(',') + ';' + ride.destination_coords.join(',') + '?geometries=geojson&overview=full&access_token=' + MAPBOX_TOKEN, { signal: controller.signal });
+      const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + ride.origin_coords.join(',') + ';' + ride.destination_coords.join(',') + '?geometries=geojson&overview=simplified&access_token=' + MAPBOX_TOKEN, { signal: controller.signal });
       if (!response.ok) throw new Error('Route unavailable. Rider positions still work.');
       const data = await response.json();
       if (!data.routes?.[0]) throw new Error('No driving route found.');
