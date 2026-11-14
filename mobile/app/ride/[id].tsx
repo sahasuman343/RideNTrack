@@ -7,7 +7,6 @@ import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale }
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
-import { useAnimatedLocations } from '../../src/hooks/useAnimatedLocations';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
@@ -49,7 +48,9 @@ export default function LiveRideScreen() {
   const active = ride?.status === 'active';
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
-  const animated = useAnimatedLocations(points);
+  // Keep map input tied to actual GPS samples. Per-frame JS marker animation
+  // repeatedly rebuilds GeoJSON and is costly on entry-level Android devices.
+  const animated = points;
   const features = useMemo(() => ({
     type: 'FeatureCollection' as const,
     features: animated
@@ -65,7 +66,7 @@ export default function LiveRideScreen() {
       })),
   }), [animated, userId, now]);
   const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()),5000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()),15000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     if (!active || !sharing || !userId) {
       setTracking('paused');
