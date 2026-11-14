@@ -18,7 +18,13 @@ export function useOfflineSync(_rideId?: string) {
   }, [userId]);
   const flushQueue = useCallback(async () => {
     if (!userId) return;
-    const pending = await getQueueCounts(userId);
+    let pending: { locations: number; alerts: number };
+    try {
+      pending = await getQueueCounts(userId);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : 'Could not read device storage.');
+      return;
+    }
     setCounts(previous => previous.locations === pending.locations && previous.alerts === pending.alerts ? previous : pending);
     if (pending.locations === 0 && pending.alerts === 0) {
       setSyncError(null);
