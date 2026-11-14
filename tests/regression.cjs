@@ -180,3 +180,35 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
   assert.deepEqual(published,[]);
   await service.stopBackgroundLocationUpdates();
 });
+
+test('background tracking requests the additional permission before starting native updates', async () => {
+  const storage = new Map();
+  let requested = 0, started = 0;
+  const service = loader({
+    'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
+    'expo-task-manager': { isTaskDefined:()=>true },
+    'expo-location': {
+      Accuracy:{High:4},
+      requestForegroundPermissionsAsync:async()=>({status:'granted'}),
+      isBackgroundLocationAvailableAsync:async()=>true,
+      getBackgroundPermissionsAsync:async()=>({status:'undetermined'}),
+      requestBackgroundPermissionsAsync:async()=>{requested++;return {status:'granted'};},
+      hasStartedLocationUpdatesAsync:async()=>false,
+      startLocationUpdatesAsync:async()=>{started++;},
+      stopLocationUpdatesAsync:async()=>{},
+    },
+    '@react-native-async-storage/async-storage': {
+      getItem:async key=>storage.get(key)||null,
+      setItem:async(key,value)=>{storage.set(key,value);},
+      removeItem:async key=>{storage.delete(key);},
+    },
+    '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
+    '../lib/offlineQueue':{enqueueLocation:async()=>{}},
+    './syncQueue':{syncQueue:async()=>{}},
+  })('mobile/src/services/backgroundLocation.ts');
+  const result = await service.startBackgroundLocationUpdates({rideId:'ride',userId:'u',displayName:'Rider'});
+  assert.equal(requested,1);
+  assert.equal(started,1);
+  assert.equal(result.isBackgroundEnabled,true);
+  await service.stopBackgroundLocationUpdates();
+});
