@@ -17,6 +17,9 @@ interface Params extends Context {
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
 let generation = 0, lastSync = 0;
+const GPS_INTERVAL_MS = 5000;
+const GPS_DISTANCE_METERS = 15;
+const QUEUE_SYNC_INTERVAL_MS = 30000;
 let operations: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
@@ -68,7 +71,7 @@ async function record(locations: Location.LocationObject[]) {
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});
   }
-  if (Date.now() - lastSync > 10000) {
+  if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
     void (async () => {
       await syncQueue();
@@ -119,7 +122,7 @@ export function startBackgroundLocationUpdates(params: Params): Promise<{ isBack
       try {
         if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK))
           await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-            accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10,
+            accuracy: Location.Accuracy.High, timeInterval: GPS_INTERVAL_MS, distanceInterval: GPS_DISTANCE_METERS,
             pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true,
             foregroundService: { notificationTitle: 'RideNTrack · Sharing location',
               notificationBody: 'Your group can see your position.', notificationColor: '#FF6B00' },
@@ -128,7 +131,7 @@ export function startBackgroundLocationUpdates(params: Params): Promise<{ isBack
       } catch { /* Foreground tracking remains useful if a native background start fails. */ }
     }
     try {
-      fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
+      fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: GPS_INTERVAL_MS, distanceInterval: GPS_DISTANCE_METERS },
         location => { void record([location]).catch(e => params.onError?.(e.message)); });
     } catch (e) {
       params.onError?.(e instanceof Error ? e.message : 'Unable to start foreground location tracker.');
