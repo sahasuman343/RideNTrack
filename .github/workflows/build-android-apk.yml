@@ -1,0 +1,118 @@
+name: Build Android preview APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ridentrack-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate selected branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: TypeScript checks
+        run: npm run typecheck
+      - name: Regression tests
+        run: npm test
+      - name: Web lint
+        run: npm run lint
+
+  build:
+    name: Approved EAS APK build
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment:
+      name: apk-approval
+    steps:
+      - name: Check out the exact selected commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install EAS CLI
+        run: npm install --global eas-cli
+      - name: Inject Mapbox native download token
+        working-directory: mobile
+        env:
+          MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+        run: |
+          if [ -z "$MAPBOX_DOWNLOADS_TOKEN" ]; then
+            echo "::error::Configure MAPBOX_DOWNLOADS_TOKEN as a GitHub Actions secret."
+            exit 1
+          fi
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'app.json';
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const mapbox = config.expo.plugins.find(
+            (plugin) => Array.isArray(plugin) && plugin[0] === '@rnmapbox/maps'
+          );
+          if (!mapbox) throw new Error('Mapbox config plugin not found in mobile/app.json');
+          mapbox[1] ??= {};
+          mapbox[1].RNMapboxMapsDownloadToken = process.env.MAPBOX_DOWNLOADS_TOKEN;
+          fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
+          NODE
+      - name: Start Android APK build on EAS
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Configure EXPO_TOKEN as a GitHub Actions secret."
+            exit 1
+          fi
+          eas build --platform android --profile preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+      - name: Download APK from this EAS build
+        working-directory: mobile
+        run: |
+          BUILD_ID="$(node -e "
+            const fs = require('node:fs');
+            const value = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/eas-build.json', 'utf8'));
+            const build = Array.isArray(value) ? value[0] : value;
+            const id = build?.id ?? build?.build?.id;
+            if (!id) throw new Error('EAS CLI did not return a build ID');
+            process.stdout.write(id);
+          ")"
+          echo "EAS_BUILD_ID=$BUILD_ID" >> "$GITHUB_ENV"
+          eas build:download "$BUILD_ID" --path "$GITHUB_WORKSPACE/RideNTrack-preview.apk" --non-interactive
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RideNTrack-android-apk-${{ github.sha }}
+          path: RideNTrack-preview.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish build details
+        if: always()
+        run: |
+          {
+            echo "## RideNTrack Android preview build"
+            echo
+            echo "- **Branch:** \`${GITHUB_REF_NAME}\`"
+            echo "- **Commit:** \`${GITHUB_SHA}\`"
+            echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
+            echo "- **Profile:** \`preview\` (APK)"
+            echo
+            echo "Download the APK from this workflow run's **Artifacts** section."
+          } >> "$GITHUB_STEP_SUMMARY"
