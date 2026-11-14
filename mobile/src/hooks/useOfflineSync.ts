@@ -11,9 +11,19 @@ export function useOfflineSync(_rideId?: string) {
   const [counts, setCounts] = useState({ locations: 0, alerts: 0 });
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const updateCounts = useCallback(async () => { if (userId) setCounts(await getQueueCounts(userId)); }, [userId]);
+  const updateCounts = useCallback(async () => {
+    if (!userId) return;
+    const next = await getQueueCounts(userId);
+    setCounts(previous => previous.locations === next.locations && previous.alerts === next.alerts ? previous : next);
+  }, [userId]);
   const flushQueue = useCallback(async () => {
     if (!userId) return;
+    const pending = await getQueueCounts(userId);
+    setCounts(previous => previous.locations === pending.locations && previous.alerts === pending.alerts ? previous : pending);
+    if (pending.locations === 0 && pending.alerts === 0) {
+      setSyncError(null);
+      return;
+    }
     setIsSyncing(true);
     try { await syncQueue(); setSyncError(null); }
     catch (e) { setSyncError(e instanceof Error ? e.message : 'Upload failed; saved locally.'); }
