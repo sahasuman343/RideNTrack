@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { getQueuedAlerts, getQueuedLocations, clearQueuedItems } from '../lib/offlineQueue';
+import { getQueueCounts, getQueuedAlerts, getQueuedLocations, clearQueuedItems } from '../lib/offlineQueue';
 
 let running: Promise<void> | null = null;
 const LOCATION_BATCH_SIZE = 100;
@@ -17,6 +17,8 @@ async function flush() {
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const userId = sessionRes?.data?.session?.user.id;
   if (!userId) return;
+  const counts = await getQueueCounts(userId);
+  if (counts.locations === 0 && counts.alerts === 0) return;
 
   let alertError: string | null = null;
   const alerts = await getQueuedAlerts(userId);
