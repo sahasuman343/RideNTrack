@@ -25,8 +25,9 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
     const next = mergeLocations(points, incoming).filter(p => members.has(p.user_id));
     // Avoid waking React and the map when Presence/reconciliation repeats the
     // exact same rider positions.
+    const previousById = new Map(points.map(point => [point.user_id, point]));
     if (next.length === points.length && next.every(point => {
-      const old = points.find(candidate => candidate.user_id === point.user_id);
+      const old = previousById.get(point.user_id);
       return old === point || (old?.timestamp === point.timestamp
         && old.lat === point.lat && old.lng === point.lng
         && old.speed === point.speed && old.heading === point.heading);
@@ -67,6 +68,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       if (!disposed) {
         members = new Map((names.data as { user_id: string; display_name: string }[]).map(p => [p.user_id, p.display_name]));
         emit((locations.data || []) as LocationUpdate[]);
+        observer.error(null);
       }
     } catch (e) {
       if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to refresh rider locations.');
