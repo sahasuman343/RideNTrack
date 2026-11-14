@@ -12,11 +12,12 @@
 - GPS is collected only during an active ride while sharing is enabled. Leaving the ride screen, pausing, signing out, or receiving a completed status stops collection.
 - The active ride context is persisted for OS background task callbacks. OS force-stop and vendor battery restrictions can still stop tracking.
 - SQLite stores queued events atomically and migrates old AsyncStorage queues once. Events are scoped to the signed-in account. There is no silent 2,000-point truncation.
-- Uploads run on reconnect, foreground resume, every ten seconds while the screen is mounted, and from GPS background callbacks. Failures retain the local events and are shown in the UI.
+- GPS uses high-accuracy fixes with a 5-second time interval and 15-metre distance threshold. These are starting values to validate on physical devices, not a guarantee that Android delivers fixes at an exact cadence.
+- Uploads run on reconnect, foreground resume, every 30 seconds while the screen is mounted, and from GPS background callbacks. Alerts are batch-upserted; each location sync pass is capped at five batches of up to 100 records to bound background work. Failures retain local events and are shown in the UI.
 - Location uploads and alerts use stable IDs. Repeated delivery is safe.
 - Alerts are read from the database and refreshed after reconnect. No ephemeral broadcast is needed for delivery.
-- Private Presence channels provide live updates; periodic database snapshots recover missed data. Names come from a restricted membership RPC, not public profile records.
-- Maps retain last-known positions, mark fixes older than 30 seconds as stale, animate movement, and let users pan freely. Follow and fit-group controls are explicit.
+- Private Presence channels provide live updates; an initial/reconnect snapshot and a 60-second member/location reconciliation recover missed data. Alert changes refresh only alerts instead of reloading all ride metadata. Names come from a restricted membership RPC, not public profile records.
+- Mobile maps retain last-known positions, mark fixes older than 30 seconds as stale, and update from GPS samples without per-frame JavaScript marker animation. Route requests use simplified geometry to reduce payload and native map-source work. Follow and fit-group controls are explicit.
 - Camera padding follows the mobile panel height so selected riders remain visible. Web map gestures release follow mode; changing ride URLs resets ride-specific state.
 
 ## Verification
@@ -37,3 +38,17 @@ The GitHub workflow also applies migrations to disposable PostgreSQL and checks 
 - End the ride from another device; connected clients stop GPS; offline clients stop after receiving the update.
 - Sign into a different account: the previous account's queue must not be uploaded or removed.
 - Web at phone and desktop widths: rider search, follow marker, fit group, offline banner, alert dismissal, keyboard controls.
+
+
+## Low-end Android performance validation
+The optimization branch targets entry-level Android devices with 2–3 GB RAM. This is a test target, not a verified compatibility claim until physical-device measurements are recorded.
+
+Run the same 3–4 hour ride scenario on an entry-level device and a 6–8 GB reference device:
+- Keep the screen locked for at least 75% of the ride; confirm the OS location indicator and background service remain active.
+- Test 1, 5, 20 and 50 riders; record map responsiveness, dropped frames, memory growth and crash/ANR events.
+- Repeat with strong network, intermittent connectivity and a 10-minute offline period; verify queued GPS points and alerts drain without duplicates after reconnect.
+- Record battery percentage at start/end, device model, Android version, screen state, GPS interval, network condition and ride duration.
+- Capture Android Studio/Perfetto memory and frame-time traces. Compare median and p95 JS/UI frame time, peak and post-GC memory, network request count and battery drain per hour.
+- Treat the optimization as accepted only if tracking reliability is unchanged and the low-end device shows lower CPU/network work without sustained memory growth or UI stalls.
+
+Do not use emulator-only results as evidence of low-end device compatibility. Background location and vendor battery-management behavior must be checked on physical hardware.
