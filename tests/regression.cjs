@@ -183,7 +183,7 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
 
 test('background tracking waits for the additional permission before starting native updates', async () => {
   const storage = new Map();
-  let requested = 0, started = 0, resolvePermission;
+  let requested = 0, started = 0, startedOptions, resolvePermission;
   const permissionResult = new Promise(resolve => { resolvePermission = resolve; });
   const service = loader({
     'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
@@ -195,7 +195,7 @@ test('background tracking waits for the additional permission before starting na
       getBackgroundPermissionsAsync:async()=>({status:'undetermined'}),
       requestBackgroundPermissionsAsync:()=>{requested++;return permissionResult;},
       hasStartedLocationUpdatesAsync:async()=>false,
-      startLocationUpdatesAsync:async()=>{started++;},
+      startLocationUpdatesAsync:async(_task,options)=>{started++;startedOptions=options;},
       stopLocationUpdatesAsync:async()=>{},
     },
     '@react-native-async-storage/async-storage': {
@@ -214,6 +214,8 @@ test('background tracking waits for the additional permission before starting na
   resolvePermission({status:'granted'});
   const result = await starting;
   assert.equal(started,1);
+  assert.equal(startedOptions.timeInterval,5000);
+  assert.equal(startedOptions.distanceInterval,15);
   assert.equal(result.isBackgroundEnabled,true);
   await service.stopBackgroundLocationUpdates();
 });
