@@ -11,8 +11,8 @@ This document is the implementation source of truth. Each phase should be delive
 - [x] Itinerary edit/reorder and multiple stays (transactional RPCs, admin UI and database regression coverage).
 
 ## Phase 2 — Group Ride Control Center
-- [ ] Trip invitations with expiry and acceptance state.
-- [ ] Participant roles: leader, sweep, rider.
+- [x] Trip invitations with expiry and acceptance state (migration 009, token-based acceptance and targeted-email checks).
+- [x] Participant roles: leader, sweep, rider (admin leader bootstrap, sweep/rider assignment and roster RPC).
 - [ ] Live/stale/offline rider status.
 - [ ] Configurable route-deviation and rider-behind alerts.
 - [ ] Regroup points and arrival confirmation.
