@@ -86,7 +86,7 @@ BEGIN
   IF v_inv.status <> 'pending' THEN RAISE EXCEPTION 'Invitation is no longer pending'; END IF;
   IF v_inv.expires_at <= now() THEN
     UPDATE public.trip_invitations SET status='expired' WHERE id=v_inv.id;
-    RAISE EXCEPTION 'Invitation has expired';
+    RETURN NULL;
   END IF;
   IF v_inv.invited_email IS NOT NULL AND v_inv.invited_email IS DISTINCT FROM v_email THEN
     RAISE EXCEPTION 'This invitation was sent to a different email address' USING ERRCODE='42501';
