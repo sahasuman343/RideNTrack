@@ -32,11 +32,11 @@ A rider can create a multi-day motorcycle trip with a route, ordered places, iti
 The RPC is transactional. Any invalid child record or failed insert rolls back the parent trip and every child record. The client should display the RPC error and allow retry.
 
 ## Acceptance criteria
-- [ ] A valid trip creates its parent and all supplied child rows.
-- [ ] A failure in any child insert leaves no parent or child rows.
-- [ ] The authenticated caller becomes the trip admin and participant through the existing trigger.
-- [ ] Waypoint order is preserved.
-- [ ] Day and stay relationships are valid.
+- [x] A valid trip creates its parent and all supplied child rows (database regression test added).
+- [x] A failure in any child insert leaves no parent or child rows (rollback regression test added).
+- [x] The authenticated caller becomes the trip admin and participant through the existing trigger (asserted in database regression test).
+- [x] Waypoint order is preserved by the sequence field.
+- [x] Day and stay relationships are valid; waypoints can reference a trip day.
 - [ ] Invalid date ranges and invalid prices are rejected.
 - [ ] Existing live ride tracking remains compatible.
 
