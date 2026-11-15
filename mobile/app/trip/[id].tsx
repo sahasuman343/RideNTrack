@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Linking, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
+import { useAuth } from '../../src/hooks/useAuth';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
@@ -9,20 +10,29 @@ type Trip = {
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
   ride_code: string; admin_id: string;
 };
-type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; notes?: string };
+type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
-type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number };
+type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   const [trip, setTrip] = useState<Trip | null>(null);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [stayName, setStayName] = useState('');
+  const [stayAddress, setStayAddress] = useState('');
+  const [stayDay, setStayDay] = useState('1');
+  const [stayCheckIn, setStayCheckIn] = useState('');
+  const [stayCheckOut, setStayCheckOut] = useState('');
+  const [stayPrice, setStayPrice] = useState('');
 
+  const isAdmin = !!user && trip?.admin_id === user.id;
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true); setError('');
@@ -51,6 +61,61 @@ export default function TripWorkspaceScreen() {
     const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(point.latitude + ',' + point.longitude);
     await Linking.openURL(url);
   }
+  function moveWaypoint(index: number, offset: number) {
+    const target = index + offset;
+    if (target < 0 || target >= waypoints.length) return;
+    setWaypoints(current => {
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next.map((point, sequence) => ({ ...point, sequence }));
+    });
+  }
+  function assignWaypointDay(pointId: string, dayNumber: number | null) {
+    const dayId = days.find(day => day.day_number === dayNumber)?.id || null;
+    setWaypoints(current => current.map(point => point.id === pointId ? { ...point, trip_day_id: dayId } : point));
+  }
+  async function saveItinerary() {
+    setSaving(true); setError('');
+    try {
+      const payload = waypoints.map((point, sequence) => ({
+        id: point.id, sequence,
+        day_number: days.find(day => day.id === point.trip_day_id)?.day_number ?? null,
+      }));
+      const { error: saveError } = await supabase.rpc('save_trip_itinerary', { p_ride_id: id, p_waypoints: payload });
+      if (saveError) throw saveError;
+      await load();
+      Alert.alert('Itinerary saved', 'Stop order and day assignments have been updated.');
+    } catch (e: any) { setError(e?.message || 'Could not save itinerary.'); }
+    finally { setSaving(false); }
+  }
+  async function addStay() {
+    if (!stayName.trim()) { Alert.alert('Stay name required', 'Enter the accommodation name.'); return; }
+    if (stayPrice.trim() && (!Number.isFinite(Number(stayPrice)) || Number(stayPrice) < 0)) {
+      Alert.alert('Invalid price', 'Enter a non-negative amount.'); return;
+    }
+    if (stayCheckIn && stayCheckOut && stayCheckOut < stayCheckIn) {
+      Alert.alert('Invalid dates', 'Check-out must be on or after check-in.'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      const { error: addError } = await supabase.rpc('add_trip_stay', {
+        p_ride_id: id,
+        p_stay: {
+          name: stayName.trim(), address: stayAddress.trim() || null,
+          day_number: stayDay ? Number(stayDay) : null,
+          check_in: stayCheckIn || null, check_out: stayCheckOut || null,
+          price_amount: stayPrice ? Number(stayPrice) : null, price_currency: 'INR',
+          stay_type: 'hotel',
+        },
+      });
+      if (addError) throw addError;
+      setStayName(''); setStayAddress(''); setStayCheckIn(''); setStayCheckOut(''); setStayPrice('');
+      await load();
+      Alert.alert('Accommodation added', 'The stay has been added to this trip.');
+    } catch (e: any) { setError(e?.message || 'Could not add accommodation.'); }
+    finally { setSaving(false); }
+  }
+
   const distance = trip?.estimated_distance_meters ? (trip.estimated_distance_meters / 1000).toFixed(0) + ' km' : 'Pending';
   const duration = trip?.estimated_duration_seconds ? Math.round(trip.estimated_duration_seconds / 3600) + ' hr map estimate' : 'Pending';
 
@@ -58,21 +123,18 @@ export default function TripWorkspaceScreen() {
   if (!trip) return <View style={styles.center}><Text style={styles.title}>Trip unavailable</Text><Text style={styles.muted}>{error || 'You may not have access to this trip.'}</Text><TouchableOpacity onPress={() => router.back()}><Text style={styles.link}>Go back</Text></TouchableOpacity></View>;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor="#ff8a32" />}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor="#ff8a32" />}>
       <Text style={styles.eyebrow}>TRIP WORKSPACE · {trip.status.toUpperCase()}</Text>
       <Text style={styles.title}>{trip.name}</Text>
       {!!trip.description && <Text style={styles.muted}>{trip.description}</Text>}
       <View style={styles.hero}>
-        <Text style={styles.route}>{trip.origin}</Text>
-        <Text style={styles.arrow}>↓</Text>
-        <Text style={styles.route}>{trip.destination}</Text>
+        <Text style={styles.route}>{trip.origin}</Text><Text style={styles.arrow}>↓</Text><Text style={styles.route}>{trip.destination}</Text>
         <View style={styles.stats}>
           <View><Text style={styles.statValue}>{distance}</Text><Text style={styles.statLabel}>ROUTE DISTANCE</Text></View>
           <View><Text style={styles.statValue}>{duration}</Text><Text style={styles.statLabel}>DRIVING ESTIMATE</Text></View>
         </View>
         <Text style={styles.note}>The map estimate is not yet adjusted for motorcycle pace, breaks or road conditions.</Text>
       </View>
-
       <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/ride/' + trip.id)}><Text style={styles.primaryText}>Open live ride tracker →</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => router.push('/(tabs)')}><Text style={styles.secondaryText}>My trips</Text></TouchableOpacity>
@@ -80,33 +142,45 @@ export default function TripWorkspaceScreen() {
 
       <View style={styles.card}>
         <Text style={styles.section}>Route & itinerary</Text>
-        {waypoints.length === 0 ? <Text style={styles.muted}>No saved waypoints yet.</Text> : waypoints.map((point, index) => (
-          <TouchableOpacity key={point.id} style={styles.point} onPress={() => void openDirections(point)}>
+        {waypoints.map((point, index) => {
+          const assignedDay = days.find(day => day.id === point.trip_day_id);
+          return <View key={point.id} style={styles.point}>
             <View style={styles.marker}><Text style={styles.markerText}>{index + 1}</Text></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.pointType}>{point.waypoint_type.toUpperCase()}</Text>
               <Text style={styles.pointName}>{point.name}</Text>
               {!!point.address && <Text style={styles.mutedSmall}>{point.address}</Text>}
-              {!!point.notes && <Text style={styles.mutedSmall}>{point.notes}</Text>}
+              <TouchableOpacity onPress={() => void openDirections(point)}><Text style={styles.link}>Open map ↗</Text></TouchableOpacity>
+              {isAdmin && <View style={styles.editorRow}>
+                <TouchableOpacity style={styles.smallButton} disabled={index === 0} onPress={() => moveWaypoint(index, -1)}><Text style={styles.smallButtonText}>↑</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.smallButton} disabled={index === waypoints.length - 1} onPress={() => moveWaypoint(index, 1)}><Text style={styles.smallButtonText}>↓</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.smallButton} onPress={() => {
+                  const current = assignedDay?.day_number || 0;
+                  const next = current >= days.length ? null : current + 1;
+                  assignWaypointDay(point.id, next);
+                }}><Text style={styles.smallButtonText}>{assignedDay ? 'Day ' + assignedDay.day_number : 'Unassigned'} · change</Text></TouchableOpacity>
+              </View>}
             </View>
-            <Text style={styles.link}>Map ↗</Text>
-          </TouchableOpacity>
-        ))}
+          </View>;
+        })}
+        {isAdmin && <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveItinerary()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save stop order & days'}</Text></TouchableOpacity>}
+        {!isAdmin && <Text style={styles.mutedSmall}>Only the trip admin can edit the itinerary.</Text>}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.section}>Day-by-day plan</Text>
-        {days.length === 0 ? <Text style={styles.muted}>Add trip dates when creating a plan to generate itinerary days.</Text> : days.map(day => (
+        {days.length === 0 ? <Text style={styles.muted}>No dated itinerary days were created for this trip.</Text> : days.map(day => (
           <View key={day.id} style={styles.day}>
             <Text style={styles.dayTitle}>{day.title || 'Day ' + day.day_number}</Text>
             <Text style={styles.mutedSmall}>{day.trip_date || 'Date not set'}</Text>
             {!!day.notes && <Text style={styles.mutedSmall}>{day.notes}</Text>}
+            <Text style={styles.mutedSmall}>{waypoints.filter(point => point.trip_day_id === day.id).length} planned stops · {stays.filter(stay => stay.trip_day_id === day.id).length} stays</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.section}>Overnight stays</Text>
+        <Text style={styles.section}>Accommodation · {stays.length} stays</Text>
         {stays.length === 0 ? <Text style={styles.muted}>No accommodation added yet.</Text> : stays.map(stay => (
           <View key={stay.id} style={styles.day}>
             <Text style={styles.pointName}>{stay.name}</Text>
@@ -115,6 +189,17 @@ export default function TripWorkspaceScreen() {
             {stay.price_amount != null ? <Text style={styles.mutedSmall}>₹{stay.price_amount}</Text> : null}
           </View>
         ))}
+        {isAdmin && <>
+          <Text style={styles.label}>Add another stay</Text>
+          <TextInput style={styles.input} value={stayName} onChangeText={setStayName} placeholder="Accommodation name" placeholderTextColor="#77809a" />
+          <TextInput style={styles.input} value={stayAddress} onChangeText={setStayAddress} placeholder="Address (optional)" placeholderTextColor="#77809a" />
+          <Text style={styles.label}>Trip day number (1–{Math.max(days.length, 1)})</Text>
+          <TextInput style={styles.input} value={stayDay} onChangeText={setStayDay} keyboardType="number-pad" placeholder="1" placeholderTextColor="#77809a" />
+          <TextInput style={styles.input} value={stayCheckIn} onChangeText={setStayCheckIn} placeholder="Check-in YYYY-MM-DD" placeholderTextColor="#77809a" />
+          <TextInput style={styles.input} value={stayCheckOut} onChangeText={setStayCheckOut} placeholder="Check-out YYYY-MM-DD" placeholderTextColor="#77809a" />
+          <TextInput style={styles.input} value={stayPrice} onChangeText={setStayPrice} keyboardType="decimal-pad" placeholder="Price in INR (optional)" placeholderTextColor="#77809a" />
+          <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void addStay()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Add accommodation'}</Text></TouchableOpacity>
+        </>}
       </View>
       {!!error && <Text style={styles.error}>{error}</Text>}
       <Text style={styles.footer}>Trip planning is separate from the actual GPS session. Starting the tracker records what happened, while this workspace keeps the planned journey.</Text>
@@ -129,19 +214,25 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 27, fontWeight: '800', marginTop: 7 },
   muted: { color: '#aab6c9', fontSize: 13, lineHeight: 19, marginTop: 6 },
   mutedSmall: { color: '#9eacc1', fontSize: 11, lineHeight: 16, marginTop: 3 },
+  label: { color: '#cbd5e1', fontSize: 11, fontWeight: '700', marginTop: 10, marginBottom: 5 },
+  input: { backgroundColor: '#101827', borderWidth: 1, borderColor: '#3b4b62', borderRadius: 9, padding: 11, color: '#fff', marginTop: 7, fontSize: 13 },
   hero: { backgroundColor: '#1a2940', borderRadius: 18, borderWidth: 1, borderColor: '#34445c', padding: 17, marginTop: 18 },
   route: { color: '#fff', fontSize: 16, fontWeight: '700' }, arrow: { color: '#ff9a50', fontSize: 20, marginVertical: 4 },
   stats: { flexDirection: 'row', gap: 28, marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#3b4b62' },
   statValue: { color: '#fff', fontSize: 17, fontWeight: '800' }, statLabel: { color: '#95a4ba', fontSize: 9, marginTop: 4, fontWeight: '700' },
   note: { color: '#d6a77f', fontSize: 10, lineHeight: 15, marginTop: 12 },
   actions: { flexDirection: 'row', gap: 8, marginVertical: 14 }, primary: { flex: 1, backgroundColor: '#ed7625', borderRadius: 11, padding: 13, alignItems: 'center' },
+  primaryWide: { backgroundColor: '#ed7625', borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 14 },
   primaryText: { color: '#fff', fontWeight: '800', fontSize: 12 }, secondary: { borderColor: '#53627a', borderWidth: 1, borderRadius: 11, padding: 13 }, secondaryText: { color: '#dce4f1', fontWeight: '700', fontSize: 12 },
   card: { backgroundColor: '#192438', borderColor: '#2d3e57', borderWidth: 1, borderRadius: 16, padding: 15, marginTop: 12 },
   section: { color: '#fff', fontSize: 17, fontWeight: '800', marginBottom: 12 },
-  point: { flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#34445b' },
+  point: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#34445b' },
   marker: { width: 25, height: 25, borderRadius: 13, backgroundColor: '#58351f', alignItems: 'center', justifyContent: 'center' },
   markerText: { color: '#ffad73', fontSize: 11, fontWeight: '800' }, pointType: { color: '#ffad73', fontSize: 9, fontWeight: '800' },
   pointName: { color: '#fff', fontSize: 13, fontWeight: '700', marginTop: 2 }, link: { color: '#ffad73', fontSize: 11, fontWeight: '700' },
+  editorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  smallButton: { borderWidth: 1, borderColor: '#53627a', borderRadius: 7, paddingHorizontal: 9, paddingVertical: 6 },
+  smallButtonText: { color: '#ffad73', fontSize: 10, fontWeight: '700' },
   day: { borderTopWidth: 1, borderTopColor: '#34445b', paddingVertical: 11 }, dayTitle: { color: '#fff', fontWeight: '700', fontSize: 13 },
   error: { color: '#ff9999', marginTop: 12 }, footer: { color: '#7f8da3', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
 });
