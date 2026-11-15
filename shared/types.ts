@@ -118,7 +118,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind';
   message?: string;
   lat: number;
   lng: number;
@@ -144,6 +144,8 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   break: '☕ Break',
   fuel: '⛽ Fuel Stop',
   mechanical: '🔧 Mechanical Issue',
+  route_deviation: '🧭 Route Deviation',
+  rider_behind: '🏍️ Rider Behind',
 };
 
 export interface SyncStatus {
