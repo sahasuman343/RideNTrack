@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
@@ -24,6 +24,7 @@ export default function TripWorkspaceScreen() {
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
   const [roster, setRoster] = useState<Rider[]>([]);
+  const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'rider' | 'sweep'>('rider');
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,7 @@ export default function TripWorkspaceScreen() {
   }, [id]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);
 
   async function openDirections(point: Waypoint) {
     const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(point.latitude + ',' + point.longitude);
@@ -174,7 +176,7 @@ export default function TripWorkspaceScreen() {
       <View style={styles.card}>
         <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
         {roster.map(rider => {
-          const age = rider.last_seen ? Date.now() - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
+          const age = rider.last_seen ? now - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
           const status = !rider.last_seen ? 'OFFLINE' : age > 120000 ? 'OFFLINE' : age > 30000 ? 'STALE' : 'LIVE';
           return <View key={rider.user_id} style={styles.riderRow}>
             <View style={{ flex: 1 }}>
