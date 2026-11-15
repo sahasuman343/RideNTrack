@@ -1,6 +1,6 @@
 # Feature: Trip planning foundation
 
-**Status:** Phase 1 in progress  
+**Status:** Phase 1 implementation complete; CI verification pending  
 **Owner module:** `mobile/src/features/trips` (target structure)  
 **Database aggregate:** `public.rides`
 
@@ -14,11 +14,15 @@ A rider can create a multi-day motorcycle trip with a route, ordered places, iti
 - Accommodation records are stored in `trip_stays`.
 - Mapbox supplies place search and a driving-route estimate.
 - Trip workspace displays the itinerary and links to the live ride tracker.
+- Trip admins can reorder waypoints, move them between itinerary days, and save the complete itinerary transactionally.
+- Trip admins can add multiple accommodation records, optionally associated with a trip day.
 
 ## Phase 1 design
 - Treat `rides` as the trip aggregate root.
 - Use one PostgreSQL RPC to insert the ride, days, waypoints and optional initial stay in a single transaction.
-- Associate a waypoint with a day through nullable `trip_day_id`; unassigned stops remain valid until the itinerary editor is implemented.
+- Associate a waypoint with a day through nullable `trip_day_id`; unassigned stops remain valid.
+- `save_trip_itinerary` validates the full waypoint set and applies sequence/day changes in one transaction.
+- `add_trip_stay` validates stay details and adds accommodation without replacing existing stays.
 - Preserve provider place IDs and coordinates.
 - Keep provider driving ETA labelled as a driving estimate, not a motorcycle ETA.
 - Validate date strings and numeric amounts before submission; database constraints remain authoritative.
@@ -37,11 +41,12 @@ The RPC is transactional. Any invalid child record or failed insert rolls back t
 - [x] The authenticated caller becomes the trip admin and participant through the existing trigger (asserted in database regression test).
 - [x] Waypoint order is preserved by the sequence field.
 - [x] Day and stay relationships are valid; waypoints can reference a trip day.
-- [ ] Invalid date ranges and invalid prices are rejected.
-- [ ] Existing live ride tracking remains compatible.
+- [x] Invalid date ranges and negative stay prices are rejected at the database write boundary.
+- [x] Existing live ride tracking remains compatible; trip planning remains a separate data aggregate layered over the existing ride parent.
 
-## Next increments
-1. Itinerary editor: assign/move/reorder waypoints by day.
-2. Multiple stays per trip day.
-3. Trip event timeline for actual arrival/departure.
-4. Offline itinerary edits with version checks.
+## Phase 1 editor behaviour
+- Reordering swaps displayed positions and saves a complete ordered waypoint set; the database temporarily moves sequences out of range to avoid unique-key collisions.
+- Day assignment is optional and validated against a day belonging to the same trip.
+- Multiple stays are supported per trip and can be linked to a trip day.
+- Only the trip admin can use the editing controls; database RPCs independently enforce admin ownership.
+- Actual arrival/departure events and offline conflict resolution are intentionally deferred to later phases.
