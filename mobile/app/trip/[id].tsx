@@ -8,10 +8,11 @@ type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
   status: string; trip_type?: string; start_date?: string | null; end_date?: string | null;
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
-  ride_code: string; admin_id: string;
+  ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
 };
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
+type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
 type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; trip_day_id?: string | null };
 
@@ -27,6 +28,12 @@ export default function TripWorkspaceScreen() {
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'rider' | 'sweep'>('rider');
+  const [regroupPoints, setRegroupPoints] = useState<Regroup[]>([]);
+  const [deviationLimit, setDeviationLimit] = useState('500');
+  const [behindLimit, setBehindLimit] = useState('1000');
+  const [regroupName, setRegroupName] = useState('');
+  const [regroupLat, setRegroupLat] = useState('');
+  const [regroupLng, setRegroupLng] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -42,23 +49,28 @@ export default function TripWorkspaceScreen() {
     if (!id) return;
     setLoading(true); setError('');
     try {
-      const [tripResult, waypointResult, dayResult, stayResult, rosterResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
         supabase.from('trip_stays').select('*').eq('ride_id', id).order('check_in'),
         supabase.rpc('get_trip_roster', { p_ride_id: id }),
+        supabase.rpc('get_regroup_points', { p_ride_id: id }),
       ]);
       if (tripResult.error) throw tripResult.error;
       if (waypointResult.error) throw waypointResult.error;
       if (dayResult.error) throw dayResult.error;
       if (stayResult.error) throw stayResult.error;
       if (rosterResult.error) throw rosterResult.error;
+      if (regroupResult.error) throw regroupResult.error;
       setTrip(tripResult.data as Trip);
       setWaypoints((waypointResult.data || []) as Waypoint[]);
       setDays((dayResult.data || []) as Day[]);
       setStays((stayResult.data || []) as Stay[]);
       setRoster((rosterResult.data || []) as Rider[]);
+      setRegroupPoints((regroupResult.data || []) as Regroup[]);
+      setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
+      setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
     } catch (e: any) { setError(e?.message || 'Could not load this trip.'); }
     finally { setLoading(false); }
   }, [id]);
@@ -95,6 +107,48 @@ export default function TripWorkspaceScreen() {
       await load();
       Alert.alert('Itinerary saved', 'Stop order and day assignments have been updated.');
     } catch (e: any) { setError(e?.message || 'Could not save itinerary.'); }
+    finally { setSaving(false); }
+  }
+  async function saveSafetySettings() {
+    const deviation = Number(deviationLimit), behind = Number(behindLimit);
+    if (!Number.isInteger(deviation) || deviation < 50 || deviation > 5000 || !Number.isInteger(behind) || behind < 100 || behind > 10000) {
+      Alert.alert('Invalid thresholds', 'Route deviation must be 50–5000 m and rider-behind distance 100–10000 m.'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      const { error: saveError } = await supabase.rpc('update_group_safety_settings', {
+        p_ride_id: id, p_route_deviation_meters: deviation, p_rider_behind_meters: behind,
+      });
+      if (saveError) throw saveError;
+      await load();
+      Alert.alert('Safety settings saved', 'Group alert thresholds were updated.');
+    } catch (e: any) { setError(e?.message || 'Could not save safety settings.'); }
+    finally { setSaving(false); }
+  }
+  async function addRegroupPoint() {
+    const lat = Number(regroupLat), lng = Number(regroupLng);
+    if (!regroupName.trim() || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      Alert.alert('Invalid regroup point', 'Enter a name and valid latitude/longitude coordinates.'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      const { error: addError } = await supabase.rpc('add_regroup_point', {
+        p_ride_id: id, p_name: regroupName.trim(), p_latitude: lat, p_longitude: lng,
+        p_sequence: regroupPoints.length,
+      });
+      if (addError) throw addError;
+      setRegroupName(''); setRegroupLat(''); setRegroupLng('');
+      await load();
+    } catch (e: any) { setError(e?.message || 'Could not add regroup point.'); }
+    finally { setSaving(false); }
+  }
+  async function confirmArrival(point: Regroup) {
+    setSaving(true); setError('');
+    try {
+      const { error: confirmError } = await supabase.rpc('confirm_regroup_arrival', { p_regroup_point_id: point.id });
+      if (confirmError) throw confirmError;
+      await load();
+    } catch (e: any) { setError(e?.message || 'Could not confirm arrival.'); }
     finally { setSaving(false); }
   }
   async function inviteRider() {
@@ -171,6 +225,33 @@ export default function TripWorkspaceScreen() {
       <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/ride/' + trip.id)}><Text style={styles.primaryText}>Open live ride tracker →</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => router.push('/(tabs)')}><Text style={styles.secondaryText}>My trips</Text></TouchableOpacity>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
+        {regroupPoints.map(point => <View key={point.id} style={styles.riderRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pointName}>{point.name}</Text>
+            <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
+          </View>
+          <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
+            <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
+          </TouchableOpacity>
+        </View>)}
+        {isAdmin && <>
+          <Text style={styles.label}>Add regroup point (coordinates)</Text>
+          <TextInput style={styles.input} value={regroupName} onChangeText={setRegroupName} placeholder="Meetup / regroup location" placeholderTextColor="#77809a" />
+          <View style={styles.editorRow}>
+            <TextInput style={[styles.input,{flex:1}]} value={regroupLat} onChangeText={setRegroupLat} keyboardType="decimal-pad" placeholder="Latitude" placeholderTextColor="#77809a" />
+            <TextInput style={[styles.input,{flex:1}]} value={regroupLng} onChangeText={setRegroupLng} keyboardType="decimal-pad" placeholder="Longitude" placeholderTextColor="#77809a" />
+          </View>
+          <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void addRegroupPoint()}><Text style={styles.primaryText}>Add regroup point</Text></TouchableOpacity>
+          <Text style={styles.label}>Route deviation alert threshold (metres)</Text>
+          <TextInput style={styles.input} value={deviationLimit} onChangeText={setDeviationLimit} keyboardType="number-pad" />
+          <Text style={styles.label}>Rider-behind alert threshold (metres)</Text>
+          <TextInput style={styles.input} value={behindLimit} onChangeText={setBehindLimit} keyboardType="number-pad" />
+          <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveSafetySettings()}><Text style={styles.primaryText}>Save safety thresholds</Text></TouchableOpacity>
+        </>}
       </View>
 
       <View style={styles.card}>
