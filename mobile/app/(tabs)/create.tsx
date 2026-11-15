@@ -136,45 +136,45 @@ export default function CreateRideScreen() {
           }
         }
       }
-      const { data: ride, error } = await supabase.from('rides').insert({
-        name: name.trim(), description: description.trim() || null, trip_type: tripType,
-        start_date: startDate || null, end_date: endDate || null,
-        admin_id: user.id, origin: origin.address, destination: destination.address,
-        origin_coords: [origin.longitude, origin.latitude],
-        destination_coords: [destination.longitude, destination.latitude],
-        route_geometry: routeGeometry, estimated_distance_meters: distance, estimated_duration_seconds: duration,
-      }).select().single();
-      if (error) throw error;
-
       const waypointRows = ordered.map((item, index) => ({
-        ride_id: ride.id, sequence: index, waypoint_type: item.type,
+        sequence: index, waypoint_type: item.type,
         name: item.place.name, address: item.place.address,
         latitude: item.place.latitude, longitude: item.place.longitude,
         provider_place_id: item.place.id,
       }));
-      const { error: waypointError } = await supabase.from('trip_waypoints').insert(waypointRows);
-      if (waypointError) throw waypointError;
+      const dayRows = days.map((date, index) => ({
+        day_number: index + 1, trip_date: date, title: 'Day ' + (index + 1),
+      }));
+      const stayPayload = stay ? {
+        name: stay.name, stay_type: stayType, address: stay.address,
+        latitude: stay.latitude, longitude: stay.longitude,
+        provider_place_id: stay.id, check_in: checkIn || startDate || null,
+        check_out: checkOut || endDate || null,
+        price_amount: stayPrice ? Number(stayPrice) : null,
+        price_currency: 'INR', day_number: 1,
+      } : null;
 
-      let dayIds: string[] = [];
-      if (days.length) {
-        const { data: dayRows, error: dayError } = await supabase.from('trip_days').insert(
-          days.map((date, index) => ({ ride_id: ride.id, day_number: index + 1, trip_date: date, title: 'Day ' + (index + 1) }))
-        ).select('id');
-        if (dayError) throw dayError;
-        dayIds = (dayRows || []).map(row => row.id);
-      }
-      if (stay) {
-        const { error: stayError } = await supabase.from('trip_stays').insert({
-          ride_id: ride.id, trip_day_id: dayIds[0] || null, name: stay.name, stay_type: stayType,
-          address: stay.address, latitude: stay.latitude, longitude: stay.longitude,
-          provider_place_id: stay.id, check_in: checkIn || startDate || null,
-          check_out: checkOut || endDate || null,
-          price_amount: stayPrice ? Number(stayPrice) : null, price_currency: 'INR',
-        });
-        if (stayError) throw stayError;
-      }
+      const { data: rideId, error } = await supabase.rpc('create_trip_plan', {
+        p_trip: {
+          name: name.trim(), description: description.trim() || null,
+          trip_type: tripType, visibility: 'invite_only',
+          start_date: startDate || null, end_date: endDate || null,
+          origin: origin.address, destination: destination.address,
+          origin_coords: [origin.longitude, origin.latitude],
+          destination_coords: [destination.longitude, destination.latitude],
+          route_geometry: routeGeometry,
+          estimated_distance_meters: distance,
+          estimated_duration_seconds: duration,
+        },
+        p_waypoints: waypointRows,
+        p_days: dayRows,
+        p_stay: stayPayload,
+      });
+      if (error) throw error;
+      if (!rideId) throw new Error('Trip creation returned no trip ID.');
+
       Alert.alert('Trip created', 'Your trip plan is ready. You can invite riders and start organizing the journey.', [
-        { text: 'Open trip', onPress: () => router.push('/trip/' + ride.id) },
+        { text: 'Open trip', onPress: () => router.push('/trip/' + rideId) },
       ]);
     } catch (error: any) {
       Alert.alert('Could not create trip', error?.message || 'Please try again.');
