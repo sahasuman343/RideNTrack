@@ -167,10 +167,47 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.rides WHERE name = 'Must rollback') THEN
     RAISE EXCEPTION 'failed child insert left a partial trip';
   END IF;
-END $$;
+END $;
+
+-- Phase 2: invite acceptance, role assignment, roster visibility and expiry.
+DO $
+DECLARE v_trip UUID; v_token UUID; v_expired_token UUID; v_joined UUID;
+BEGIN
+  SELECT id INTO v_trip FROM public.rides WHERE name='Atomic trip fixture';
+  SELECT invitation_token INTO v_token
+    FROM public.create_trip_invitation(v_trip,'member@example.test','sweep',24);
+  PERFORM set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',true);
+  v_joined := public.accept_trip_invitation(v_token);
+  IF v_joined IS DISTINCT FROM v_trip THEN RAISE EXCEPTION 'invitation did not join expected trip'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id=v_trip
+    AND user_id=auth.uid() AND role='sweep' AND is_active) THEN
+    RAISE EXCEPTION 'invited sweep role was not applied';
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',true);
+  PERFORM public.set_trip_participant_role(v_trip,'22222222-2222-4222-8222-222222222222','rider');
+  IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id=v_trip
+    AND user_id='22222222-2222-4222-8222-222222222222' AND role='rider') THEN
+    RAISE EXCEPTION 'leader could not update rider role';
+  END IF;
+  IF (SELECT count(*) FROM public.get_trip_roster(v_trip)) <> 2 THEN
+    RAISE EXCEPTION 'trip roster missing active members';
+  END IF;
+  SELECT invitation_token INTO v_expired_token
+    FROM public.create_trip_invitation(v_trip,NULL,'rider',1);
+  UPDATE public.trip_invitations SET expires_at=now()-interval '1 minute'
+    WHERE token=v_expired_token;
+  PERFORM set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',true);
+  IF public.accept_trip_invitation(v_expired_token) IS NOT NULL THEN
+    RAISE EXCEPTION 'expired invitation was accepted';
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',true);
+  IF NOT EXISTS (SELECT 1 FROM public.trip_invitations WHERE token=v_expired_token AND status='expired') THEN
+    RAISE EXCEPTION 'expired invitation state was not persisted';
+  END IF;
+END $;
 
 SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
-DO $$ DECLARE trip_id uuid; BEGIN
+DO $ DECLARE trip_id uuid; BEGIN
   SELECT id INTO trip_id FROM public.rides WHERE name = 'Atomic trip fixture';
   IF (SELECT count(*) FROM public.get_ride_members('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) != 0 THEN RAISE EXCEPTION 'outsider sees members'; END IF;
   IF (SELECT count(*) FROM realtime.messages) != 0 THEN RAISE EXCEPTION 'outsider receives private presence'; END IF;
