@@ -22,7 +22,59 @@ export interface Ride {
   destination_coords: [number, number];
   route_geometry?: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: number[][] }; properties: Record<string, unknown> }; // GeoJSON LineString
   status: 'planned' | 'active' | 'completed';
+  description?: string | null;
+  trip_type?: 'solo' | 'group' | 'weekend' | 'touring' | 'expedition';
+  visibility?: 'private' | 'invite_only' | 'public';
+  start_date?: string | null;
+  end_date?: string | null;
+  estimated_distance_meters?: number | null;
+  estimated_duration_seconds?: number | null;
   created_at: string;
+}
+
+export type TripWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination';
+export interface TripWaypoint {
+  id: string;
+  ride_id: string;
+  sequence: number;
+  waypoint_type: TripWaypointType;
+  name: string;
+  address?: string | null;
+  latitude: number;
+  longitude: number;
+  provider_place_id?: string | null;
+  notes?: string | null;
+  is_optional: boolean;
+  planned_arrival?: string | null;
+  planned_departure?: string | null;
+}
+
+export interface TripDay {
+  id: string;
+  ride_id: string;
+  day_number: number;
+  trip_date?: string | null;
+  title?: string | null;
+  notes?: string | null;
+}
+
+export interface TripStay {
+  id: string;
+  ride_id: string;
+  trip_day_id?: string | null;
+  name: string;
+  stay_type: 'hotel' | 'homestay' | 'hostel' | 'camping' | 'guesthouse' | 'other';
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  provider_place_id?: string | null;
+  check_in?: string | null;
+  check_out?: string | null;
+  booking_reference?: string | null;
+  price_amount?: number | null;
+  price_currency: string;
+  contact_phone?: string | null;
+  notes?: string | null;
 }
 
 export interface RideParticipant {
