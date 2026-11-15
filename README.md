@@ -79,7 +79,7 @@ Execute the SQL migration scripts in your **Supabase SQL Editor** in the followi
 3. `supabase/migrations/003_auth_profiles_trigger.sql` — Auto-creates rider profiles upon signup via a `SECURITY DEFINER` trigger, resolving Row Level Security issues.
 
 4. `supabase/migrations/004_fix_rls_recursion.sql` — Non-recursive membership policies.
-5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.
+5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.\n6. `supabase/migrations/006_trip_planning.sql` — Trip metadata, searchable-location waypoints, multi-day itinerary and accommodation records.
 
 See [deployment and device checks](docs/ride-reliability.md) before updating existing installations.
 
@@ -141,18 +141,18 @@ node node_modules/typescript/bin/tsc shared/types.ts --noEmit
 
 ## ✨ Core Features & Implementation Highlights
 
-### 1. 🛰️ Uninterrupted Background GPS Tracking
+### 1. 🗺️ Trip planning foundation\n- Create a trip with searchable Mapbox place suggestions for origin, destination, meetup point and multiple stops.\n- Persist selected place IDs and coordinates, rather than saving free-text location labels.\n- Add trip dates, generated itinerary days and an initial overnight stay.\n- Open a trip workspace with its ordered route, day plan, accommodation and a handoff to the live ride tracker.\n- Planned waypoints are stored separately from actual GPS sessions.\n\n### 2. 🛰️ Uninterrupted Background GPS Tracking
 - Integrated with `expo-task-manager` and `expo-location`.
 - Persistent Android Foreground Service notification (`"RideNTrack Live Ride"`).
 - Background location and fetch modes on iOS (`UIBackgroundModes: ["location", "fetch"]`).
 - Automatically falls back to high-accuracy foreground watching if background permissions are unavailable.
 
-### 2. 📶 Offline / Low-Connectivity Buffering Engine
+### 3. 📶 Offline / Low-Connectivity Buffering Engine
 - **Transactional SQLite Queue (`offlineQueue.ts`)**: Stores location breadcrumbs and alerts locally, scoped to the signed-in account, and migrates legacy `AsyncStorage` queues when traveling through dead zones.
 - **Auto Sync Monitor (`useOfflineSync.ts`)**: Detects network connectivity via `@react-native-community/netinfo` and automatically drains the queue in batches via the `bulk_insert_location_updates` Supabase RPC on reconnect, app resume, periodic foreground checks, and background GPS callbacks. Persistent IDs make retries safe.
 - **UI Connectivity Badges**: Live indicators on the ride screen show `GPS Active`, `Offline Mode (X buffered)`, or `Syncing...` with a tap-to-flush option.
 
-### 3. 📦 `@ridentrack/shared` Type Package
+### 4. 📦 `@ridentrack/shared` Type Package
 - Single source of truth for `Ride`, `LocationUpdate`, `BufferedLocation`, `Alert`, `AlertType`, `ALERT_LABELS`, and `Profile` models ensuring 100% type synchronicity across client and server.
 
 ## Ride map and reliability checks
