@@ -174,7 +174,7 @@ export default function CreateRideScreen() {
         if (stayError) throw stayError;
       }
       Alert.alert('Trip created', 'Your trip plan is ready. You can invite riders and start organizing the journey.', [
-        { text: 'Open trip', onPress: () => router.push('/ride/' + ride.id) },
+        { text: 'Open trip', onPress: () => router.push('/trip/' + ride.id) },
       ]);
     } catch (error: any) {
       Alert.alert('Could not create trip', error?.message || 'Please try again.');
