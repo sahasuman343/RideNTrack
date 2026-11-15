@@ -172,7 +172,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.create_trip_plan(JSONB, JSONB, JSONB, JSONB) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.create_trip_plan(JSONB, JSONB, JSONB, JSONB) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.create_trip_plan(JSONB, JSONB, JSONB, JSONB) TO authenticated;
 
 COMMIT;
