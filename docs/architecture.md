@@ -16,7 +16,7 @@ Do not introduce a separate FastAPI service, Redis, Kafka or microservices witho
 
 ## Domain modules
 1. Trips: trip lifecycle, metadata and itinerary.
-2. Group rides: invitations, membership, rider roles and coordination.
+2. Group rides: expiring token invitations, membership roles (leader/sweep/rider), roster and rider coordination.
 3. Location: foreground/background GPS lifecycle and validation.
 4. Realtime: ephemeral presence, subscriptions and reconnect reconciliation.
 5. Sync: durable offline queue, idempotency and conflict handling.
