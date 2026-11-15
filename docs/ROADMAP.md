@@ -8,7 +8,7 @@ This document is the implementation source of truth. Each phase should be delive
 - [x] Day assignment for waypoints (nullable FK and creation payload support).
 - [x] Date and price validation at aggregate write boundary.
 - [x] Transaction/RLS regression tests (added; CI verification pending).
-- [ ] Itinerary edit/reorder and multiple stays.
+- [x] Itinerary edit/reorder and multiple stays (transactional RPCs, admin UI and database regression coverage).
 
 ## Phase 2 — Group Ride Control Center
 - [ ] Trip invitations with expiry and acceptance state.
