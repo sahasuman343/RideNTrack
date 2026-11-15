@@ -65,8 +65,8 @@ DECLARE v_token UUID := gen_random_uuid(); v_expiry TIMESTAMPTZ;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE='28000'; END IF;
   IF p_role NOT IN ('sweep','rider') THEN RAISE EXCEPTION 'Invitation role must be sweep or rider'; END IF;
-  IF p_expires_in_hours IS NULL OR p_expires_in_hours < 1 OR p_expires_in_hours > 720 THEN
-    RAISE EXCEPTION 'Invitation expiry must be between 1 and 720 hours';
+  IF p_expires_in_hours IS NULL OR p_expires_in_hours < 0 OR p_expires_in_hours > 720 THEN
+    RAISE EXCEPTION 'Invitation expiry must be between 0 and 720 hours';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.rides r JOIN public.ride_participants rp ON rp.ride_id=r.id
