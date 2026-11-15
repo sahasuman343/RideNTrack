@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -12,6 +12,7 @@ type Trip = {
 };
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
+type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
@@ -22,6 +23,9 @@ export default function TripWorkspaceScreen() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
+  const [roster, setRoster] = useState<Rider[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'rider' | 'sweep'>('rider');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -37,20 +41,23 @@ export default function TripWorkspaceScreen() {
     if (!id) return;
     setLoading(true); setError('');
     try {
-      const [tripResult, waypointResult, dayResult, stayResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
         supabase.from('trip_stays').select('*').eq('ride_id', id).order('check_in'),
+        supabase.rpc('get_trip_roster', { p_ride_id: id }),
       ]);
       if (tripResult.error) throw tripResult.error;
       if (waypointResult.error) throw waypointResult.error;
       if (dayResult.error) throw dayResult.error;
       if (stayResult.error) throw stayResult.error;
+      if (rosterResult.error) throw rosterResult.error;
       setTrip(tripResult.data as Trip);
       setWaypoints((waypointResult.data || []) as Waypoint[]);
       setDays((dayResult.data || []) as Day[]);
       setStays((stayResult.data || []) as Stay[]);
+      setRoster((rosterResult.data || []) as Rider[]);
     } catch (e: any) { setError(e?.message || 'Could not load this trip.'); }
     finally { setLoading(false); }
   }, [id]);
@@ -86,6 +93,30 @@ export default function TripWorkspaceScreen() {
       await load();
       Alert.alert('Itinerary saved', 'Stop order and day assignments have been updated.');
     } catch (e: any) { setError(e?.message || 'Could not save itinerary.'); }
+    finally { setSaving(false); }
+  }
+  async function inviteRider() {
+    setSaving(true); setError('');
+    try {
+      const { data, error: inviteError } = await supabase.rpc('create_trip_invitation', {
+        p_ride_id: id, p_email: inviteEmail.trim() || null, p_role: inviteRole, p_expires_in_hours: 72,
+      });
+      if (inviteError) throw inviteError;
+      const invitation = Array.isArray(data) ? data[0] : data;
+      if (!invitation?.invitation_token) throw new Error('Invitation was created but no token was returned.');
+      await Share.share({ message: 'You are invited to join ' + trip?.name + ' on RideNTrack. Invitation token: ' + invitation.invitation_token + '. It expires at ' + invitation.expires_at + '. Open RideNTrack → Join a Group Ride → Accept trip invitation.' });
+      setInviteEmail('');
+      await load();
+    } catch (e: any) { setError(e?.message || 'Could not create invitation.'); }
+    finally { setSaving(false); }
+  }
+  async function changeRole(rider: Rider, role: 'sweep' | 'rider') {
+    setSaving(true); setError('');
+    try {
+      const { error: roleError } = await supabase.rpc('set_trip_participant_role', { p_ride_id: id, p_user_id: rider.user_id, p_role: role });
+      if (roleError) throw roleError;
+      await load();
+    } catch (e: any) { setError(e?.message || 'Could not update rider role.'); }
     finally { setSaving(false); }
   }
   async function addStay() {
@@ -138,6 +169,34 @@ export default function TripWorkspaceScreen() {
       <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/ride/' + trip.id)}><Text style={styles.primaryText}>Open live ride tracker →</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => router.push('/(tabs)')}><Text style={styles.secondaryText}>My trips</Text></TouchableOpacity>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
+        {roster.map(rider => {
+          const age = rider.last_seen ? Date.now() - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
+          const status = !rider.last_seen ? 'OFFLINE' : age > 120000 ? 'OFFLINE' : age > 30000 ? 'STALE' : 'LIVE';
+          return <View key={rider.user_id} style={styles.riderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
+              <Text style={styles.mutedSmall}>{rider.role.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
+            </View>
+            {isAdmin && rider.user_id !== user?.id && <TouchableOpacity style={styles.smallButton} disabled={saving}
+              onPress={() => void changeRole(rider, rider.role === 'sweep' ? 'rider' : 'sweep')}>
+              <Text style={styles.smallButtonText}>{rider.role === 'sweep' ? 'Make rider' : 'Assign sweep'}</Text>
+            </TouchableOpacity>}
+          </View>;
+        })}
+        {isAdmin && <>
+          <Text style={styles.label}>Invite by email (optional)</Text>
+          <TextInput style={styles.input} value={inviteEmail} onChangeText={setInviteEmail} keyboardType="email-address" autoCapitalize="none" placeholder="rider@example.com" placeholderTextColor="#77809a" />
+          <View style={styles.editorRow}>
+            <TouchableOpacity style={[styles.smallButton, inviteRole === 'rider' && styles.roleSelected]} onPress={() => setInviteRole('rider')}><Text style={styles.smallButtonText}>Rider</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.smallButton, inviteRole === 'sweep' && styles.roleSelected]} onPress={() => setInviteRole('sweep')}><Text style={styles.smallButtonText}>Sweep</Text></TouchableOpacity>
+          </View>
+          <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void inviteRider()}><Text style={styles.primaryText}>{saving ? 'Please wait…' : 'Create & share 72-hour invitation'}</Text></TouchableOpacity>
+        </>}
+        <Text style={styles.mutedSmall}>GPS status is based on the latest saved location: live ≤30 seconds, stale 30–120 seconds, offline/no recent update after 2 minutes. A missing GPS update is not proof that a rider has left the group.</Text>
       </View>
 
       <View style={styles.card}>
@@ -233,6 +292,8 @@ const styles = StyleSheet.create({
   editorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   smallButton: { borderWidth: 1, borderColor: '#53627a', borderRadius: 7, paddingHorizontal: 9, paddingVertical: 6 },
   smallButtonText: { color: '#ffad73', fontSize: 10, fontWeight: '700' },
+  riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#34445b' },
+  roleSelected: { borderColor: '#ff9a50', backgroundColor: '#3b2b22' },
   day: { borderTopWidth: 1, borderTopColor: '#34445b', paddingVertical: 11 }, dayTitle: { color: '#fff', fontWeight: '700', fontSize: 13 },
   error: { color: '#ff9999', marginTop: 12 }, footer: { color: '#7f8da3', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
 });
