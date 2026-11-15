@@ -1,140 +1,298 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 
+type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
+type WaypointKind = 'meetup' | 'stop';
+const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
+
+function LocationSearch({ label, placeholder, value, onChange, kind = 'place' }: {
+  label: string; placeholder: string; value: Place | null; onChange: (place: Place | null) => void; kind?: string;
+}) {
+  const [query, setQuery] = useState(value?.name || '');
+  const [suggestions, setSuggestions] = useState<Place[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => { setQuery(value?.name || ''); }, [value?.id]);
+  useEffect(() => {
+    if (value && query === value.name) { setSuggestions([]); return; }
+    if (query.trim().length < 3 || !TOKEN) { setSuggestions([]); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' + encodeURIComponent(query.trim()) +
+          '.json?autocomplete=true&limit=6&country=IN&language=en&types=poi,address,place,locality,neighborhood&access_token=' + TOKEN;
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error('Location search is temporarily unavailable');
+        const json = await response.json();
+        setSuggestions((json.features || []).map((item: any) => ({
+          id: item.id, name: item.text || item.place_name, address: item.place_name,
+          longitude: item.center[0], latitude: item.center[1],
+        })));
+      } catch (e) {
+        if (!controller.signal.aborted) setSuggestions([]);
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query, value?.id]);
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={query}
+        onChangeText={text => { setQuery(text); onChange(null); }}
+        placeholder={placeholder}
+        placeholderTextColor="#77809a"
+        autoCorrect={false}
+      />
+      {loading ? <ActivityIndicator color="#FF8A32" style={{ alignSelf: 'flex-start', marginTop: 8 }} /> : null}
+      {suggestions.length > 0 && (
+        <View style={styles.suggestions}>
+          {suggestions.map(place => (
+            <TouchableOpacity key={place.id} style={styles.suggestion} onPress={() => { onChange(place); setQuery(place.name); setSuggestions([]); }}>
+              <Text style={styles.suggestionTitle}>{place.name}</Text>
+              <Text style={styles.suggestionAddress}>{place.address}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {value ? <Text style={styles.selected}>✓ {value.address}</Text> : null}
+      {!TOKEN ? <Text style={styles.help}>Add EXPO_PUBLIC_MAPBOX_TOKEN to enable searchable places.</Text> : null}
+    </View>
+  );
+}
+
 export default function CreateRideScreen() {
   const [name, setName] = useState('');
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
+  const [description, setDescription] = useState('');
+  const [tripType, setTripType] = useState<'solo' | 'group' | 'weekend' | 'touring' | 'expedition'>('group');
+  const [origin, setOrigin] = useState<Place | null>(null);
+  const [destination, setDestination] = useState<Place | null>(null);
+  const [meetup, setMeetup] = useState<Place | null>(null);
+  const [stops, setStops] = useState<Array<{ key: string; place: Place | null; kind: WaypointKind }>>([]);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [stay, setStay] = useState<Place | null>(null);
+  const [stayType, setStayType] = useState<'hotel' | 'homestay' | 'hostel' | 'camping' | 'guesthouse'>('hotel');
+  const [checkIn, setCheckIn] = useState('');
+  const [checkOut, setCheckOut] = useState('');
+  const [stayPrice, setStayPrice] = useState('');
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
 
+  const days = useMemo(() => {
+    if (!startDate || !endDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(startDate) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(endDate)) return [];
+    const start = new Date(startDate + 'T12:00:00Z'), end = new Date(endDate + 'T12:00:00Z');
+    if (Number.isNaN(start.getTime()) || end < start) return [];
+    const result: string[] = [];
+    for (let d = new Date(start); d <= end && result.length < 31; d.setUTCDate(d.getUTCDate() + 1)) result.push(d.toISOString().slice(0, 10));
+    return result;
+  }, [startDate, endDate]);
+
+  function addStop(kind: WaypointKind = 'stop') {
+    setStops(current => [...current, { key: String(Date.now()) + Math.random(), place: null, kind }]);
+  }
+  function updateStop(key: string, place: Place | null) {
+    setStops(current => current.map(stop => stop.key === key ? { ...stop, place } : stop));
+  }
+
   async function handleCreate() {
-    if (!name || !origin || !destination) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!name.trim() || !origin || !destination) {
+      Alert.alert('Missing trip details', 'Add a trip name, a selected origin and a selected destination.');
       return;
     }
     if (!user) return;
-
+    if (startDate && endDate && days.length === 0) {
+      Alert.alert('Check trip dates', 'Use YYYY-MM-DD dates and ensure the end date is on or after the start date.');
+      return;
+    }
+    if (stops.some(s => !s.place)) {
+      Alert.alert('Incomplete stop', 'Select a location for every added stop or remove the empty stop.');
+      return;
+    }
     setLoading(true);
     try {
-      // Geocode origin and destination using Mapbox
-      const originCoords = await geocode(origin);
-      const destCoords = await geocode(destination);
-
-      if (!originCoords || !destCoords) {
-        Alert.alert('Error', 'Could not find one or both locations. Try being more specific.');
-        return;
+      const ordered = [
+        { place: origin, type: 'origin' },
+        ...(meetup ? [{ place: meetup, type: 'meetup' }] : []),
+        ...stops.map(s => ({ place: s.place!, type: s.kind })),
+        { place: destination, type: 'destination' },
+      ];
+      let routeGeometry: any = null, distance: number | null = null, duration: number | null = null;
+      if (TOKEN && ordered.length >= 2) {
+        const coords = ordered.map(p => p.place.longitude + ',' + p.place.latitude).join(';');
+        const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + coords +
+          '?overview=full&geometries=geojson&steps=false&access_token=' + TOKEN);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.routes?.[0]) {
+            routeGeometry = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
+            distance = Math.round(data.routes[0].distance);
+            duration = Math.round(data.routes[0].duration);
+          }
+        }
       }
-
-      const { data, error } = await supabase.from('rides').insert({
-        name,
-        admin_id: user.id,
-        origin,
-        destination,
-        origin_coords: originCoords,
-        destination_coords: destCoords,
+      const { data: ride, error } = await supabase.from('rides').insert({
+        name: name.trim(), description: description.trim() || null, trip_type: tripType,
+        start_date: startDate || null, end_date: endDate || null,
+        admin_id: user.id, origin: origin.address, destination: destination.address,
+        origin_coords: [origin.longitude, origin.latitude],
+        destination_coords: [destination.longitude, destination.latitude],
+        route_geometry: routeGeometry, estimated_distance_meters: distance, estimated_duration_seconds: duration,
       }).select().single();
-
       if (error) throw error;
 
-      Alert.alert('Ride Created!', `Share this code with your group: ${data.ride_code}`, [
-        { text: 'Go to Ride', onPress: () => router.push(`/ride/${data.id}`) },
-      ]);
+      const waypointRows = ordered.map((item, index) => ({
+        ride_id: ride.id, sequence: index, waypoint_type: item.type,
+        name: item.place.name, address: item.place.address,
+        latitude: item.place.latitude, longitude: item.place.longitude,
+        provider_place_id: item.place.id,
+      }));
+      const { error: waypointError } = await supabase.from('trip_waypoints').insert(waypointRows);
+      if (waypointError) throw waypointError;
 
-      setName('');
-      setOrigin('');
-      setDestination('');
+      let dayIds: string[] = [];
+      if (days.length) {
+        const { data: dayRows, error: dayError } = await supabase.from('trip_days').insert(
+          days.map((date, index) => ({ ride_id: ride.id, day_number: index + 1, trip_date: date, title: 'Day ' + (index + 1) }))
+        ).select('id');
+        if (dayError) throw dayError;
+        dayIds = (dayRows || []).map(row => row.id);
+      }
+      if (stay) {
+        const { error: stayError } = await supabase.from('trip_stays').insert({
+          ride_id: ride.id, trip_day_id: dayIds[0] || null, name: stay.name, stay_type: stayType,
+          address: stay.address, latitude: stay.latitude, longitude: stay.longitude,
+          provider_place_id: stay.id, check_in: checkIn || startDate || null,
+          check_out: checkOut || endDate || null,
+          price_amount: stayPrice ? Number(stayPrice) : null, price_currency: 'INR',
+        });
+        if (stayError) throw stayError;
+      }
+      Alert.alert('Trip created', 'Your trip plan is ready. You can invite riders and start organizing the journey.', [
+        { text: 'Open trip', onPress: () => router.push('/ride/' + ride.id) },
+      ]);
     } catch (error: any) {
-      Alert.alert('Error', error.message);
-    } finally {
-      setLoading(false);
-    }
+      Alert.alert('Could not create trip', error?.message || 'Please try again.');
+    } finally { setLoading(false); }
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      <Text style={styles.title}>Create a Group Ride</Text>
-      <Text style={styles.subtitle}>Set up a ride and share the code with your group</Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <Text style={styles.eyebrow}>PLAN YOUR NEXT ADVENTURE</Text>
+      <Text style={styles.title}>Create a trip</Text>
+      <Text style={styles.subtitle}>Build the journey first. Add your riders and start tracking when it is time to ride.</Text>
 
-      <View style={styles.form}>
-        <Text style={styles.label}>Ride Name</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Weekend Coastal Ride"
-          placeholderTextColor="#666"
-          value={name}
-          onChangeText={setName}
-        />
-
-        <Text style={styles.label}>Starting Point</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Bangalore, Karnataka"
-          placeholderTextColor="#666"
-          value={origin}
-          onChangeText={setOrigin}
-        />
-
-        <Text style={styles.label}>Destination</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Goa"
-          placeholderTextColor="#666"
-          value={destination}
-          onChangeText={setDestination}
-        />
-
-        <TouchableOpacity style={styles.button} onPress={handleCreate} disabled={loading}>
-          <Text style={styles.buttonText}>{loading ? 'Creating...' : 'Create Ride'}</Text>
-        </TouchableOpacity>
+      <View style={styles.card}>
+        <Text style={styles.section}>Trip details</Text>
+        <View style={styles.field}>
+          <Text style={styles.label}>Trip name *</Text>
+          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="e.g. Western Ghats escape" placeholderTextColor="#77809a" />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Trip type</Text>
+          <View style={styles.chips}>
+            {(['solo','group','weekend','touring','expedition'] as const).map(type => (
+              <TouchableOpacity key={type} onPress={() => setTripType(type)} style={[styles.chip, tripType === type && styles.chipActive]}>
+                <Text style={[styles.chipText, tripType === type && styles.chipTextActive]}>{type[0].toUpperCase() + type.slice(1)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Description</Text>
+          <TextInput style={[styles.input, styles.multiline]} multiline value={description} onChangeText={setDescription} placeholder="What is this trip about?" placeholderTextColor="#77809a" />
+        </View>
+        <View style={styles.row}>
+          <View style={styles.half}><Text style={styles.label}>Start date</Text><TextInput style={styles.input} value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD" placeholderTextColor="#77809a" /></View>
+          <View style={styles.half}><Text style={styles.label}>End date</Text><TextInput style={styles.input} value={endDate} onChangeText={setEndDate} placeholder="YYYY-MM-DD" placeholderTextColor="#77809a" /></View>
+        </View>
       </View>
+
+      <View style={styles.card}>
+        <Text style={styles.section}>Route & places</Text>
+        <Text style={styles.helper}>Search for real places and select a suggestion. A typed string alone is not saved as a location.</Text>
+        <LocationSearch label="Origin *" placeholder="Search starting point" value={origin} onChange={setOrigin} />
+        <LocationSearch label="Destination *" placeholder="Search final destination" value={destination} onChange={setDestination} />
+        <LocationSearch label="Group meetup point" placeholder="Optional: where riders meet" value={meetup} onChange={setMeetup} />
+        {stops.map((stop, index) => (
+          <View key={stop.key} style={styles.stopBlock}>
+            <View style={styles.stopHeader}>
+              <Text style={styles.label}>{stop.kind === 'fuel' ? 'Fuel stop' : 'Waypoint'} {index + 1}</Text>
+              <TouchableOpacity onPress={() => setStops(current => current.filter(s => s.key !== stop.key))}><Text style={styles.remove}>Remove</Text></TouchableOpacity>
+            </View>
+            <LocationSearch label="Location" placeholder="Search a place to stop" value={stop.place} onChange={place => updateStop(stop.key, place)} />
+          </View>
+        ))}
+        <View style={styles.chips}>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}><Text style={styles.addText}>＋ Add stop</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}><Text style={styles.addText}>＋ Fuel stop</Text></TouchableOpacity>
+        </View>
+        {days.length > 0 ? <Text style={styles.helper}>{days.length} itinerary day(s) will be created automatically.</Text> : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.section}>Overnight stay</Text>
+        <Text style={styles.helper}>Add the first night's accommodation now. You can manage additional stays in the trip workspace.</Text>
+        <LocationSearch label="Hotel / homestay / campsite" placeholder="Search accommodation" value={stay} onChange={setStay} />
+        <View style={styles.chips}>
+          {(['hotel','homestay','hostel','camping','guesthouse'] as const).map(type => (
+            <TouchableOpacity key={type} onPress={() => setStayType(type)} style={[styles.chip, stayType === type && styles.chipActive]}>
+              <Text style={[styles.chipText, stayType === type && styles.chipTextActive]}>{type}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.row}>
+          <View style={styles.half}><Text style={styles.label}>Check-in</Text><TextInput style={styles.input} value={checkIn} onChangeText={setCheckIn} placeholder="YYYY-MM-DD" placeholderTextColor="#77809a" /></View>
+          <View style={styles.half}><Text style={styles.label}>Check-out</Text><TextInput style={styles.input} value={checkOut} onChangeText={setCheckOut} placeholder="YYYY-MM-DD" placeholderTextColor="#77809a" /></View>
+        </View>
+        <View style={styles.field}><Text style={styles.label}>Price (INR)</Text><TextInput style={styles.input} value={stayPrice} onChangeText={setStayPrice} keyboardType="decimal-pad" placeholder="Optional" placeholderTextColor="#77809a" /></View>
+      </View>
+
+      <TouchableOpacity style={[styles.primary, loading && { opacity: 0.65 }]} onPress={handleCreate} disabled={loading}>
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Create trip plan  →</Text>}
+      </TouchableOpacity>
+      <Text style={styles.footer}>Route time is a map-provider estimate for driving, not a motorcycle-specific ETA. We'll refine touring estimates and day planning in the next iteration.</Text>
     </ScrollView>
   );
 }
 
-async function geocode(place: string): Promise<[number, number] | null> {
-  const token = process.env.EXPO_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return null;
-  try {
-    const res = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(place)}.json?country=IN&access_token=${token}`
-    );
-    const data = await res.json();
-    if (data.features && data.features.length > 0) {
-      return data.features[0].center as [number, number]; // [lng, lat]
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
-  scroll: { padding: 24 },
-  title: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
-  subtitle: { color: '#999', fontSize: 14, marginTop: 4, marginBottom: 24 },
-  form: { gap: 12 },
-  label: { color: '#ccc', fontSize: 14, fontWeight: '500' },
-  input: {
-    backgroundColor: '#16213e',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#fff',
-    borderWidth: 1,
-    borderColor: '#0f3460',
-  },
-  button: {
-    backgroundColor: '#FF6B00',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  buttonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  container: { flex: 1, backgroundColor: '#101827' },
+  content: { padding: 18, paddingBottom: 44 },
+  eyebrow: { color: '#FF8A32', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
+  title: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6 },
+  subtitle: { color: '#aab4c8', fontSize: 14, lineHeight: 21, marginTop: 7, marginBottom: 18 },
+  card: { backgroundColor: '#192438', borderColor: '#293951', borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 14, gap: 14 },
+  section: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  field: { gap: 7 },
+  label: { color: '#d7deeb', fontSize: 13, fontWeight: '700' },
+  input: { backgroundColor: '#101a2b', borderColor: '#35445c', borderWidth: 1, borderRadius: 11, paddingHorizontal: 13, paddingVertical: 12, color: '#fff', fontSize: 14 },
+  multiline: { minHeight: 76, textAlignVertical: 'top' },
+  helper: { color: '#98a6bd', fontSize: 12, lineHeight: 18 },
+  selected: { color: '#75d7a2', fontSize: 11, marginTop: 5 },
+  help: { color: '#ffbd80', fontSize: 11, marginTop: 5 },
+  suggestions: { backgroundColor: '#23324a', borderColor: '#455570', borderWidth: 1, borderRadius: 10, overflow: 'hidden', marginTop: 2 },
+  suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: '#394962' },
+  suggestionTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  suggestionAddress: { color: '#aab6ca', fontSize: 11, marginTop: 3 },
+  row: { flexDirection: 'row', gap: 10 },
+  half: { flex: 1, gap: 7 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  chip: { borderRadius: 20, borderWidth: 1, borderColor: '#46546b', paddingHorizontal: 11, paddingVertical: 8 },
+  chipActive: { backgroundColor: '#5b321f', borderColor: '#FF8A32' },
+  chipText: { color: '#bdc7d8', fontSize: 11, textTransform: 'capitalize' },
+  chipTextActive: { color: '#ffb77e', fontWeight: '800' },
+  stopBlock: { borderTopWidth: 1, borderTopColor: '#33425a', paddingTop: 12, gap: 8 },
+  stopHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  remove: { color: '#ff8e8e', fontSize: 12, fontWeight: '700' },
+  addButton: { borderWidth: 1, borderColor: '#52627b', borderStyle: 'dashed', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  addText: { color: '#ffad70', fontSize: 12, fontWeight: '700' },
+  primary: { backgroundColor: '#f47721', borderRadius: 13, padding: 16, alignItems: 'center', marginTop: 3 },
+  primaryText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  footer: { color: '#8290a6', fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12 },
 });
