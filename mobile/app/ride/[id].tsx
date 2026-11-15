@@ -18,6 +18,32 @@ if (MAPBOX_TOKEN) {
   catch { /* Native maps are unavailable in Expo Go; the rider panel still works. */ }
 }
 
+
+function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+}
+function distanceToRouteMeters(point: { lat: number; lng: number }, coordinates: number[][]) {
+  if (coordinates.length < 2) return Number.POSITIVE_INFINITY;
+  const cosLat = Math.cos(point.lat * Math.PI / 180);
+  const project = (coord: number[]) => ({
+    x: (coord[0] - point.lng) * 111320 * cosLat,
+    y: (coord[1] - point.lat) * 110540,
+  });
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const a = project(coordinates[i]), b = project(coordinates[i + 1]);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const denom = dx * dx + dy * dy;
+    const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / denom));
+    nearest = Math.min(nearest, Math.hypot(a.x + t * dx, a.y + t * dy));
+  }
+  return nearest;
+}
+
 export default function LiveRideScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
@@ -46,6 +72,7 @@ export default function LiveRideScreen() {
   const [route, setRoute] = useState<Ride['route_geometry']>();
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const lastSafetyAlertAt = useRef<Record<string, number>>({});
   const active = ride?.status === 'active';
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
@@ -68,6 +95,44 @@ export default function LiveRideScreen() {
   }), [animated, userId, now]);
   const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()),15000); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    if (!active || !position || !userId || isStale(position.timestamp, now) || !ride) return;
+    const publishSafetyAlert = async (key: string, type: AlertType, lat: number, lng: number, message: string) => {
+      const last = lastSafetyAlertAt.current[key] || 0;
+      if (now - last < 5 * 60 * 1000) return;
+      lastSafetyAlertAt.current[key] = now;
+      try {
+        await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat, lng, message, created_at: new Date(now).toISOString() });
+        await sync.flushQueue();
+        await refresh();
+      } catch (e) {
+        setMessage(e instanceof Error ? e.message : 'Could not publish a group safety alert.');
+      }
+    };
+    const routeCoordinates = route?.geometry?.coordinates;
+    if (Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
+      const deviation = distanceToRouteMeters(position, routeCoordinates);
+      const limit = ride.route_deviation_threshold_meters || 500;
+      if (deviation > limit) void publishSafetyAlert('route-deviation', 'route_deviation', position.lat, position.lng,
+        'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).');
+    }
+    const leader = participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now));
+    if (admin && leader) {
+      for (const rider of participants) {
+        if (rider.user_id === ride.admin_id || isStale(rider.timestamp, now)) continue;
+        const gap = distanceMeters(leader, rider);
+        const limit = ride.rider_behind_threshold_meters || 1000;
+        if (gap > limit) void publishSafetyAlert('rider-behind-' + rider.user_id, 'rider_behind', rider.lat, rider.lng,
+          rider.display_name + ' is approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
+      }
+    } else if (!admin && leader) {
+      const gap = distanceMeters(leader, position);
+      const limit = ride.rider_behind_threshold_meters || 1000;
+      if (gap > limit) void publishSafetyAlert('rider-behind-self', 'rider_behind', position.lat, position.lng,
+        'You are approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
+    }
+  }, [active,position,participants,route,ride?.id,ride?.admin_id,ride?.route_deviation_threshold_meters,ride?.rider_behind_threshold_meters,admin,userId,id,now,sync.flushQueue,refresh]);
+
   useEffect(() => {
     if (!active || !sharing || !userId) {
       setTracking('paused');
