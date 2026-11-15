@@ -14,7 +14,7 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place' }:
   const [query, setQuery] = useState(value?.name || '');
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
-  useEffect(() => { setQuery(value?.name || ''); }, [value?.id]);
+  useEffect(() => { if (value) setQuery(value.name); }, [value?.id]);
   useEffect(() => {
     if (value && query === value.name) { setSuggestions([]); return; }
     if (query.trim().length < 3 || !TOKEN) { setSuggestions([]); return; }
