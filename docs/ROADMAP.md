@@ -13,8 +13,8 @@ This document is the implementation source of truth. Each phase should be delive
 ## Phase 2 — Group Ride Control Center
 - [x] Trip invitations with expiry and acceptance state (migration 009, token-based acceptance and targeted-email checks).
 - [x] Participant roles: leader, sweep, rider (admin leader bootstrap, sweep/rider assignment and roster RPC).
-- [ ] Live/stale/offline rider status.
-- [ ] Automatic route-deviation and rider-behind alert detection (threshold configuration implemented).
+- [x] Live/stale/offline rider status (persisted GPS freshness labels; Presence connection status remains separately available in live tracker).
+- [x] Configurable route-deviation and rider-behind alerts (client-side detection, configurable thresholds and five-minute per-condition throttle).
 - [x] Regroup points and arrival confirmation (member-scoped confirmations and arrival counts).
 - [ ] Privacy and membership tests.
 
