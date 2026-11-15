@@ -132,6 +132,29 @@ BEGIN
 
   BEGIN
     PERFORM public.create_trip_plan(
+      '{"name":"Invalid dates","trip_type":"touring","start_date":"2026-11-22","end_date":"2026-11-20","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+      '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+      '[]'::jsonb,
+      NULL
+    );
+    RAISE EXCEPTION 'invalid trip date range unexpectedly accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'invalid trip date range unexpectedly accepted' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM public.create_trip_plan(
+      '{"name":"Invalid stay price","trip_type":"touring","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+      '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+      '[]'::jsonb,
+      '{"name":"Bad stay","price_amount":-10}'::jsonb
+    );
+    RAISE EXCEPTION 'negative initial stay price unexpectedly accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'negative initial stay price unexpectedly accepted' THEN RAISE; END IF;
+  END;
+
+  BEGIN
+    PERFORM public.create_trip_plan(
       '{"name":"Must rollback","trip_type":"group","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
       '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":999,"longitude":78}]'::jsonb,
       '[]'::jsonb,
