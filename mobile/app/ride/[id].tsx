@@ -139,21 +139,29 @@ export default function LiveRideScreen() {
   async function enableBackgroundGps() {
     if (!userId) return;
     setGpsError(null);
-    const result = await enableBackgroundLocationUpdates({
-      rideId: id,
-      userId,
-      displayName: name,
-      publish,
-      onLocationUpdate: setPosition,
-      onError: setGpsError,
-    });
-    if (result.permissionGranted) setBackgroundPermissionGranted(true);
-    if (result.isBackgroundEnabled) {
-      setTracking('background');
-      setBackgroundPermissionGranted(true);
-      setMessage(null);
-    } else if (result.permissionGranted) {
-      setMessage('Background permission granted. Tap Start background GPS again to activate it.');
+    setMessage(null);
+    try {
+      const result = await enableBackgroundLocationUpdates({
+        rideId: id,
+        userId,
+        displayName: name,
+        publish,
+        onLocationUpdate: setPosition,
+        onError: setGpsError,
+      });
+      if (result.permissionGranted) setBackgroundPermissionGranted(true);
+      if (result.isBackgroundEnabled) {
+        setTracking('background');
+        setBackgroundPermissionGranted(true);
+        setMessage(null);
+      } else if (result.permissionGranted) {
+        setMessage('Background permission granted. Tap Start background GPS again to activate it.');
+      }
+    } catch (e) {
+      // Permission APIs can reject on OEM Android builds. Never let a rejected
+      // native-module promise escape a button callback as an unhandled error.
+      setGpsError(e instanceof Error ? e.message : 'Android could not enable background GPS.');
+      setTracking('foreground');
     }
   }
   async function changeStatus(status: 'active' | 'completed') {
