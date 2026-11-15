@@ -10,7 +10,11 @@ BEGIN
     'public.bulk_insert_location_updates(jsonb)'::regprocedure,
     'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure,
     'public.save_trip_itinerary(uuid,jsonb)'::regprocedure,
-    'public.add_trip_stay(uuid,jsonb)'::regprocedure
+    'public.add_trip_stay(uuid,jsonb)'::regprocedure,
+    'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
+    'public.accept_trip_invitation(uuid)'::regprocedure,
+    'public.set_trip_participant_role(uuid,uuid,text)'::regprocedure,
+    'public.get_trip_roster(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
