@@ -14,8 +14,8 @@ This document is the implementation source of truth. Each phase should be delive
 - [x] Trip invitations with expiry and acceptance state (migration 009, token-based acceptance and targeted-email checks).
 - [x] Participant roles: leader, sweep, rider (admin leader bootstrap, sweep/rider assignment and roster RPC).
 - [ ] Live/stale/offline rider status.
-- [ ] Configurable route-deviation and rider-behind alerts.
-- [ ] Regroup points and arrival confirmation.
+- [ ] Automatic route-deviation and rider-behind alert detection (threshold configuration implemented).
+- [x] Regroup points and arrival confirmation (member-scoped confirmations and arrival counts).
 - [ ] Privacy and membership tests.
 
 ## Phase 3 — Motorcycle touring intelligence
