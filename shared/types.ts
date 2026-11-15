@@ -29,6 +29,8 @@ export interface Ride {
   end_date?: string | null;
   estimated_distance_meters?: number | null;
   estimated_duration_seconds?: number | null;
+  route_deviation_threshold_meters?: number;
+  rider_behind_threshold_meters?: number;
   created_at: string;
 }
 
