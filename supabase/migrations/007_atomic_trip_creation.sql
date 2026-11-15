@@ -33,7 +33,7 @@ BEGIN
   IF p_trip IS NULL OR jsonb_typeof(p_trip) <> 'object' THEN
     RAISE EXCEPTION 'Trip details must be an object';
   END IF;
-  IF jsonb_typeof(p_waypoints) <> 'array' OR jsonb_array_length(p_waypoints) < 2
+  IF p_waypoints IS NULL OR jsonb_typeof(p_waypoints) <> 'array' OR jsonb_array_length(p_waypoints) < 2
      OR jsonb_array_length(p_waypoints) > 200 THEN
     RAISE EXCEPTION 'Trip must contain between 2 and 200 waypoints';
   END IF;
