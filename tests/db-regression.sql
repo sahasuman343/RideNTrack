@@ -223,7 +223,7 @@ BEGIN
 END $$;
 
 SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
-DO $ DECLARE trip_id uuid; BEGIN
+DO $$ DECLARE trip_id uuid; BEGIN
   SELECT id INTO trip_id FROM public.rides WHERE name = 'Atomic trip fixture';
   IF (SELECT count(*) FROM public.get_ride_members('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) != 0 THEN RAISE EXCEPTION 'outsider sees members'; END IF;
   IF (SELECT count(*) FROM realtime.messages) != 0 THEN RAISE EXCEPTION 'outsider receives private presence'; END IF;
