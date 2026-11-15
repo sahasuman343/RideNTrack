@@ -14,7 +14,11 @@ BEGIN
     'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
     'public.accept_trip_invitation(uuid)'::regprocedure,
     'public.set_trip_participant_role(uuid,uuid,text)'::regprocedure,
-    'public.get_trip_roster(uuid)'::regprocedure
+    'public.get_trip_roster(uuid)'::regprocedure,
+    'public.update_group_safety_settings(uuid,integer,integer)'::regprocedure,
+    'public.add_regroup_point(uuid,text,double precision,double precision,integer,timestamp with time zone,text)'::regprocedure,
+    'public.confirm_regroup_arrival(uuid)'::regprocedure,
+    'public.get_regroup_points(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -196,6 +200,16 @@ BEGIN
   IF (SELECT count(*) FROM public.get_trip_roster(v_trip)) <> 2 THEN
     RAISE EXCEPTION 'trip roster missing active members';
   END IF;
+  PERFORM public.update_group_safety_settings(v_trip,750,1500);
+  PERFORM public.add_regroup_point(v_trip,'Lake regroup',12.9716,77.5946,0,NULL,'Wait for the group');
+  PERFORM set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',true);
+  IF public.confirm_regroup_arrival((SELECT id FROM public.trip_regroup_points WHERE ride_id=v_trip AND name='Lake regroup')) IS NULL THEN
+    RAISE EXCEPTION 'regroup arrival was not recorded';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.get_regroup_points(v_trip) WHERE name='Lake regroup' AND arrived_count=1 AND my_arrived) THEN
+    RAISE EXCEPTION 'regroup arrival status missing';
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',true);
   SELECT invitation_token INTO v_expired_token
     FROM public.create_trip_invitation(v_trip,NULL,'rider',1);
   UPDATE public.trip_invitations SET expires_at=now()-interval '1 minute'
