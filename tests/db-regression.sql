@@ -7,7 +7,8 @@ BEGIN
     'public.get_ride_members(uuid)'::regprocedure,
     'public.get_latest_ride_locations(uuid)'::regprocedure,
     'public.join_ride_by_code(text)'::regprocedure,
-    'public.bulk_insert_location_updates(jsonb)'::regprocedure
+    'public.bulk_insert_location_updates(jsonb)'::regprocedure,
+    'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -65,6 +66,50 @@ INSERT INTO public.alerts (id,ride_id,user_id,type,lat,lng) VALUES
  ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',auth.uid(),'fuel',0,0) ON CONFLICT DO NOTHING;
 SET realtime.topic = 'ride:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 INSERT INTO realtime.messages VALUES (1,'presence');
+
+-- Atomic trip aggregate creation: parent and child records commit together.
+DO $
+DECLARE created_id uuid;
+BEGIN
+  created_id := public.create_trip_plan(
+    '{"name":"Atomic trip fixture","trip_type":"touring","visibility":"invite_only","start_date":"2026-11-20","end_date":"2026-11-21","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77,"day_number":1},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78,"day_number":2}]'::jsonb,
+    '[{"day_number":1,"trip_date":"2026-11-20","title":"Day 1"},{"day_number":2,"trip_date":"2026-11-21","title":"Day 2"}]'::jsonb,
+    '{"name":"First stay","stay_type":"hotel","price_amount":1200,"day_number":1}'::jsonb
+  );
+  IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id = created_id AND admin_id = auth.uid()) THEN
+    RAISE EXCEPTION 'trip parent was not created for authenticated admin';
+  END IF;
+  IF (SELECT count(*) FROM public.trip_days WHERE ride_id = created_id) <> 2 THEN
+    RAISE EXCEPTION 'trip days missing';
+  END IF;
+  IF (SELECT count(*) FROM public.trip_waypoints WHERE ride_id = created_id) <> 2 THEN
+    RAISE EXCEPTION 'trip waypoints missing';
+  END IF;
+  IF (SELECT count(*) FROM public.trip_waypoints w JOIN public.trip_days d ON d.id = w.trip_day_id
+      WHERE w.ride_id = created_id AND d.day_number = w.sequence + 1) <> 2 THEN
+    RAISE EXCEPTION 'waypoint day assignment missing';
+  END IF;
+  IF (SELECT count(*) FROM public.trip_stays WHERE ride_id = created_id) <> 1 THEN
+    RAISE EXCEPTION 'initial stay missing';
+  END IF;
+
+  BEGIN
+    PERFORM public.create_trip_plan(
+      '{"name":"Must rollback","trip_type":"group","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+      '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":999,"longitude":78}]'::jsonb,
+      '[]'::jsonb,
+      NULL
+    );
+    RAISE EXCEPTION 'invalid waypoint unexpectedly accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  IF EXISTS (SELECT 1 FROM public.rides WHERE name = 'Must rollback') THEN
+    RAISE EXCEPTION 'failed child insert left a partial trip';
+  END IF;
+END $;
+
 SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
 DO $$ BEGIN
   IF (SELECT count(*) FROM public.get_ride_members('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) != 0 THEN RAISE EXCEPTION 'outsider sees members'; END IF;
