@@ -104,7 +104,8 @@ BEGIN
   END IF;
   INSERT INTO public.ride_participants(ride_id,user_id,is_active,role)
   VALUES(v_inv.ride_id,auth.uid(),true,v_inv.assigned_role)
-  ON CONFLICT(ride_id,user_id) DO UPDATE SET is_active=true, role=EXCLUDED.role;
+  ON CONFLICT(ride_id,user_id) DO UPDATE SET is_active=true,
+    role=CASE WHEN public.ride_participants.role='leader' THEN 'leader' ELSE EXCLUDED.role END;
   UPDATE public.trip_invitations SET status='accepted',accepted_by=auth.uid(),accepted_at=now()
     WHERE id=v_inv.id;
   RETURN v_inv.ride_id;
