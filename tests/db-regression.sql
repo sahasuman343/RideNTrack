@@ -78,7 +78,8 @@ SET realtime.topic = 'ride:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 INSERT INTO realtime.messages VALUES (1,'presence');
 
 -- Atomic trip aggregate creation: parent and child records commit together.
-DO $$
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $
 DECLARE created_id uuid;
 BEGIN
   created_id := public.create_trip_plan(
