@@ -10,6 +10,7 @@
 
 ## Behavior
 - GPS is collected only during an active ride while sharing is enabled. Leaving the ride screen, pausing, signing out, or receiving a completed status stops collection.
+- Mobile starts foreground GPS first. Background location permission is requested only after the rider explicitly chooses **Enable background GPS**; on Android 11+ the user returns from system Settings and taps again to start the native location foreground service. This separates the permission Settings transition from native service startup and preserves foreground GPS if background access is denied or service startup fails.
 - The active ride context is persisted for OS background task callbacks. OS force-stop and vendor battery restrictions can still stop tracking.
 - SQLite stores queued events atomically and migrates old AsyncStorage queues once. Events are scoped to the signed-in account. There is no silent 2,000-point truncation.
 - GPS uses high-accuracy fixes with a 5-second time interval and 15-metre distance threshold. These are starting values to validate on physical devices, not a guarantee that Android delivers fixes at an exact cadence.
