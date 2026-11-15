@@ -8,7 +8,9 @@ BEGIN
     'public.get_latest_ride_locations(uuid)'::regprocedure,
     'public.join_ride_by_code(text)'::regprocedure,
     'public.bulk_insert_location_updates(jsonb)'::regprocedure,
-    'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure
+    'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure,
+    'public.save_trip_itinerary(uuid,jsonb)'::regprocedure,
+    'public.add_trip_stay(uuid,jsonb)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -93,6 +95,40 @@ BEGIN
   IF (SELECT count(*) FROM public.trip_stays WHERE ride_id = created_id) <> 1 THEN
     RAISE EXCEPTION 'initial stay missing';
   END IF;
+
+  -- Add a second stay and verify multiple stays can belong to one trip day.
+  PERFORM public.add_trip_stay(created_id,
+    '{"name":"Second stay","stay_type":"homestay","price_amount":800,"day_number":2}'::jsonb);
+  IF (SELECT count(*) FROM public.trip_stays WHERE ride_id = created_id) <> 2 THEN
+    RAISE EXCEPTION 'multiple stays were not persisted';
+  END IF;
+
+  -- Reorder all waypoints and move the first waypoint to day two.
+  PERFORM public.save_trip_itinerary(created_id, (
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', w.id,
+      'sequence', CASE WHEN w.sequence = 0 THEN 1 ELSE 0 END,
+      'day_number', CASE WHEN w.sequence = 0 THEN 2 ELSE 1 END
+    ) ORDER BY w.sequence DESC)
+    FROM public.trip_waypoints w WHERE w.ride_id = created_id
+  ));
+  IF NOT EXISTS (
+    SELECT 1 FROM public.trip_waypoints w JOIN public.trip_days d ON d.id = w.trip_day_id
+    WHERE w.ride_id = created_id AND w.name = 'B' AND w.sequence = 0 AND d.day_number = 1
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.trip_waypoints w JOIN public.trip_days d ON d.id = w.trip_day_id
+    WHERE w.ride_id = created_id AND w.name = 'A' AND w.sequence = 1 AND d.day_number = 2
+  ) THEN
+    RAISE EXCEPTION 'itinerary reorder or day reassignment failed';
+  END IF;
+
+  BEGIN
+    PERFORM public.add_trip_stay(created_id,
+      '{"name":"Invalid price","price_amount":-1,"day_number":1}'::jsonb);
+    RAISE EXCEPTION 'negative stay price unexpectedly accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'negative stay price unexpectedly accepted' THEN RAISE; END IF;
+  END;
 
   BEGIN
     PERFORM public.create_trip_plan(
