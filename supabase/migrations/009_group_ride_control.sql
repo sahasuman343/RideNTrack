@@ -49,6 +49,9 @@ CREATE POLICY "Trip leaders manage invitations" ON public.trip_invitations
   USING (EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid()))
   WITH CHECK (EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid()));
 
+REVOKE INSERT,UPDATE,DELETE ON public.trip_invitations FROM PUBLIC,anon,authenticated;
+GRANT SELECT ON public.trip_invitations TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.create_trip_invitation(
   p_ride_id UUID,
   p_email TEXT DEFAULT NULL,
