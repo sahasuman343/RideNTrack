@@ -25,7 +25,7 @@ A rider can create a multi-day motorcycle trip with a route, ordered places, iti
 
 ## Authorization
 - Only an authenticated user can create a trip.
-- The RPC sets `admin_id` from `auth.uid()`; clients cannot create a trip on behalf of another user.
+- The RPC sets `admin_id` from `auth.uid()`; clients cannot create a trip on behalf of another user. Execute permission is explicitly revoked from both PUBLIC and anon, then granted only to authenticated users.
 - Existing trip-member read and ride-admin write policies continue to apply to child records.
 
 ## Failure handling
