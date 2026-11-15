@@ -175,7 +175,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.rides WHERE name = 'Must rollback') THEN
     RAISE EXCEPTION 'failed child insert left a partial trip';
   END IF;
-END $;
+END $$;
 
 -- Phase 2: invite acceptance, role assignment, roster visibility and expiry.
 DO $
@@ -220,7 +220,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.trip_invitations WHERE token=v_expired_token AND status='expired') THEN
     RAISE EXCEPTION 'expired invitation state was not persisted';
   END IF;
-END $;
+END $$;
 
 SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
 DO $ DECLARE trip_id uuid; BEGIN
