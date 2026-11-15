@@ -77,13 +77,19 @@ export interface TripStay {
   notes?: string | null;
 }
 
+export type RideParticipantRole = 'leader' | 'sweep' | 'rider';
+export type RiderConnectionStatus = 'live' | 'stale' | 'offline';
+
 export interface RideParticipant {
   id: string;
   ride_id: string;
   user_id: string;
   display_name: string;
+  role: RideParticipantRole;
   is_active: boolean;
   joined_at: string;
+  last_seen?: string | null;
+  connection_status?: RiderConnectionStatus;
 }
 
 export interface LocationUpdate {
