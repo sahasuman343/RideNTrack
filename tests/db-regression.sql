@@ -211,9 +211,7 @@ BEGIN
   END IF;
   PERFORM set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',true);
   SELECT invitation_token INTO v_expired_token
-    FROM public.create_trip_invitation(v_trip,NULL,'rider',1);
-  UPDATE public.trip_invitations SET expires_at=now()-interval '1 minute'
-    WHERE token=v_expired_token;
+    FROM public.create_trip_invitation(v_trip,NULL,'rider',0);
   PERFORM set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',true);
   IF public.accept_trip_invitation(v_expired_token) IS NOT NULL THEN
     RAISE EXCEPTION 'expired invitation was accepted';
