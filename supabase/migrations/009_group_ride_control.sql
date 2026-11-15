@@ -10,12 +10,12 @@ FROM public.rides r
 WHERE r.id = rp.ride_id AND r.admin_id = rp.user_id;
 
 CREATE OR REPLACE FUNCTION public.auto_join_admin()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   INSERT INTO public.ride_participants (ride_id,user_id,role)
   VALUES (NEW.id,NEW.admin_id,'leader');
   RETURN NEW;
-END; $;
+END; $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ride_one_leader_per_trip
   ON public.ride_participants(ride_id) WHERE role = 'leader';
