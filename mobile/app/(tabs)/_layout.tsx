@@ -20,14 +20,14 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'My Rides',
+          title: 'My Trips',
           tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>🏍️</Text>,
         }}
       />
       <Tabs.Screen
         name="create"
         options={{
-          title: 'Create Ride',
+          title: 'Plan Trip',
           tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>➕</Text>,
         }}
       />
