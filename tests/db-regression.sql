@@ -68,7 +68,7 @@ SET realtime.topic = 'ride:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 INSERT INTO realtime.messages VALUES (1,'presence');
 
 -- Atomic trip aggregate creation: parent and child records commit together.
-DO $
+DO $$
 DECLARE created_id uuid;
 BEGIN
   created_id := public.create_trip_plan(
@@ -108,7 +108,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.rides WHERE name = 'Must rollback') THEN
     RAISE EXCEPTION 'failed child insert left a partial trip';
   END IF;
-END $;
+END $$;
 
 SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
 DO $$ BEGIN
