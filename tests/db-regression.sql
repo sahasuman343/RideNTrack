@@ -178,7 +178,7 @@ BEGIN
 END $$;
 
 -- Phase 2: invite acceptance, role assignment, roster visibility and expiry.
-DO $
+DO $$
 DECLARE v_trip UUID; v_token UUID; v_expired_token UUID; v_joined UUID;
 BEGIN
   SELECT id INTO v_trip FROM public.rides WHERE name='Atomic trip fixture';
