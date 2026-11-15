@@ -4,10 +4,10 @@ This document is the implementation source of truth. Each phase should be delive
 
 ## Phase 1 — Trip foundation hardening
 - [x] Initial trip schema and workspace foundation (PR #6).
-- [ ] Atomic trip creation RPC.
-- [ ] Day assignment for waypoints.
-- [ ] Date and price validation.
-- [ ] Transaction/RLS regression tests.
+- [x] Atomic trip creation RPC.
+- [x] Day assignment for waypoints (nullable FK and creation payload support).
+- [x] Date and price validation at aggregate write boundary.
+- [x] Transaction/RLS regression tests (added; CI verification pending).
 - [ ] Itinerary edit/reorder and multiple stays.
 
 ## Phase 2 — Group Ride Control Center
