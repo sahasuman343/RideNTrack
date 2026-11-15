@@ -5,7 +5,7 @@ import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
-type WaypointKind = 'meetup' | 'stop';
+type WaypointKind = 'fuel' | 'stop';
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 
 function LocationSearch({ label, placeholder, value, onChange, kind = 'place' }: {
