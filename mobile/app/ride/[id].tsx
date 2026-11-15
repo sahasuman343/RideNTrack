@@ -9,7 +9,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
-import { startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { enableBackgroundLocationUpdates, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
 const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 let Mapbox: typeof import('@rnmapbox/maps').default | null = null;
@@ -33,6 +33,7 @@ export default function LiveRideScreen() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(true);
   const [gpsRetry, setGpsRetry] = useState(0);
+  const [backgroundPermissionGranted, setBackgroundPermissionGranted] = useState(false);
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(200);
@@ -135,6 +136,26 @@ export default function LiveRideScreen() {
       /* Ignore camera bounds error */
     }
   }
+  async function enableBackgroundGps() {
+    if (!userId) return;
+    setGpsError(null);
+    const result = await enableBackgroundLocationUpdates({
+      rideId: id,
+      userId,
+      displayName: name,
+      publish,
+      onLocationUpdate: setPosition,
+      onError: setGpsError,
+    });
+    if (result.permissionGranted) setBackgroundPermissionGranted(true);
+    if (result.isBackgroundEnabled) {
+      setTracking('background');
+      setBackgroundPermissionGranted(true);
+      setMessage(null);
+    } else if (result.permissionGranted) {
+      setMessage('Background permission granted. Tap Start background GPS again to activate it.');
+    }
+  }
   async function changeStatus(status: 'active' | 'completed') {
     setBusy(true); setMessage(null);
     try {
@@ -228,7 +249,7 @@ export default function LiveRideScreen() {
           <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>
         </TouchableOpacity>}
       />}
-      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
+      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
     <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? Dialog.alert('Send emergency alert?', 'Notify your group that you need help.', [{ text: 'Cancel',style: 'cancel' },{ text: 'Send alert',onPress: () => void sendAlert(type) }]) : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
