@@ -181,21 +181,22 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
   await service.stopBackgroundLocationUpdates();
 });
 
-test('background tracking waits for the additional permission before starting native updates', async () => {
+test('Android background permission and native GPS service start are separate user actions', async () => {
   const storage = new Map();
-  let requested = 0, started = 0, startedOptions, resolvePermission;
-  const permissionResult = new Promise(resolve => { resolvePermission = resolve; });
+  let requested = 0, started = 0, startedOptions, permissionGranted = false, foregroundWatch = 0;
   const service = loader({
     'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
     'expo-task-manager': { isTaskDefined:()=>true },
     'expo-location': {
       Accuracy:{High:4},
       requestForegroundPermissionsAsync:async()=>({status:'granted'}),
+      getForegroundPermissionsAsync:async()=>({status:'granted'}),
       isBackgroundLocationAvailableAsync:async()=>true,
-      getBackgroundPermissionsAsync:async()=>({status:'undetermined'}),
-      requestBackgroundPermissionsAsync:()=>{requested++;return permissionResult;},
+      getBackgroundPermissionsAsync:async()=>({status:permissionGranted?'granted':'undetermined'}),
+      requestBackgroundPermissionsAsync:async()=>{requested++;permissionGranted=true;return {status:'granted'};},
       hasStartedLocationUpdatesAsync:async()=>false,
       startLocationUpdatesAsync:async(_task,options)=>{started++;startedOptions=options;},
+      watchPositionAsync:async()=>{foregroundWatch++;return {remove(){}};},
       stopLocationUpdatesAsync:async()=>{},
     },
     '@react-native-async-storage/async-storage': {
@@ -207,15 +208,25 @@ test('background tracking waits for the additional permission before starting na
     '../lib/offlineQueue':{enqueueLocation:async()=>{}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
-  const starting = service.startBackgroundLocationUpdates({rideId:'ride',userId:'u',displayName:'Rider'});
-  await new Promise(resolve=>setImmediate(resolve));
+  const params={rideId:'ride',userId:'u',displayName:'Rider'};
+  const foreground = await service.startBackgroundLocationUpdates(params);
+  assert.equal(foreground.isBackgroundEnabled,false);
+  assert.equal(foregroundWatch,1);
+  assert.equal(requested,0);
+  assert.equal(started,0);
+
+  const permissionStep = await service.enableBackgroundLocationUpdates(params);
+  assert.equal(permissionStep.permissionGranted,true);
+  assert.equal(permissionStep.isBackgroundEnabled,false);
   assert.equal(requested,1);
   assert.equal(started,0);
-  resolvePermission({status:'granted'});
-  const result = await starting;
+
+  const serviceStep = await service.enableBackgroundLocationUpdates(params);
+  assert.equal(serviceStep.permissionGranted,true);
+  assert.equal(serviceStep.isBackgroundEnabled,true);
   assert.equal(started,1);
   assert.equal(startedOptions.timeInterval,5000);
   assert.equal(startedOptions.distanceInterval,15);
-  assert.equal(result.isBackgroundEnabled,true);
+  assert.equal(startedOptions.foregroundService.notificationTitle,'RideNTrack · Sharing location');
   await service.stopBackgroundLocationUpdates();
 });
