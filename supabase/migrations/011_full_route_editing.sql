@@ -81,13 +81,12 @@ BEGIN
     RAISE EXCEPTION 'A route point has invalid coordinates, name, type or trip day';
   END IF;
   IF (SELECT count(DISTINCT w.sequence) FROM jsonb_to_recordset(p_waypoints) AS w(sequence INTEGER)) <> v_total
-     OR (SELECT count(DISTINCT w.id) FROM jsonb_to_recordset(p_waypoints) AS w(id UUID)) FILTER (WHERE w.id IS NOT NULL) > v_total THEN
+     OR (SELECT count(*) FROM jsonb_to_recordset(p_waypoints) AS w(id UUID) WHERE w.id IS NOT NULL)
+        <> (SELECT count(DISTINCT w.id) FROM jsonb_to_recordset(p_waypoints) AS w(id UUID) WHERE w.id IS NOT NULL) THEN
     RAISE EXCEPTION 'Route point sequences and IDs must be unique';
   END IF;
-  IF EXISTS (
-    SELECT 1 FROM jsonb_to_recordset(p_waypoints) AS w(sequence INTEGER)
-    WHERE w.sequence >= v_total
-  ) THEN
+  IF (SELECT min(w.sequence) FROM jsonb_to_recordset(p_waypoints) AS w(sequence INTEGER)) <> 0
+     OR (SELECT max(w.sequence) FROM jsonb_to_recordset(p_waypoints) AS w(sequence INTEGER)) <> v_total - 1 THEN
     RAISE EXCEPTION 'Route point sequences must be contiguous starting at zero';
   END IF;
   IF EXISTS (
