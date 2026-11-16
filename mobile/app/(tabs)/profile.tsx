@@ -22,10 +22,10 @@ export default function ProfileScreen() {
   }
   async function saveProfile() {
     if (!displayName.trim()) { Alert.alert('Name required', 'Please enter your display name.'); return; }
-    if (phone.trim() && !/^\\+?[0-9 ()-]{7,20}$/.test(phone.trim())) {
+    if (phone.trim() && !/^\+?[0-9 ()-]{7,20}$/.test(phone.trim())) {
       Alert.alert('Check phone number', 'Enter a valid phone number, including country code if needed.'); return;
     }
-    if (avatarUrl.trim() && !/^https?:\\/\\//i.test(avatarUrl.trim())) {
+    if (avatarUrl.trim() && !/^https?:\/\//i.test(avatarUrl.trim())) {
       Alert.alert('Invalid photo URL', 'Use a public HTTPS or HTTP image URL.'); return;
     }
     setSaving(true);
