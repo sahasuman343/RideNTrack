@@ -95,6 +95,7 @@ export default function TripWorkspaceScreen() {
   }
 
   async function saveTripDetails() {
+    if (!editName.trim()) { Alert.alert('Trip name required', 'Enter a name for this trip.'); return; }
     setSaving(true); setError('');
     try {
       const { error: updateError } = await supabase.from('rides').update({
