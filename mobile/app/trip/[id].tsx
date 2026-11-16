@@ -110,6 +110,31 @@ export default function TripWorkspaceScreen() {
     } finally { setSaving(false); }
   }
 
+  function confirmDeleteTrip() {
+    if (!trip || !isAdmin || saving) return;
+    Alert.alert(
+      'Delete this trip permanently?',
+      '“' + trip.name + '” and its route, itinerary, invitations, regroup points and trip history will be deleted for everyone. This cannot be undone.',
+      [
+        { text: 'Keep trip', style: 'cancel' },
+        { text: 'Delete permanently', style: 'destructive', onPress: () => { void deleteTrip(); } },
+      ],
+    );
+  }
+
+  async function deleteTrip() {
+    if (!trip || !isAdmin) return;
+    setSaving(true); setError('');
+    try {
+      const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: id });
+      if (deleteError) throw deleteError;
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      setError(e?.message || 'Could not delete this trip.');
+      setSaving(false);
+    }
+  }
+
   async function openDirections(point: Waypoint) {
     const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(point.latitude + ',' + point.longitude);
     await Linking.openURL(url);
@@ -262,6 +287,9 @@ export default function TripWorkspaceScreen() {
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={openTripEditor}><Text style={styles.secondaryText}>Trip details</Text></TouchableOpacity>
       </View>}
+      {isAdmin && <TouchableOpacity style={styles.dangerButton} disabled={saving} onPress={confirmDeleteTrip}>
+        <Text style={styles.dangerText}>{saving ? 'Please wait…' : 'Delete trip permanently'}</Text>
+      </TouchableOpacity>}
 
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
@@ -430,5 +458,6 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
   roleSelected: { borderColor: c.accent, backgroundColor: c.accentSoft },
   day: { borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 11 }, dayTitle: { color: c.text, fontWeight: '700', fontSize: 13 },
+  dangerButton: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 }, dangerText: { color: c.danger, fontWeight: '900', fontSize: 12 },
   error: { color: c.danger, marginTop: 12 }, footer: { color: c.subtle, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
 });
