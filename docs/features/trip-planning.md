@@ -61,3 +61,12 @@ The RPC is transactional. Any invalid child record or failed insert rolls back t
 - Existing trip-day assignments are carried through route edits. New stops remain unassigned until assigned through the itinerary workflow.
 - The database RPC enforces trip-admin ownership, validates route point order, types, coordinates, day ownership and GeoJSON geometry, and updates parent route metadata and waypoints atomically.
 - Mapbox's `driving` profile is a general driving estimate, not a motorcycle-specific route or ETA. Riders should verify road suitability and local conditions.
+
+
+## Trip deletion
+
+- The trip leader can permanently delete a trip from its workspace using a separate destructive action and a confirmation dialog.
+- Deletion is performed through the `delete_trip` RPC, which verifies the authenticated caller owns the trip before deleting the parent ride.
+- Existing foreign-key cascade rules remove dependent trip data such as participants, waypoints, days, stays, invitations and regroup points.
+- Members cannot delete a trip; the database function independently enforces leader ownership.
+- Deletion is permanent and removes the shared trip for all participants.
