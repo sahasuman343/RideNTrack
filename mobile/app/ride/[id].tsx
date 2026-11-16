@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale } from '@ridentrack/shared';
+import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -20,30 +20,6 @@ if (MAPBOX_TOKEN) {
 }
 
 
-function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const rad = Math.PI / 180;
-  const dLat = (b.lat - a.lat) * rad;
-  const dLng = (b.lng - a.lng) * rad;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
-}
-function distanceToRouteMeters(point: { lat: number; lng: number }, coordinates: number[][]) {
-  if (coordinates.length < 2) return Number.POSITIVE_INFINITY;
-  const cosLat = Math.cos(point.lat * Math.PI / 180);
-  const project = (coord: number[]) => ({
-    x: (coord[0] - point.lng) * 111320 * cosLat,
-    y: (coord[1] - point.lat) * 110540,
-  });
-  let nearest = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    const a = project(coordinates[i]), b = project(coordinates[i + 1]);
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const denom = dx * dx + dy * dy;
-    const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / denom));
-    nearest = Math.min(nearest, Math.hypot(a.x + t * dx, a.y + t * dy));
-  }
-  return nearest;
-}
 
 export default function LiveRideScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
@@ -66,7 +42,19 @@ export default function LiveRideScreen() {
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(200);
-  const cameraPadding = useMemo(() => ({ paddingTop: insets.top + 135, paddingBottom: sheetHeight + 28, paddingLeft: 45, paddingRight: 45 }), [insets.top,sheetHeight]);
+  const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
+  const cameraPadding = useMemo(() => {
+    const maxTop = Math.max(20, Math.floor(windowHeight * 0.25));
+    const maxBottom = Math.max(50, Math.floor(windowHeight * 0.45));
+    const maxHoriz = Math.max(10, Math.floor(windowWidth * 0.2));
+    return {
+      paddingTop: Math.min(insets.top + 135, maxTop),
+      paddingBottom: Math.min(sheetHeight + 28, maxBottom),
+      paddingLeft: Math.min(45, maxHoriz),
+      paddingRight: Math.min(45, maxHoriz),
+    };
+  }, [insets.top, sheetHeight, windowHeight, windowWidth]);
+  const lastCameraPosition = useRef<{ lat: number; lng: number } | null>(null);
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -106,8 +94,7 @@ export default function LiveRideScreen() {
       lastSafetyAlertAt.current[key] = now;
       try {
         await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat, lng, message, created_at: new Date(now).toISOString() });
-        await sync.flushQueue();
-        await refresh();
+        void sync.flushQueue();
       } catch (e) {
         setMessage(e instanceof Error ? e.message : 'Could not publish a group safety alert.');
       }
@@ -119,8 +106,8 @@ export default function LiveRideScreen() {
       if (deviation > limit) void publishSafetyAlert('route-deviation', 'route_deviation', position.lat, position.lng,
         'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).');
     }
-    const leader = participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now));
-    if (admin && leader) {
+    const leader = (admin ? position : participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now)));
+    if (admin && leader && Number.isFinite(leader.lat) && Number.isFinite(leader.lng)) {
       for (const rider of participants) {
         if (rider.user_id === ride.admin_id || isStale(rider.timestamp, now)) continue;
         const gap = distanceMeters(leader, rider);
@@ -128,13 +115,13 @@ export default function LiveRideScreen() {
         if (gap > limit) void publishSafetyAlert('rider-behind-' + rider.user_id, 'rider_behind', rider.lat, rider.lng,
           rider.display_name + ' is approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
       }
-    } else if (!admin && leader) {
+    } else if (!admin && leader && Number.isFinite(leader.lat) && Number.isFinite(leader.lng)) {
       const gap = distanceMeters(leader, position);
       const limit = ride.rider_behind_threshold_meters || 1000;
       if (gap > limit) void publishSafetyAlert('rider-behind-self', 'rider_behind', position.lat, position.lng,
         'You are approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
     }
-  }, [active,position,participants,route,ride?.id,ride?.admin_id,ride?.route_deviation_threshold_meters,ride?.rider_behind_threshold_meters,admin,userId,id,now,sync.flushQueue,refresh]);
+  }, [active,position,participants,route,ride?.id,ride?.admin_id,ride?.route_deviation_threshold_meters,ride?.rider_behind_threshold_meters,admin,userId,id,now,sync.flushQueue]);
 
   useEffect(() => {
     if (!active || !sharing || !userId) {
@@ -154,13 +141,18 @@ export default function LiveRideScreen() {
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
       if (typeof position.lng === 'number' && typeof position.lat === 'number' && Number.isFinite(position.lng) && Number.isFinite(position.lat)) {
+        const last = lastCameraPosition.current;
+        if (last && Math.abs(position.lat - last.lat) < 0.00002 && Math.abs(position.lng - last.lng) < 0.00002) {
+          return;
+        }
+        lastCameraPosition.current = { lat: position.lat, lng: position.lng };
         try {
           camera.current.setCamera({
             centerCoordinate: [position.lng, position.lat],
             zoomLevel: 14,
             padding: cameraPadding,
             animationMode: 'easeTo',
-            animationDuration: 900,
+            animationDuration: 800,
           });
         } catch {
           /* Ignore transient camera update error */
@@ -268,10 +260,12 @@ export default function LiveRideScreen() {
   return <View style={s.screen}>
     {Mapbox && MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL={theme ? (theme.text === "#F2F0E8" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/outdoors-v12") : "mapbox://styles/mapbox/outdoors-v12"}
       onDidFinishLoadingMap={() => { setMapReady(true); setMapError(false); }} onMapLoadingError={() => setMapError(true)}
-      onCameraChanged={state => { if (state.gestures.isGestureActive) setFollow(false); }}
-      logoPosition={{ bottom: sheetHeight + 8,left: 10 }} attributionPosition={{ bottom: sheetHeight + 8,right: 10 }} compassEnabled>
-      <Mapbox.Camera ref={camera} defaultSettings={{ centerCoordinate: (Array.isArray(ride.origin_coords) && ride.origin_coords.length === 2) ? ride.origin_coords : [77.5946, 12.9716], zoomLevel: 11 }} />
-      {route && <Mapbox.ShapeSource id="route" shape={route}><Mapbox.LineLayer id="route-edge" style={{ lineColor: '#fff',lineWidth: 8,lineCap: 'round',lineJoin: 'round' }} /><Mapbox.LineLayer id="route-line" style={{ lineColor: '#de7136',lineWidth: 4,lineCap: 'round',lineJoin: 'round' }} /></Mapbox.ShapeSource>}
+      onCameraChanged={state => { if (state?.gestures?.isGestureActive) setFollow(false); }}
+      logoPosition={{ bottom: Math.min(sheetHeight + 8, 120), left: 10 }} attributionPosition={{ bottom: Math.min(sheetHeight + 8, 120), right: 10 }} compassEnabled>
+      <Mapbox.Camera ref={camera} defaultSettings={{ centerCoordinate: (Array.isArray(ride.origin_coords) && ride.origin_coords.length === 2 && Number.isFinite(ride.origin_coords[0]) && Number.isFinite(ride.origin_coords[1])) ? ride.origin_coords : [77.5946, 12.9716], zoomLevel: 11 }} />
+      {route && route.geometry && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2 && (
+        <Mapbox.ShapeSource id="route" shape={route}><Mapbox.LineLayer id="route-edge" style={{ lineColor: '#fff',lineWidth: 8,lineCap: 'round',lineJoin: 'round' }} /><Mapbox.LineLayer id="route-line" style={{ lineColor: '#de7136',lineWidth: 4,lineCap: 'round',lineJoin: 'round' }} /></Mapbox.ShapeSource>
+      )}
       <Mapbox.ShapeSource id="endpoints" shape={{
         type: 'FeatureCollection',
         features: [ride.origin_coords, ride.destination_coords]
@@ -304,7 +298,7 @@ export default function LiveRideScreen() {
       </Mapbox.ShapeSource>
     </Mapbox.MapView> : <View style={s.fallback}><Text style={s.heading}>Your ride, together.</Text><Text style={s.muted}>The native map needs a development build and a Mapbox token. Your rider list and foreground GPS remain available.</Text></View>}
     <View style={[s.top,{ top: insets.top + 10 }]}><TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}><Text style={s.text}>‹</Text></TouchableOpacity><View style={s.title}><Text numberOfLines={1} style={s.heading}>{ride.name}</Text><Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text></View>{admin && <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}><Text style={s.text}>✎</Text></TouchableOpacity>}<TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}><Text style={s.text}>↗</Text></TouchableOpacity></View>
-    <View style={[s.controls,{ top: insets.top + 94 }]}><TouchableOpacity accessibilityLabel="Follow my location" style={[s.control,follow && s.selected]} disabled={!position} onPress={() => setFollow(true)}><Text style={s.text}>◎ Me</Text></TouchableOpacity><TouchableOpacity style={s.control} onPress={fitGroup}><Text style={s.text}>⊞ Group</Text></TouchableOpacity></View>
+    <View style={[s.controls,{ top: insets.top + 94 }]}><TouchableOpacity accessibilityLabel="Follow my location" style={[s.control,follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}><Text style={s.text}>◎ Me</Text></TouchableOpacity><TouchableOpacity style={s.control} onPress={fitGroup}><Text style={s.text}>⊞ Group</Text></TouchableOpacity></View>
     {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + 150 }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
     <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
       <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
@@ -320,7 +314,12 @@ export default function LiveRideScreen() {
         updateCellsBatchingPeriod={50}
         removeClippedSubviews
         ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
-        renderItem={({ item: p }) => <TouchableOpacity style={s.rider} onPress={() => { setFollow(false); try { camera.current?.setCamera({ centerCoordinate: [p.lng,p.lat],zoomLevel: 15,padding: cameraPadding,animationDuration: 700 }); } catch { /* ignore */ } }}>
+        renderItem={({ item: p }) => <TouchableOpacity style={s.rider} onPress={() => {
+          setFollow(false);
+          if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
+            try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
+          }
+        }}>
           <View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text></View>
           <View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View>
           <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>

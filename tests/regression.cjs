@@ -371,3 +371,184 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
     assert.equal(states[1], null, 'late user A profile must remain hidden');
   } finally { cleanup(); }
 });
+
+test('distanceMeters and distanceToRouteMeters handle malformed coordinates safely and calculate distance', () => {
+  const { distanceMeters, distanceToRouteMeters } = loader()('shared/route.ts');
+  assert.equal(distanceMeters(null, null), Infinity);
+  assert.equal(distanceMeters({ lat: 12, lng: 77 }, null), Infinity);
+  assert.equal(distanceMeters({ lat: NaN, lng: 77 }, { lat: 12, lng: 77 }), Infinity);
+
+  // Same point
+  assert.equal(Math.round(distanceMeters({ lat: 12.9716, lng: 77.5946 }, { lat: 12.9716, lng: 77.5946 })), 0);
+  // ~111 km for 1 degree latitude at equator
+  const oneDegreeLat = distanceMeters({ lat: 0, lng: 0 }, { lat: 1, lng: 0 });
+  assert.ok(oneDegreeLat > 110000 && oneDegreeLat < 112000);
+
+  // distanceToRouteMeters
+  assert.equal(distanceToRouteMeters(null, null), Infinity);
+  assert.equal(distanceToRouteMeters({ lat: 12, lng: 77 }, []), Infinity);
+  assert.equal(distanceToRouteMeters({ lat: 12, lng: 77 }, [[77, 12]]), Infinity);
+  assert.equal(distanceToRouteMeters({ lat: 12, lng: 77 }, [[null, undefined], [NaN, NaN]]), Infinity);
+
+  // Point right on horizontal route [77.0, 12.0] to [77.1, 12.0]
+  const distOnLine = distanceToRouteMeters({ lat: 12.0, lng: 77.05 }, [[77.0, 12.0], [77.1, 12.0]]);
+  assert.ok(distOnLine < 1, 'point on segment should have near-zero distance');
+
+  // Point displaced ~100m north
+  const distOffLine = distanceToRouteMeters({ lat: 12.0009, lng: 77.05 }, [[77.0, 12.0], [77.1, 12.0]]);
+  assert.ok(distOffLine > 90 && distOffLine < 110, 'perpendicular distance should be ~100m');
+});
+
+test('onCameraChanged handles missing gestures payload gracefully without throwing', () => {
+  let follow = true;
+  const onCameraChanged = state => {
+    if (state?.gestures?.isGestureActive) follow = false;
+  };
+
+  // Programmatic or uninitialized camera event (empty payload from Android/iOS native)
+  assert.doesNotThrow(() => onCameraChanged({}));
+  assert.equal(follow, true);
+
+  assert.doesNotThrow(() => onCameraChanged(null));
+  assert.equal(follow, true);
+
+  assert.doesNotThrow(() => onCameraChanged({ properties: { zoom: 12 } }));
+  assert.equal(follow, true);
+
+  // User gesture event
+  assert.doesNotThrow(() => onCameraChanged({ gestures: { isGestureActive: true } }));
+  assert.equal(follow, false);
+});
+
+test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, and enforces limits', () => {
+  const { insertRouteStop, validateRoutePoints, WAYPOINT_META } = routeTools;
+  assert.ok(WAYPOINT_META.fuel && WAYPOINT_META.stop);
+
+  const initialPoints = [
+    { sequence: 0, waypoint_type: 'origin', name: 'Bengaluru', latitude: 12.9716, longitude: 77.5946 },
+    { sequence: 1, waypoint_type: 'destination', name: 'Mysuru', latitude: 12.2958, longitude: 76.6394 },
+  ];
+  assert.equal(validateRoutePoints(initialPoints), null);
+
+  // Insert a fuel stop before destination
+  const withFuel = insertRouteStop(initialPoints, {
+    waypoint_type: 'fuel',
+    name: 'IndianOil Fuel Station',
+    address: 'SH 17, Ramanagara',
+    latitude: 12.7214,
+    longitude: 77.2810,
+  });
+  assert.equal(withFuel.length, 3);
+  assert.equal(withFuel[0].waypoint_type, 'origin');
+  assert.equal(withFuel[1].waypoint_type, 'fuel');
+  assert.equal(withFuel[1].sequence, 1);
+  assert.equal(withFuel[2].waypoint_type, 'destination');
+  assert.equal(withFuel[2].sequence, 2);
+  assert.equal(validateRoutePoints(withFuel), null);
+
+  // Insert a food stop at index 1 (between origin and fuel)
+  const withFood = insertRouteStop(withFuel, {
+    waypoint_type: 'food',
+    name: 'Bidadi Thatte Idli',
+    address: 'Bengaluru-Mysuru Expressway',
+    latitude: 12.8000,
+    longitude: 77.4000,
+  }, 1);
+  assert.equal(withFood.length, 4);
+  assert.deepEqual(withFood.map(p => p.sequence), [0, 1, 2, 3]);
+  assert.deepEqual(withFood.map(p => p.waypoint_type), ['origin', 'food', 'fuel', 'destination']);
+  assert.equal(validateRoutePoints(withFood), null);
+
+  // Rejects empty / blank name
+  assert.throws(() => {
+    insertRouteStop(initialPoints, {
+      waypoint_type: 'stop',
+      name: '   ',
+      latitude: 12.5,
+      longitude: 77.0,
+    });
+  }, /valid name/);
+
+  // Rejects invalid coordinates
+  assert.throws(() => {
+    insertRouteStop(initialPoints, {
+      waypoint_type: 'stop',
+      name: 'Nowhere',
+      latitude: 195, // invalid lat
+      longitude: 77.0,
+    });
+  }, /valid geographic coordinates/);
+
+  // Enforces 25-point limit
+  let fullPoints = [...initialPoints];
+  for (let i = 0; i < 23; i++) {
+    fullPoints = insertRouteStop(fullPoints, {
+      waypoint_type: 'stop',
+      name: `Stop ${i + 1}`,
+      latitude: 12.5 + i * 0.01,
+      longitude: 77.0,
+    });
+  }
+  assert.equal(fullPoints.length, 25);
+  assert.equal(validateRoutePoints(fullPoints), null);
+
+  assert.throws(() => {
+    insertRouteStop(fullPoints, {
+      waypoint_type: 'stop',
+      name: '26th Stop',
+      latitude: 12.8,
+      longitude: 77.1,
+    });
+  }, /support up to 25 points/);
+});
+
+test('removeRouteStop and moveRouteStop manage intermediate stops without corrupting origin/destination', () => {
+  const { removeRouteStop, moveRouteStop, validateRoutePoints } = routeTools;
+
+  const points = [
+    { sequence: 0, waypoint_type: 'origin', name: 'Start', latitude: 12.0, longitude: 77.0 },
+    { sequence: 1, waypoint_type: 'fuel', name: 'Fuel', latitude: 12.2, longitude: 77.2 },
+    { sequence: 2, waypoint_type: 'food', name: 'Food', latitude: 12.4, longitude: 77.4 },
+    { sequence: 3, waypoint_type: 'destination', name: 'Finish', latitude: 12.6, longitude: 77.6 },
+  ];
+
+  // Cannot remove origin or destination
+  assert.throws(() => removeRouteStop(points, 0), /Origin and destination cannot be removed/);
+  assert.throws(() => removeRouteStop(points, 3), /Origin and destination cannot be removed/);
+
+  // Remove intermediate stop
+  const withoutFuel = removeRouteStop(points, 1);
+  assert.equal(withoutFuel.length, 3);
+  assert.deepEqual(withoutFuel.map(p => p.sequence), [0, 1, 2]);
+  assert.deepEqual(withoutFuel.map(p => p.name), ['Start', 'Food', 'Finish']);
+  assert.equal(validateRoutePoints(withoutFuel), null);
+
+  // Cannot move origin or destination
+  assert.throws(() => moveRouteStop(points, 0, 1), /Only intermediate route stops/);
+  assert.throws(() => moveRouteStop(points, 1, 0), /Only intermediate route stops/);
+  assert.throws(() => moveRouteStop(points, 1, 3), /Only intermediate route stops/);
+
+  // Move intermediate stop: swap Fuel and Food
+  const reordered = moveRouteStop(points, 1, 2);
+  assert.equal(reordered.length, 4);
+  assert.deepEqual(reordered.map(p => p.sequence), [0, 1, 2, 3]);
+  assert.deepEqual(reordered.map(p => p.name), ['Start', 'Food', 'Fuel', 'Finish']);
+  assert.equal(validateRoutePoints(reordered), null);
+});
+
+test('route editor uses dedicated place search modal and never leaves dummy placeholder stops', () => {
+  const routeSource = fs.readFileSync(path.resolve('mobile/app/trip/[id]/route.tsx'), 'utf8');
+  // Does not insert dummy { latitude: 0, longitude: 0, name: '' }
+  assert.doesNotMatch(routeSource, /latitude:\s*0,\s*longitude:\s*0/);
+  // Uses insertRouteStop from @ridentrack/shared
+  assert.match(routeSource, /insertRouteStop/);
+  assert.match(routeSource, /removeRouteStop/);
+  assert.match(routeSource, /moveRouteStop/);
+  // Contains search modal with clean cancel
+  assert.match(routeSource, /onRequestClose=\{closeSearchModal\}/);
+  assert.match(routeSource, /Cancel without adding/);
+
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /router\.push\('\/trip\/' \+ trip\.id \+ '\/route'\)/);
+  assert.match(tripSource, /promptDayAssignment/);
+});

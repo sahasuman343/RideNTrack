@@ -1,5 +1,18 @@
 export type RouteWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination';
 
+export const WAYPOINT_META: Record<RouteWaypointType, { label: string; icon: string; short: string; description: string }> = {
+  origin: { label: 'Start Point', icon: '🟢', short: 'START', description: 'Journey origin' },
+  destination: { label: 'Finish Point', icon: '🏁', short: 'FINISH', description: 'Final destination' },
+  stop: { label: 'Stop', icon: '🛑', short: 'STOP', description: 'General planned waypoint' },
+  fuel: { label: 'Fuel Stop', icon: '⛽', short: 'FUEL', description: 'Petrol / gas station' },
+  food: { label: 'Food & Meals', icon: '🍽️', short: 'FOOD', description: 'Breakfast, lunch, or dinner stop' },
+  rest: { label: 'Rest Break', icon: '☕', short: 'REST', description: 'Chai / coffee & stretch break' },
+  sightseeing: { label: 'Scenic View', icon: '📸', short: 'VIEW', description: 'Attraction or scenic viewpoint' },
+  meetup: { label: 'Meetup Point', icon: '📍', short: 'MEET', description: 'Rider regrouping location' },
+};
+
+export const EDITABLE_WAYPOINT_TYPES: RouteWaypointType[] = ['stop', 'fuel', 'food', 'rest', 'sightseeing', 'meetup'];
+
 export type RoutePoint = {
   id?: string | null;
   sequence: number;
@@ -48,6 +61,61 @@ export function routeCoordinates(points: RoutePoint[]): [number, number][] {
   return points.map(point => [point.longitude, point.latitude]);
 }
 
+export function insertRouteStop(
+  points: RoutePoint[],
+  stop: Omit<RoutePoint, 'sequence'>,
+  targetIndex?: number,
+): RoutePoint[] {
+  if (points.length >= 25) {
+    throw new Error('Mapbox driving directions support up to 25 points, including origin and destination.');
+  }
+  if (!stop.name || !stop.name.trim()) {
+    throw new Error('A route stop must have a valid name.');
+  }
+  if (!Number.isFinite(stop.latitude) || !Number.isFinite(stop.longitude) || Math.abs(stop.latitude) > 90 || Math.abs(stop.longitude) > 180) {
+    throw new Error('A route stop must have valid geographic coordinates.');
+  }
+  const destinationIndex = points.length - 1;
+  const insertAt = targetIndex !== undefined
+    ? Math.max(1, Math.min(destinationIndex, targetIndex))
+    : destinationIndex;
+
+  const newPoint: RoutePoint = {
+    ...stop,
+    name: stop.name.trim(),
+    sequence: insertAt,
+  };
+
+  const nextPoints = [
+    ...points.slice(0, insertAt),
+    newPoint,
+    ...points.slice(insertAt),
+  ];
+
+  return nextPoints.map((point, index) => ({ ...point, sequence: index }));
+}
+
+export function removeRouteStop(points: RoutePoint[], index: number): RoutePoint[] {
+  if (index <= 0 || index >= points.length - 1) {
+    throw new Error('Origin and destination cannot be removed.');
+  }
+  return points.filter((_, i) => i !== index).map((point, i) => ({ ...point, sequence: i }));
+}
+
+export function moveRouteStop(points: RoutePoint[], fromIndex: number, toIndex: number): RoutePoint[] {
+  const lastIndex = points.length - 1;
+  if (fromIndex <= 0 || fromIndex >= lastIndex || toIndex <= 0 || toIndex >= lastIndex) {
+    throw new Error('Only intermediate route stops can be reordered.');
+  }
+  if (fromIndex === toIndex) return points;
+
+  const next = [...points];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+
+  return next.map((point, index) => ({ ...point, sequence: index }));
+}
+
 export function parseDirectionsRoute(payload: unknown): DirectionsRoute {
   const root = payload as { routes?: Array<{ geometry?: { type?: string; coordinates?: unknown }; distance?: unknown; duration?: unknown }> } | null;
   const route = root?.routes?.[0];
@@ -80,4 +148,44 @@ export function formatRouteDuration(seconds: number | null | undefined): string 
   const totalMinutes = Math.round(seconds / 60);
   const hours = Math.floor(totalMinutes / 60), minutes = totalMinutes % 60;
   return hours ? hours + ' hr ' + (minutes ? minutes + ' min' : '') : minutes + ' min';
+}
+
+export function distanceMeters(a: { lat: number; lng: number } | null | undefined, b: { lat: number; lng: number } | null | undefined): number {
+  if (!a || !b || !Number.isFinite(a.lat) || !Number.isFinite(a.lng) || !Number.isFinite(b.lat) || !Number.isFinite(b.lng)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+}
+
+export function distanceToRouteMeters(point: { lat: number; lng: number } | null | undefined, coordinates: number[][] | null | undefined): number {
+  if (!point || !Array.isArray(coordinates) || coordinates.length < 2) return Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return Number.POSITIVE_INFINITY;
+  const cosLat = Math.cos(point.lat * Math.PI / 180);
+  const scaleX = 111320 * cosLat;
+  const scaleY = 110540;
+  let nearest = Number.POSITIVE_INFINITY;
+
+  const first = coordinates[0];
+  if (!Array.isArray(first) || !Number.isFinite(first[0]) || !Number.isFinite(first[1])) return Number.POSITIVE_INFINITY;
+  let ax = (first[0] - point.lng) * scaleX;
+  let ay = (first[1] - point.lat) * scaleY;
+
+  for (let i = 1; i < coordinates.length; i++) {
+    const next = coordinates[i];
+    if (!Array.isArray(next) || !Number.isFinite(next[0]) || !Number.isFinite(next[1])) continue;
+    const bx = (next[0] - point.lng) * scaleX;
+    const by = (next[1] - point.lat) * scaleY;
+    const dx = bx - ax, dy = by - ay;
+    const denom = dx * dx + dy * dy;
+    const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom));
+    const dist = Math.hypot(ax + t * dx, ay + t * dy);
+    if (dist < nearest) nearest = dist;
+    ax = bx;
+    ay = by;
+  }
+  return nearest;
 }

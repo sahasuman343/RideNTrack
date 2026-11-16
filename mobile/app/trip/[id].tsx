@@ -152,6 +152,21 @@ export default function TripWorkspaceScreen() {
     const dayId = days.find(day => day.day_number === dayNumber)?.id || null;
     setWaypoints(current => current.map(point => point.id === pointId ? { ...point, trip_day_id: dayId } : point));
   }
+  function promptDayAssignment(point: Waypoint) {
+    if (days.length === 0) {
+      Alert.alert('No dated days', 'This trip does not have dated itinerary days yet.');
+      return;
+    }
+    const buttons = [
+      { text: 'Unassigned', onPress: () => assignWaypointDay(point.id, null) },
+      ...days.map(day => ({
+        text: `Day ${day.day_number}${day.title ? ': ' + day.title : ''}`,
+        onPress: () => assignWaypointDay(point.id, day.day_number),
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ];
+    Alert.alert('Assign Day for ' + point.name, 'Choose which day of the trip this stop belongs to:', buttons);
+  }
   async function saveItinerary() {
     setSaving(true); setError('');
     try {
@@ -360,16 +375,23 @@ export default function TripWorkspaceScreen() {
               {isAdmin && <View style={styles.editorRow}>
                 <TouchableOpacity style={styles.smallButton} disabled={index === 0} onPress={() => moveWaypoint(index, -1)}><Text style={styles.smallButtonText}>↑</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.smallButton} disabled={index === waypoints.length - 1} onPress={() => moveWaypoint(index, 1)}><Text style={styles.smallButtonText}>↓</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.smallButton} onPress={() => {
-                  const current = assignedDay?.day_number || 0;
-                  const next = current >= days.length ? null : current + 1;
-                  assignWaypointDay(point.id, next);
-                }}><Text style={styles.smallButtonText}>{assignedDay ? 'Day ' + assignedDay.day_number : 'Unassigned'} · change</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.smallButton} onPress={() => promptDayAssignment(point)}>
+                  <Text style={styles.smallButtonText}>{assignedDay ? 'Day ' + assignedDay.day_number : 'Unassigned'} · change</Text>
+                </TouchableOpacity>
               </View>}
             </View>
           </View>;
         })}
-        {isAdmin && <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveItinerary()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save stop order & days'}</Text></TouchableOpacity>}
+        {isAdmin && <View style={{ marginTop: 14, gap: 8 }}>
+          <TouchableOpacity style={styles.primaryWide} onPress={() => router.push('/trip/' + trip.id + '/route')}>
+            <Text style={styles.primaryText}>＋ Add stops & edit route in workshop →</Text>
+          </TouchableOpacity>
+          {waypoints.length > 0 && (
+            <TouchableOpacity style={[styles.secondary, { alignItems: 'center' }]} disabled={saving} onPress={() => void saveItinerary()}>
+              <Text style={styles.secondaryText}>{saving ? 'Saving…' : 'Save stop order & days'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>}
         {!isAdmin && <Text style={styles.mutedSmall}>Only the trip admin can edit the itinerary.</Text>}
       </View>
 
