@@ -13,7 +13,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: { display_name: string; phone: string | null; avatar_url: string | null }) => Promise<void>;
+  updateProfile: (updates: { display_name: string; phone: string | null; emergency_contact?: string | null; avatar_url: string | null }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function updateProfile(updates: { display_name: string; phone: string | null; avatar_url: string | null }) {
+  async function updateProfile(updates: { display_name: string; phone: string | null; emergency_contact?: string | null; avatar_url: string | null }) {
     if (!activeUserId.current) throw new Error('You must be signed in to edit your profile.');
     const { data, error } = await supabase.from('profiles').update(updates).eq('id', activeUserId.current).select('*').single();
     if (error) throw error;

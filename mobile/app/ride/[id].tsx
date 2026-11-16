@@ -61,6 +61,7 @@ export default function LiveRideScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [route, setRoute] = useState<Ride['route_geometry']>();
+  const [trailCoordinates, setTrailCoordinates] = useState<[number, number][]>([]);
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
   const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
   const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
@@ -178,6 +179,54 @@ export default function LiveRideScreen() {
       });
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !userId) return;
+    let cancelled = false;
+    supabase
+      .from('location_updates')
+      .select('lat,lng')
+      .eq('ride_id', id)
+      .eq('user_id', userId)
+      .order('timestamp', { ascending: true })
+      .limit(500)
+      .then(({ data, error }) => {
+        if (cancelled || error || !Array.isArray(data)) return;
+        const historical: [number, number][] = data
+          .filter(d => typeof d.lng === 'number' && typeof d.lat === 'number' && Number.isFinite(d.lng) && Number.isFinite(d.lat))
+          .map(d => [Number(d.lng), Number(d.lat)]);
+        if (historical.length > 0) {
+          setTrailCoordinates(curr => {
+            if (curr.length === 0) return historical;
+            return [...historical, ...curr];
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [id, userId]);
+
+  useEffect(() => {
+    if (!position || typeof position.lng !== 'number' || typeof position.lat !== 'number' || !Number.isFinite(position.lng) || !Number.isFinite(position.lat)) return;
+    setTrailCoordinates(prev => {
+      const last = prev[prev.length - 1];
+      if (last && Math.abs(last[0] - position.lng) < 0.00005 && Math.abs(last[1] - position.lat) < 0.00005) {
+        return prev;
+      }
+      return [...prev, [position.lng, position.lat]];
+    });
+  }, [position?.lng, position?.lat]);
+
+  const actualTrailGeoJson = useMemo(() => {
+    if (trailCoordinates.length < 2) return null;
+    return {
+      type: 'Feature' as const,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: trailCoordinates,
+      },
+      properties: {},
+    };
+  }, [trailCoordinates]);
 
   useEffect(() => {
     if (!position || !nextWaypoint || targetWaypointIndex >= upcomingWaypoints.length - 1) return;
@@ -305,6 +354,29 @@ export default function LiveRideScreen() {
       <Mapbox.Camera ref={camera} defaultSettings={{ centerCoordinate: (Array.isArray(ride.origin_coords) && ride.origin_coords.length === 2 && Number.isFinite(ride.origin_coords[0]) && Number.isFinite(ride.origin_coords[1])) ? ride.origin_coords : [77.5946, 12.9716], zoomLevel: 11 }} />
       {route && route.geometry && Array.isArray(route.geometry.coordinates) && route.geometry.coordinates.length >= 2 && (
         <Mapbox.ShapeSource id="route" shape={route}><Mapbox.LineLayer id="route-edge" style={{ lineColor: '#fff',lineWidth: 8,lineCap: 'round',lineJoin: 'round' }} /><Mapbox.LineLayer id="route-line" style={{ lineColor: '#de7136',lineWidth: 4,lineCap: 'round',lineJoin: 'round' }} /></Mapbox.ShapeSource>
+      )}
+      {actualTrailGeoJson && (
+        <Mapbox.ShapeSource id="actual-trail" shape={actualTrailGeoJson}>
+          <Mapbox.LineLayer
+            id="actual-trail-edge"
+            style={{
+              lineColor: '#0284c7',
+              lineWidth: 6,
+              lineCap: 'round',
+              lineJoin: 'round',
+              lineOpacity: 0.75,
+            }}
+          />
+          <Mapbox.LineLayer
+            id="actual-trail-line"
+            style={{
+              lineColor: '#38bdf8',
+              lineWidth: 3,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+        </Mapbox.ShapeSource>
       )}
       <Mapbox.ShapeSource id="endpoints" shape={{
         type: 'FeatureCollection',

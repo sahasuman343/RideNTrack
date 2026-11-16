@@ -12,11 +12,13 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name || '');
   const [phone, setPhone] = useState(profile?.phone || '');
+  const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
 
   function openEditor() {
     setDisplayName(profile?.display_name || '');
     setPhone(profile?.phone || '');
+    setEmergencyContact(profile?.emergency_contact || '');
     setAvatarUrl(profile?.avatar_url || '');
     setEditing(true);
   }
@@ -25,12 +27,20 @@ export default function ProfileScreen() {
     if (phone.trim() && !/^\+?[0-9 ()-]{7,20}$/.test(phone.trim())) {
       Alert.alert('Check phone number', 'Enter a valid phone number, including country code if needed.'); return;
     }
+    if (emergencyContact.trim() && !/^\+?[0-9 ()-]{7,25}$/.test(emergencyContact.trim())) {
+      Alert.alert('Check emergency contact', 'Enter a valid emergency contact number, including country code.'); return;
+    }
     if (avatarUrl.trim() && !/^https?:\/\//i.test(avatarUrl.trim())) {
       Alert.alert('Invalid photo URL', 'Use a public HTTPS or HTTP image URL.'); return;
     }
     setSaving(true);
     try {
-      await updateProfile({ display_name: displayName.trim(), phone: phone.trim() || null, avatar_url: avatarUrl.trim() || null });
+      await updateProfile({
+        display_name: displayName.trim(),
+        phone: phone.trim() || null,
+        emergency_contact: emergencyContact.trim() || null,
+        avatar_url: avatarUrl.trim() || null,
+      });
       setEditing(false);
       Alert.alert('Profile updated', 'Your rider details have been saved.');
     } catch (error) {
@@ -75,6 +85,8 @@ export default function ProfileScreen() {
           <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholder="Your name" placeholderTextColor={theme.subtle} />
           <Text style={styles.fieldLabel}>Phone number</Text>
           <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91..." placeholderTextColor={theme.subtle} />
+          <Text style={styles.fieldLabel}>Emergency contact</Text>
+          <TextInput style={styles.input} value={emergencyContact} onChangeText={setEmergencyContact} keyboardType="phone-pad" placeholder="Emergency contact phone (+91...)" placeholderTextColor={theme.subtle} />
           <Text style={styles.fieldLabel}>Profile photo URL</Text>
           <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
           <Text style={styles.hint}>Use a publicly accessible image URL. Leave blank to use your initials.</Text>

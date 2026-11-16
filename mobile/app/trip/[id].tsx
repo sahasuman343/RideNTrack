@@ -136,6 +136,31 @@ export default function TripWorkspaceScreen() {
     }
   }
 
+  function confirmLeaveRide() {
+    if (!trip || isAdmin || saving) return;
+    Alert.alert(
+      'Leave this group ride?',
+      'You will no longer share your live location or receive regroup and separation alerts for “' + trip.name + '”. You can rejoin later if you have an invitation code.',
+      [
+        { text: 'Stay in ride', style: 'cancel' },
+        { text: 'Leave ride', style: 'destructive', onPress: () => { void leaveRide(); } },
+      ],
+    );
+  }
+
+  async function leaveRide() {
+    if (!trip || isAdmin) return;
+    setSaving(true); setError('');
+    try {
+      const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
+      if (leaveError) throw leaveError;
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      setError(e?.message || 'Could not leave this ride.');
+      setSaving(false);
+    }
+  }
+
   async function openDirections(point: Waypoint) {
     try {
       const url = buildGoogleMapsNavigationUrl({
@@ -314,6 +339,11 @@ export default function TripWorkspaceScreen() {
       {isAdmin && <TouchableOpacity style={styles.dangerButton} disabled={saving} onPress={confirmDeleteTrip}>
         <Text style={styles.dangerText}>{saving ? 'Please wait…' : 'Delete trip permanently'}</Text>
       </TouchableOpacity>}
+      {!isAdmin && roster.some(r => r.user_id === user?.id && r.is_active) && (
+        <TouchableOpacity style={styles.dangerButton} disabled={saving} onPress={confirmLeaveRide}>
+          <Text style={styles.dangerText}>{saving ? 'Please wait…' : 'Leave group ride'}</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>

@@ -594,3 +594,59 @@ test('my rides screen JSX is free of raw newline text strings that cause React N
   assert.doesNotMatch(source, /<View[^>]*>\\n/);
   assert.doesNotMatch(source, /<\/View>\\n/);
 });
+
+test('profile screen validates emergency contact phone format and persists to profile', () => {
+  const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
+  const authSource = fs.readFileSync(path.resolve('mobile/src/hooks/useAuth.tsx'), 'utf8');
+
+  // Verify emergency contact validation regex
+  const regex = /^\+?[0-9 ()-]{7,25}$/;
+  assert.equal(regex.test('+91 98765 43210'), true);
+  assert.equal(regex.test('+1-800-555-0199'), true);
+  assert.equal(regex.test('(080) 1234-5678'), true);
+  assert.equal(regex.test('123'), false, 'Too short');
+  assert.equal(regex.test('invalid-phone'), false, 'Alphabetical characters forbidden');
+
+  assert.match(profileSource, /emergencyContact/);
+  assert.match(profileSource, /Check emergency contact/);
+  assert.match(profileSource, /emergency_contact: emergencyContact\.trim\(\) \|\| null/);
+  assert.match(authSource, /emergency_contact\?: string \| null/);
+});
+
+test('route editor supports waypoint notes and road condition observations', () => {
+  const routeSource = fs.readFileSync(path.resolve('mobile/app/trip/[id]/route.tsx'), 'utf8');
+  assert.match(routeSource, /stopNotes/);
+  assert.match(routeSource, /NOTES \/ ROAD CONDITIONS/);
+  assert.match(routeSource, /saveStopDetailsOnly/);
+  assert.match(routeSource, /pointNotesBox/);
+  assert.match(routeSource, /pointNotesText/);
+  assert.match(routeSource, /📝 \{point\.notes\}/);
+});
+
+test('leave_ride migration exists and trip workspace exposes self-service leave for participants', () => {
+  const migrationSource = fs.readFileSync(path.resolve('supabase/migrations/013_leave_ride.sql'), 'utf8');
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.leave_ride/);
+  assert.match(migrationSource, /Trip leaders cannot leave their own trip/);
+  assert.match(migrationSource, /UPDATE public\.ride_participants\s+SET is_active = false/);
+  assert.match(migrationSource, /REVOKE ALL ON FUNCTION public\.leave_ride\(UUID\) FROM PUBLIC, anon/);
+  assert.match(migrationSource, /GRANT EXECUTE ON FUNCTION public\.leave_ride\(UUID\) TO authenticated/);
+
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /confirmLeaveRide/);
+  assert.match(tripSource, /leaveRide/);
+  assert.match(tripSource, /supabase\.rpc\('leave_ride'/);
+  assert.match(tripSource, /Leave group ride/);
+  assert.match(tripSource, /!isAdmin && roster\.some/);
+});
+
+test('live ride map renders actual GPS trail distinct from planned route', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /actualTrailGeoJson/);
+  assert.match(rideSource, /id="actual-trail"/);
+  assert.match(rideSource, /id="actual-trail-line"/);
+  assert.match(rideSource, /id="route"/);
+  assert.match(rideSource, /id="route-line"/);
+  // Ensure planned route is orange (#de7136) and actual trail is cyan (#38bdf8)
+  assert.match(rideSource, /lineColor:\s*['"]#de7136['"]/);
+  assert.match(rideSource, /lineColor:\s*['"]#38bdf8['"]/);
+});

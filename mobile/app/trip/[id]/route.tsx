@@ -111,6 +111,7 @@ export default function RouteEditorScreen() {
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [stopNotes, setStopNotes] = useState('');
 
   // Day picker modal state
   const [dayPicker, setDayPicker] = useState<DayPickerConfig>({
@@ -268,6 +269,7 @@ export default function RouteEditorScreen() {
     setSearchQuery('');
     setSuggestions([]);
     setSearchError('');
+    setStopNotes('');
     setSearchModal({
       visible: true,
       mode: 'add',
@@ -284,6 +286,7 @@ export default function RouteEditorScreen() {
     setSearchQuery(point.name || '');
     setSuggestions([]);
     setSearchError('');
+    setStopNotes(point.notes || '');
     setSearchModal({
       visible: true,
       mode: 'edit',
@@ -298,6 +301,31 @@ export default function RouteEditorScreen() {
     setSearchQuery('');
     setSuggestions([]);
     setSearchError('');
+    setStopNotes('');
+  }
+
+  // Save stop notes and category updates in edit mode without replacing the coordinates
+  function saveStopDetailsOnly() {
+    const idx = searchModal.targetIndex;
+    const currentPoint = points[idx];
+    if (!currentPoint) return;
+    const isEndpoint = idx === 0 || idx === points.length - 1;
+    const updatedType = isEndpoint ? currentPoint.waypoint_type : searchModal.waypointType;
+    const newNotes = stopNotes.trim() || null;
+
+    setPoints(curr =>
+      curr.map((p, i) =>
+        i === idx
+          ? {
+              ...p,
+              waypoint_type: updatedType,
+              notes: newNotes,
+              trip_day_id: isEndpoint ? null : searchModal.selectedDayId,
+            }
+          : p,
+      ),
+    );
+    closeSearchModal();
   }
 
   // Select place from search suggestions
@@ -314,6 +342,7 @@ export default function RouteEditorScreen() {
             latitude: place.latitude,
             longitude: place.longitude,
             provider_place_id: place.id,
+            notes: stopNotes.trim() || null,
             trip_day_id: searchModal.selectedDayId,
           },
           searchModal.targetIndex,
@@ -344,6 +373,7 @@ export default function RouteEditorScreen() {
                 longitude: place.longitude,
                 provider_place_id: place.id,
                 waypoint_type: updatedType,
+                notes: stopNotes.trim() || null,
                 trip_day_id: isEndpoint ? null : searchModal.selectedDayId,
               }
             : p,
@@ -725,6 +755,11 @@ export default function RouteEditorScreen() {
                     {!!point.address && point.address !== point.name && (
                       <Text style={styles.placeAddress}>{point.address}</Text>
                     )}
+                    {!!point.notes && (
+                      <View style={styles.pointNotesBox}>
+                        <Text style={styles.pointNotesText}>📝 {point.notes}</Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* Actions for this point */}
@@ -909,6 +944,30 @@ export default function RouteEditorScreen() {
                   })}
                 </ScrollView>
               </View>
+            )}
+
+            {/* Notes / Road Conditions Input */}
+            <View style={styles.notesSection}>
+              <Text style={styles.categoryLabel}>NOTES / ROAD CONDITIONS (OPTIONAL)</Text>
+              <TextInput
+                style={styles.notesInput}
+                value={stopNotes}
+                onChangeText={setStopNotes}
+                placeholder="e.g. Broken tarmac, hairpin bends, fuel pump..."
+                placeholderTextColor={theme.subtle}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
+
+            {/* Quick save button when editing notes/category without replacing location */}
+            {searchModal.mode === 'edit' && (
+              <TouchableOpacity
+                style={styles.saveDetailsOnlyButton}
+                onPress={saveStopDetailsOnly}
+              >
+                <Text style={styles.saveDetailsOnlyText}>💾 Save notes & category</Text>
+              </TouchableOpacity>
             )}
 
             {/* Search Input Bar */}
@@ -1188,6 +1247,20 @@ const makeStyles = (c: RidePalette) =>
     placeInfo: { marginVertical: 4 },
     placeName: { color: c.text, fontSize: 15, fontWeight: '800' },
     placeAddress: { color: c.muted, fontSize: 12, lineHeight: 16, marginTop: 2 },
+    pointNotesBox: {
+      backgroundColor: c.surfaceRaised,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      marginTop: 6,
+      borderLeftWidth: 3,
+      borderLeftColor: c.accent,
+    },
+    pointNotesText: {
+      color: c.text,
+      fontSize: 11,
+      lineHeight: 15,
+    },
 
     pointActions: {
       flexDirection: 'row',
@@ -1381,6 +1454,35 @@ const makeStyles = (c: RidePalette) =>
     },
     categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
     categoryPillTextSelected: { color: '#FFFFFF', fontWeight: '800' },
+
+    // Notes & Details in Modal
+    notesSection: { marginBottom: 12 },
+    notesInput: {
+      backgroundColor: c.background,
+      borderColor: c.border,
+      borderWidth: 1,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      color: c.text,
+      fontSize: 13,
+      minHeight: 48,
+      textAlignVertical: 'top',
+    },
+    saveDetailsOnlyButton: {
+      backgroundColor: c.surfaceRaised,
+      borderWidth: 1,
+      borderColor: c.accent,
+      borderRadius: 10,
+      paddingVertical: 10,
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    saveDetailsOnlyText: {
+      color: c.accent,
+      fontSize: 12,
+      fontWeight: '800',
+    },
 
     // Search Input in Modal
     searchInputContainer: {

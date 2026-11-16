@@ -12,6 +12,7 @@ BEGIN
     'public.save_trip_itinerary(uuid,jsonb)'::regprocedure,
     'public.save_trip_route(uuid,jsonb,jsonb)'::regprocedure,
     'public.delete_trip(uuid)'::regprocedure,
+    'public.leave_ride(uuid)'::regprocedure,
     'public.add_trip_stay(uuid,jsonb)'::regprocedure,
     'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
     'public.accept_trip_invitation(uuid)'::regprocedure,
@@ -366,5 +367,40 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id=deleted_id) THEN
     RAISE EXCEPTION 'trip deletion did not cascade to its dependent records';
   END IF;
+END $$;
+
+DO $$
+DECLARE
+  test_ride_id UUID;
+  member_id UUID := '22222222-2222-4222-8222-222222222222';
+  owner_id UUID := '11111111-1111-4111-8111-111111111111';
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Leave ride fixture","trip_type":"touring","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[{"day_number":1,"title":"Day 1"}]'::jsonb,
+    NULL
+  );
+  INSERT INTO public.ride_participants(ride_id, user_id, role, is_active)
+  VALUES (test_ride_id, member_id, 'rider', true);
+
+  -- Owner cannot leave own ride
+  BEGIN
+    PERFORM public.leave_ride(test_ride_id);
+    RAISE EXCEPTION 'owner should not be permitted to leave own ride';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  -- Member can leave ride
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.leave_ride(test_ride_id);
+  IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id=test_ride_id AND user_id=member_id AND is_active=false) THEN
+    RAISE EXCEPTION 'member leaving ride was not set to inactive';
+  END IF;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip(test_ride_id);
 END $$;
 RESET ROLE;
