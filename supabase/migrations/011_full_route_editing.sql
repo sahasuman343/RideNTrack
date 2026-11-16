@@ -51,8 +51,8 @@ BEGIN
     RAISE EXCEPTION 'Route duration cannot be negative';
   END IF;
   IF p_trip->'route_geometry' IS NOT NULL AND p_trip->'route_geometry' <> 'null'::jsonb
-     AND (p_trip->'route_geometry'->'geometry'->>'type' <> 'LineString'
-       OR jsonb_typeof(p_trip->'route_geometry'->'geometry'->'coordinates') <> 'array'
+     AND (p_trip->'route_geometry'->'geometry'->>'type' IS DISTINCT FROM 'LineString'
+       OR jsonb_typeof(p_trip->'route_geometry'->'geometry'->'coordinates') IS DISTINCT FROM 'array'
        OR jsonb_array_length(p_trip->'route_geometry'->'geometry'->'coordinates') < 2) THEN
     RAISE EXCEPTION 'Route geometry must be a GeoJSON LineString';
   END IF;
