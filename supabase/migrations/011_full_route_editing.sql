@@ -15,9 +15,7 @@ DECLARE
   v_user_id UUID := auth.uid();
   v_point RECORD;
   v_day_id UUID;
-  v_seen INTEGER := 0;
   v_total INTEGER;
-  v_existing_ids UUID[];
 BEGIN
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'Authentication required' USING ERRCODE = '28000';
@@ -38,9 +36,9 @@ BEGIN
   v_total := jsonb_array_length(p_waypoints);
   IF NULLIF(trim(p_trip->>'origin'), '') IS NULL
      OR NULLIF(trim(p_trip->>'destination'), '') IS NULL
-     OR jsonb_typeof(p_trip->'origin_coords') <> 'array'
+     OR jsonb_typeof(p_trip->'origin_coords') IS DISTINCT FROM 'array'
      OR jsonb_array_length(p_trip->'origin_coords') <> 2
-     OR jsonb_typeof(p_trip->'destination_coords') <> 'array'
+     OR jsonb_typeof(p_trip->'destination_coords') IS DISTINCT FROM 'array'
      OR jsonb_array_length(p_trip->'destination_coords') <> 2 THEN
     RAISE EXCEPTION 'Origin, destination and coordinates are required';
   END IF;
@@ -54,12 +52,15 @@ BEGIN
   END IF;
   IF p_trip->'route_geometry' IS NOT NULL AND p_trip->'route_geometry' <> 'null'::jsonb
      AND (p_trip->'route_geometry'->'geometry'->>'type' <> 'LineString'
-       OR jsonb_typeof(p_trip->'route_geometry'->'geometry'->'coordinates') <> 'array') THEN
+       OR jsonb_typeof(p_trip->'route_geometry'->'geometry'->'coordinates') <> 'array'
+       OR jsonb_array_length(p_trip->'route_geometry'->'geometry'->'coordinates') < 2) THEN
     RAISE EXCEPTION 'Route geometry must be a GeoJSON LineString';
   END IF;
 
   IF (p_waypoints->0->>'waypoint_type') <> 'origin'
-     OR (p_waypoints->(v_total - 1)->>'waypoint_type') <> 'destination' THEN
+     OR (p_waypoints->(v_total - 1)->>'waypoint_type') <> 'destination'
+     OR (SELECT count(*) FROM jsonb_to_recordset(p_waypoints) AS w(waypoint_type TEXT) WHERE w.waypoint_type='origin') <> 1
+     OR (SELECT count(*) FROM jsonb_to_recordset(p_waypoints) AS w(waypoint_type TEXT) WHERE w.waypoint_type='destination') <> 1 THEN
     RAISE EXCEPTION 'The first route point must be origin and the last must be destination';
   END IF;
 
@@ -134,7 +135,6 @@ BEGIN
         trip_day_id = v_day_id
       WHERE id = v_point.id AND ride_id = p_ride_id;
     END IF;
-    v_seen := v_seen + 1;
   END LOOP;
 
   DELETE FROM public.trip_waypoints tw
