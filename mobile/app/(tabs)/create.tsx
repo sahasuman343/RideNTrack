@@ -26,7 +26,7 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place', s
 
   useEffect(() => {
     let cancelled = false;
-    Location.getLastKnownPositionAsync().then(position => {
+    Location.getLastKnownPositionAsync({ maxAge: 600000, requiredAccuracy: 5000 }).then(position => {
       if (!cancelled && position) setSearchOrigin([position.coords.longitude, position.coords.latitude]);
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -59,7 +59,7 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place', s
           limit: '8',
           country: 'IN',
           language: 'en',
-          worldview: 'IN',
+          worldview: 'in',
           types: 'poi,address,place,locality,neighborhood,postcode,region',
           access_token: TOKEN,
         });
