@@ -243,6 +243,10 @@ export default function CreateRideScreen() {
   }, [startDate, endDate]);
 
   function addStop(kind: WaypointKind = 'stop') {
+    if (stops.length + 2 + (meetup ? 1 : 0) >= 25) {
+      Alert.alert('Route point limit', 'Mapbox driving directions support up to 25 points, including origin and destination.');
+      return;
+    }
     setStops(current => [...current, { key: String(Date.now()) + Math.random(), place: null, kind }]);
   }
   function updateStop(key: string, place: Place | null) {
