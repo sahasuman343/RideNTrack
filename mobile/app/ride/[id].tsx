@@ -8,6 +8,7 @@ import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { useRideTheme, RidePalette } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { enableBackgroundLocationUpdates, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
@@ -51,6 +52,8 @@ export default function LiveRideScreen() {
   const name = profile?.display_name || 'Rider';
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const theme = useRideTheme();
+  const s = React.useMemo(() => makeStyles(theme), [theme]);
   const { ride, participants, alerts, connection, error, publish, refresh, setRide } = useRide(id, userId || '');
   const sync = useOfflineSync();
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
@@ -279,14 +282,14 @@ export default function LiveRideScreen() {
             properties: { label: i === 0 ? 'A' : 'B' },
           })),
       }}>
-        <Mapbox.CircleLayer id="endpoint-dot" style={{ circleColor: '#213e44', circleRadius: 13, circleStrokeWidth: 3, circleStrokeColor: '#fff' }} />
+        <Mapbox.CircleLayer id="endpoint-dot" style={{ circleColor: '#213e44', circleRadius: 13, circleStrokeWidth: 3, circleStrokeColor: theme.surface }} />
         <Mapbox.SymbolLayer id="endpoint-label" style={{ textField: ['coalesce', ['to-string', ['get', 'label']], ''], textSize: 12, textColor: '#fff' }} />
       </Mapbox.ShapeSource>
       <Mapbox.ShapeSource id="riders" shape={features}>
-        <Mapbox.CircleLayer id="rider-halo" style={{ circleRadius: 18, circleColor: '#e68145', circleOpacity: 0.18 }} />
+        <Mapbox.CircleLayer id="rider-halo" style={{ circleRadius: 18, circleColor: theme.accent, circleOpacity: 0.18 }} />
         <Mapbox.CircleLayer id="rider-dot" style={{
           circleRadius: 8,
-          circleColor: ['case', ['==', ['get', 'stale'], true], '#94a3b8', ['==', ['get', 'mine'], true], '#df7133', '#247963'],
+          circleColor: ['case', ['==', ['get', 'stale'], true], theme.subtle, ['==', ['get', 'mine'], true], theme.accent, theme.green],
           circleStrokeWidth: 3,
           circleStrokeColor: '#fff',
         }} />
@@ -294,8 +297,8 @@ export default function LiveRideScreen() {
           textField: ['coalesce', ['to-string', ['get', 'name']], 'Rider'],
           textOffset: [0, 1.8],
           textSize: 12,
-          textColor: '#213e44',
-          textHaloColor: '#fff',
+          textColor: theme.text,
+          textHaloColor: theme.surface,
           textHaloWidth: 2,
         }} />
       </Mapbox.ShapeSource>
@@ -329,12 +332,12 @@ export default function LiveRideScreen() {
     <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? Dialog.alert('Send emergency alert?', 'Notify your group that you need help.', [{ text: 'Cancel',style: 'cancel' },{ text: 'Send alert',onPress: () => void sendAlert(type) }]) : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
   </View>;
 }
-const s = StyleSheet.create({
-  screen:{flex:1,backgroundColor:'#e2e9dc'},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:'#f5f7f1'},brand:{color:'#d66029',fontSize:16,fontWeight:'800',letterSpacing:4},
-  text:{color:'#213e44',fontSize:14,fontWeight:'600'},muted:{color:'#72827e',fontSize:12,lineHeight:18},heading:{color:'#213e44',fontSize:18,fontWeight:'700'},top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},title:{flex:1,padding:13,borderRadius:17,backgroundColor:'#fffffff5'},square:{width:44,height:48,borderRadius:15,backgroundColor:'#fff',alignItems:'center',justifyContent:'center'},
-  controls:{position:'absolute',right:14,flexDirection:'row',gap:8},control:{backgroundColor:'#fff',paddingHorizontal:16,minHeight:44,justifyContent:'center',borderRadius:23,borderWidth:1,borderColor:'#d9e1d4'},selected:{borderColor:'#d66029',backgroundColor:'#fff3e9'},
-  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#fffffff8',borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:'#213e44',shadowOpacity:0.12,shadowRadius:15,elevation:8},sheetHeader:{paddingTop:10,paddingBottom:16},handle:{width:38,height:4,backgroundColor:'#d5ded1',borderRadius:3,alignSelf:'center',marginBottom:14},row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},eyebrow:{color:'#3c7b61',fontSize:11,fontWeight:'600',marginBottom:5},code:{backgroundColor:'#f0f4ec',padding:9,borderRadius:10,letterSpacing:2,fontSize:11,color:'#6a7c69'},
-  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:'#edf1e9'},avatar:{width:36,height:36,borderRadius:18,backgroundColor:'#3c7b61',alignItems:'center',justifyContent:'center'},stale:{backgroundColor:'#94a3a0'},grow:{flex:1},
-  actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:'#d66029',borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:'#eef3e9',borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:'#fff',fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:'#b94936',fontSize:13},
-  warning:{position:'absolute',left:16,right:16,backgroundColor:'#fff5e8',borderRadius:15,padding:12,gap:4},warningText:{color:'#99542d',fontSize:12,lineHeight:18},link:{color:'#c65e2c',fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:'#fff0e8',marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'#15313966'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:'#fff',gap:12},alertOption:{padding:20,borderRadius:16,backgroundColor:'#eff4e9'},emergency:{backgroundColor:'#ffeae1'},fallback:{padding:36,paddingTop:225,gap:14},
+const makeStyles = (c: RidePalette) => StyleSheet.create({
+  screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
+  text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'700'},top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},title:{flex:1,padding:13,borderRadius:10,backgroundColor:c.surface},square:{width:44,height:48,borderRadius:9,backgroundColor:c.surface,alignItems:'center',justifyContent:'center'},
+  controls:{position:'absolute',right:14,flexDirection:'row',gap:8},control:{backgroundColor:c.surface,paddingHorizontal:16,minHeight:44,justifyContent:'center',borderRadius:12,borderWidth:1,borderColor:c.border},selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
+  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:'#fffffff8',borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8},sheetHeader:{paddingTop:10,paddingBottom:16},handle:{width:38,height:4,backgroundColor:c.border,borderRadius:3,alignSelf:'center',marginBottom:14},row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},eyebrow:{color:c.green,fontSize:11,fontWeight:'600',marginBottom:5},code:{backgroundColor:c.surfaceRaised,padding:9,borderRadius:10,letterSpacing:2,fontSize:11,color:'#6a7c69'},
+  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:c.border},avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},stale:{backgroundColor:c.subtle},grow:{flex:1},
+  actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:c.surface,fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:c.danger,fontSize:13},
+  warning:{position:'absolute',left:16,right:16,backgroundColor:c.accentSoft,borderRadius:15,padding:12,gap:4},warningText:{color:c.text,fontSize:12,lineHeight:18},link:{color:c.accent,fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:c.accentSoft,marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:c.shadow + '88'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:c.surface,gap:12},alertOption:{padding:20,borderRadius:9,backgroundColor:c.surfaceRaised},emergency:{backgroundColor:c.accentSoft},fallback:{padding:36,paddingTop:225,gap:14},
 });
