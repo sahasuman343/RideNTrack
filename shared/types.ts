@@ -197,14 +197,14 @@ export function buildGoogleMapsNavigationUrl(destination: {
   if (!validCoordinates(destination.latitude, destination.longitude)) {
     throw new Error('A valid destination coordinate is required for navigation.');
   }
-  const params = new URLSearchParams({
-    api: '1',
-    destination: destination.latitude + ',' + destination.longitude,
-    travelmode: 'two-wheeler',
-    dir_action: 'navigate',
-  });
+  const params = [
+    'api=1',
+    'destination=' + encodeURIComponent(destination.latitude + ',' + destination.longitude),
+    'travelmode=two-wheeler',
+    'dir_action=navigate',
+  ];
   if (destination.placeId?.trim()) {
-    params.set('destination_place_id', destination.placeId.trim());
+    params.push('destination_place_id=' + encodeURIComponent(destination.placeId.trim()));
   }
-  return 'https://www.google.com/maps/dir/?' + params.toString();
+  return 'https://www.google.com/maps/dir/?' + params.join('&');
 }
