@@ -79,7 +79,7 @@ INSERT INTO realtime.messages VALUES (1,'presence');
 
 -- Atomic trip aggregate creation: parent and child records commit together.
 SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
-DO $
+DO $$
 DECLARE created_id uuid;
 BEGIN
   created_id := public.create_trip_plan(
