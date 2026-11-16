@@ -266,7 +266,7 @@ export default function LiveRideScreen() {
   };
   if (!ride) return <View style={s.loading}><Text style={s.brand}>RIDEN TRACK</Text>{error ? <Text style={s.text}>{error}</Text> : <ActivityIndicator color="#d66029" />}<TouchableOpacity onPress={() => void refresh()}><Text style={s.link}>Retry connection</Text></TouchableOpacity><TouchableOpacity onPress={handleBack}><Text style={s.link}>Back to rides</Text></TouchableOpacity></View>;
   return <View style={s.screen}>
-    {Mapbox && MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL="mapbox://styles/mapbox/streets-v12"
+    {Mapbox && MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL={theme ? (theme.text === "#F2F0E8" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/outdoors-v12") : "mapbox://styles/mapbox/outdoors-v12"}
       onDidFinishLoadingMap={() => { setMapReady(true); setMapError(false); }} onMapLoadingError={() => setMapError(true)}
       onCameraChanged={state => { if (state.gestures.isGestureActive) setFollow(false); }}
       logoPosition={{ bottom: sheetHeight + 8,left: 10 }} attributionPosition={{ bottom: sheetHeight + 8,right: 10 }} compassEnabled>
