@@ -1,6 +1,6 @@
 # Feature: Trip planning foundation
 
-**Status:** Phase 1 implementation complete; CI verification pending  
+**Status:** Trip planning and full route editing implementation complete; CI verified  
 **Owner module:** `mobile/src/features/trips` (target structure)  
 **Database aggregate:** `public.rides`
 
