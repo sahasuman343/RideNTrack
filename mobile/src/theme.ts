@@ -1,6 +1,8 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import { useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export type ThemeMode = 'system' | 'light' | 'dark';
 export type RidePalette = {
   background: string; surface: string; surfaceRaised: string; text: string; muted: string;
   subtle: string; border: string; accent: string; accentSoft: string; green: string;
@@ -22,7 +24,36 @@ const palettes: Record<'light' | 'dark', RidePalette> = {
   },
 };
 
+type ThemeContextValue = { mode: ThemeMode; setMode: (mode: ThemeMode) => void; palette: RidePalette };
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function RideThemeProvider({ children }: { children: React.ReactNode }) {
+  const systemScheme = useColorScheme();
+  const [mode, setModeState] = useState<ThemeMode>('system');
+  useEffect(() => {
+    let mounted = true;
+    void AsyncStorage.getItem('ridentrack.theme-mode').then(value => {
+      if (mounted && (value === 'light' || value === 'dark' || value === 'system')) setModeState(value);
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+  const setMode = (next: ThemeMode) => {
+    setModeState(next);
+    void AsyncStorage.setItem('ridentrack.theme-mode', next).catch(() => {});
+  };
+  const resolved = mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
+  const value = useMemo(() => ({ mode, setMode, palette: palettes[resolved] }), [mode, resolved]);
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
 export function useRideTheme() {
-  const scheme = useColorScheme();
-  return useMemo(() => palettes[scheme === 'dark' ? 'dark' : 'light'], [scheme]);
+  const context = useContext(ThemeContext);
+  const systemScheme = useColorScheme();
+  return context?.palette || palettes[systemScheme === 'dark' ? 'dark' : 'light'];
+}
+
+export function useRideThemeSettings() {
+  const context = useContext(ThemeContext);
+  if (!context) throw new Error('useRideThemeSettings must be used inside RideThemeProvider');
+  return { mode: context.mode, setMode: context.setMode };
 }
