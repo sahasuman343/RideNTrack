@@ -29,6 +29,8 @@ jobs:
         if: always()
         run: npm run lint
       - name: Start disposable test database
+        id: start_test_database
+        if: always()
         run: |
           test_db_password="$(openssl rand -hex 32)"
           echo "::add-mask::$test_db_password"
@@ -48,7 +50,7 @@ jobs:
           docker logs ridentrack-test-db
           exit 1
       - name: Database migrations and access checks
-        if: always()
+        if: always() && steps.start_test_database.outcome == 'success'
         run: |
           psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f tests/db-bootstrap.sql
           for migration in supabase/migrations/*.sql; do
