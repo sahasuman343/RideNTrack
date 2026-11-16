@@ -1,7 +1,7 @@
 import { Redirect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Tabs } from 'expo-router';
-import { Text, useColorScheme } from 'react-native';
+import { Text } from 'react-native';
 import { useRideTheme } from '../../src/theme';
 
 export default function TabsLayout() {
