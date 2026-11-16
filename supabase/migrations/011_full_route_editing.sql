@@ -15,6 +15,8 @@ DECLARE
   v_user_id UUID := auth.uid();
   v_point RECORD;
   v_day_id UUID;
+  v_waypoint_id UUID;
+  v_keep_ids UUID[] := ARRAY[]::UUID[];
   v_total INTEGER;
 BEGIN
   IF v_user_id IS NULL THEN
@@ -124,7 +126,7 @@ BEGIN
         NULLIF(trim(v_point.address), ''), v_point.latitude, v_point.longitude,
         NULLIF(v_point.provider_place_id, ''), NULLIF(v_point.notes, ''),
         COALESCE(v_point.is_optional, false), v_day_id
-      );
+      ) RETURNING id INTO v_waypoint_id;
     ELSE
       UPDATE public.trip_waypoints SET
         sequence = v_point.sequence, waypoint_type = v_point.waypoint_type,
@@ -134,15 +136,14 @@ BEGIN
         notes = NULLIF(v_point.notes, ''), is_optional = COALESCE(v_point.is_optional, false),
         trip_day_id = v_day_id
       WHERE id = v_point.id AND ride_id = p_ride_id;
+      v_waypoint_id := v_point.id;
     END IF;
+    v_keep_ids := array_append(v_keep_ids, v_waypoint_id);
   END LOOP;
 
   DELETE FROM public.trip_waypoints tw
   WHERE tw.ride_id = p_ride_id
-    AND NOT EXISTS (
-      SELECT 1 FROM jsonb_to_recordset(p_waypoints) AS w(id UUID)
-      WHERE w.id = tw.id
-    );
+    AND NOT (tw.id = ANY(v_keep_ids));
 
   UPDATE public.rides SET
     origin = trim(p_trip->>'origin'),
