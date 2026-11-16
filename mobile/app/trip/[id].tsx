@@ -258,6 +258,10 @@ export default function TripWorkspaceScreen() {
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/ride/' + trip.id)}><Text style={styles.primaryText}>Open live ride tracker →</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => router.push('/(tabs)')}><Text style={styles.secondaryText}>My trips</Text></TouchableOpacity>
       </View>
+      {isAdmin && <View style={styles.actions}>
+        <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={openTripEditor}><Text style={styles.secondaryText}>Trip details</Text></TouchableOpacity>
+      </View>}
 
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
