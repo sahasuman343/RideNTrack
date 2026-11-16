@@ -11,6 +11,7 @@ BEGIN
     'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure,
     'public.save_trip_itinerary(uuid,jsonb)'::regprocedure,
     'public.save_trip_route(uuid,jsonb,jsonb)'::regprocedure,
+    'public.delete_trip(uuid)'::regprocedure,
     'public.add_trip_stay(uuid,jsonb)'::regprocedure,
     'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
     'public.accept_trip_invitation(uuid)'::regprocedure,
@@ -275,6 +276,10 @@ DO $$ DECLARE trip_id uuid; BEGIN
     RAISE EXCEPTION 'non-admin route edit allowed';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
+    PERFORM public.delete_trip(trip_id);
+    RAISE EXCEPTION 'non-admin trip deletion allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
     PERFORM public.add_trip_stay(trip_id, '{"name":"Unauthorized stay"}'::jsonb);
     RAISE EXCEPTION 'non-admin accommodation edit allowed';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
@@ -334,3 +339,32 @@ BEGIN
     RAISE EXCEPTION 'day deletion must preserve unassigned stays and waypoints';
   END IF;
 END $$;
+
+
+-- Trip deletion is leader-only and cascades the complete trip aggregate.
+SET ROLE authenticated;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $$
+DECLARE
+  deleted_id UUID;
+BEGIN
+  deleted_id := public.create_trip_plan(
+    '{"name":"Delete trip fixture","trip_type":"touring","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[{"day_number":1,"title":"Day 1"}]'::jsonb,
+    '{"name":"Delete fixture stay","stay_type":"hotel","day_number":1}'::jsonb
+  );
+  PERFORM public.add_regroup_point(deleted_id,'Delete fixture regroup',12,77,0,NULL,NULL);
+  PERFORM public.create_trip_invitation(deleted_id,NULL,'rider',72);
+  PERFORM public.delete_trip(deleted_id);
+  IF EXISTS (SELECT 1 FROM public.rides WHERE id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.trip_days WHERE ride_id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.trip_waypoints WHERE ride_id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.trip_stays WHERE ride_id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.trip_invitations WHERE ride_id=deleted_id)
+     OR EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id=deleted_id) THEN
+    RAISE EXCEPTION 'trip deletion did not cascade to its dependent records';
+  END IF;
+END $$;
+RESET ROLE;
