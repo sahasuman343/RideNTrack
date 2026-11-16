@@ -23,7 +23,7 @@ export type DirectionsRoute = {
 
 export function validateRoutePoints(points: RoutePoint[]): string | null {
   if (!Array.isArray(points) || points.length < 2) return 'A route needs an origin and a destination.';
-  if (points.length > 200) return 'A route can contain at most 200 points.';
+  if (points.length > 25) return 'Mapbox driving directions support at most 25 route points, including origin and destination.';
   if (points[0].waypoint_type !== 'origin') return 'The first point must be the origin.';
   if (points[points.length - 1].waypoint_type !== 'destination') return 'The last point must be the destination.';
   const ids = points.map(point => point.id).filter((id): id is string => Boolean(id));
