@@ -577,3 +577,12 @@ test('trip workspace exposes external next-stop navigation without replacing the
   assert.match(source,/Navigate here/);
   assert.match(source,/Linking\.openURL\(url\)/);
 });
+
+
+test('live ride screen offers external navigation while keeping the in-app group map', () => {
+  const source=fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'),'utf8');
+  assert.match(source,/buildGoogleMapsNavigationUrl/);
+  assert.match(source,/trip_waypoints/);
+  assert.match(source,/Navigate to \{nextWaypoint\.name\}/);
+  assert.match(source,/active && nextWaypoint/);
+});
