@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -46,6 +46,13 @@ export default function TripWorkspaceScreen() {
   const [stayCheckIn, setStayCheckIn] = useState('');
   const [stayCheckOut, setStayCheckOut] = useState('');
   const [stayPrice, setStayPrice] = useState('');
+  const [editTripVisible, setEditTripVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editOrigin, setEditOrigin] = useState('');
+  const [editDestination, setEditDestination] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -83,6 +90,42 @@ export default function TripWorkspaceScreen() {
 
   useFocusEffect(useCallback(() => { void load(); return () => { ++loadGeneration.current; }; }, [load]));
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);
+
+  function openTripEditor() {
+    if (!trip) return;
+    setEditName(trip.name || '');
+    setEditDescription(trip.description || '');
+    setEditOrigin(trip.origin || '');
+    setEditDestination(trip.destination || '');
+    setEditStartDate(trip.start_date || '');
+    setEditEndDate(trip.end_date || '');
+    setEditTripVisible(true);
+  }
+
+  async function saveTripDetails() {
+    if (!editName.trim() || !editOrigin.trim() || !editDestination.trim()) {
+      Alert.alert('Missing trip details', 'Trip name, origin and destination are required.');
+      return;
+    }
+    if (editStartDate && editEndDate && editEndDate < editStartDate) {
+      Alert.alert('Invalid dates', 'End date must be on or after start date.');
+      return;
+    }
+    setSaving(true); setError('');
+    try {
+      const { error: updateError } = await supabase.from('rides').update({
+        name: editName.trim(), description: editDescription.trim() || null,
+        origin: editOrigin.trim(), destination: editDestination.trim(),
+        start_date: editStartDate.trim() || null, end_date: editEndDate.trim() || null,
+      }).eq('id', id);
+      if (updateError) throw updateError;
+      setEditTripVisible(false);
+      await load();
+      Alert.alert('Trip updated', 'Your trip details have been saved.');
+    } catch (e: any) {
+      setError(e?.message || 'Could not update trip details.');
+    } finally { setSaving(false); }
+  }
 
   async function openDirections(point: Waypoint) {
     const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(point.latitude + ',' + point.longitude);
@@ -349,6 +392,28 @@ export default function TripWorkspaceScreen() {
           <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void addStay()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Add accommodation'}</Text></TouchableOpacity>
         </>}
       </View>
+      <Modal visible={editTripVisible} transparent animationType="slide" onRequestClose={() => setEditTripVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.section}>Edit trip details</Text>
+            <Text style={styles.mutedSmall}>You can update the plan even after the ride has started. Changes are saved to the shared trip.</Text>
+            <Text style={styles.label}>Trip name</Text>
+            <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Trip name" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>Description</Text>
+            <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
+            <Text style={styles.label}>Origin</Text>
+            <TextInput style={styles.input} value={editOrigin} onChangeText={setEditOrigin} placeholder="Starting point" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>Destination</Text>
+            <TextInput style={styles.input} value={editDestination} onChangeText={setEditDestination} placeholder="Destination" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>Start date · YYYY-MM-DD</Text>
+            <TextInput style={styles.input} value={editStartDate} onChangeText={setEditStartDate} placeholder="2026-11-16" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>End date · YYYY-MM-DD</Text>
+            <TextInput style={styles.input} value={editEndDate} onChangeText={setEditEndDate} placeholder="2026-11-18" placeholderTextColor={theme.subtle} />
+            <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
       {!!error && <Text style={styles.error}>{error}</Text>}
       <Text style={styles.footer}>Trip planning is separate from the actual GPS session. Starting the tracker records what happened, while this workspace keeps the planned journey.</Text>
     </ScrollView>
@@ -356,6 +421,8 @@ export default function TripWorkspaceScreen() {
 }
 
 const makeStyles = (c: RidePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.background }, editTripButton: { borderWidth: 1, borderColor: c.accent, backgroundColor: c.accentSoft, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }, editTripText: { color: c.text, fontSize: 13, fontWeight: '800' },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' }, editModal: { maxHeight: '90%', backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
   container: { flex: 1, backgroundColor: c.background }, content: { padding: 18, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: c.background, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   eyebrow: { color: c.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
