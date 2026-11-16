@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useRideTheme, RidePalette } from '../../src/theme';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -11,6 +12,8 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
+  const theme = useRideTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
   async function handleRegister() {
     if (!email || !password || !username || !displayName) {
@@ -37,7 +40,7 @@ export default function RegisterScreen() {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.logo}>RideNTrack</Text>
+          <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack<span> </span></Text>
           <Text style={styles.subtitle}>Join the Community</Text>
         </View>
 
@@ -87,10 +90,10 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: RidePalette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: c.background,
   },
   scroll: {
     flexGrow: 1,
@@ -101,30 +104,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 48,
   },
+  kicker: { color: c.green, fontSize: 9, fontWeight: '900', letterSpacing: 2.2, marginBottom: 10 },
   logo: {
     fontSize: 36,
-    fontWeight: 'bold',
-    color: '#FF6B00',
+    fontWeight: '900',
+    color: c.accent,
   },
   subtitle: {
     fontSize: 16,
-    color: '#ccc',
+    color: c.muted,
     marginTop: 8,
   },
   form: {
     gap: 16,
   },
   input: {
-    backgroundColor: '#16213e',
-    borderRadius: 12,
+    backgroundColor: c.input,
+    borderRadius: 8,
     padding: 16,
     fontSize: 16,
-    color: '#fff',
+    color: c.text,
     borderWidth: 1,
-    borderColor: '#0f3460',
+    borderColor: c.border,
   },
   button: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: c.accent,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
