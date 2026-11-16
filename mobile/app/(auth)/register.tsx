@@ -40,7 +40,7 @@ export default function RegisterScreen() {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack<span> </span></Text>
+          <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack</Text>
           <Text style={styles.subtitle}>Join the Community</Text>
         </View>
 
