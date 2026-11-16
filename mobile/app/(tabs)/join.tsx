@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
+import { useRideTheme, RidePalette } from '../../src/theme';
 
 export default function JoinRideScreen() {
   const [code, setCode] = useState('');
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const theme = useRideTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
   async function handleJoinCode() {
     if (!code || code.trim().length !== 6) {
@@ -43,8 +46,8 @@ export default function JoinRideScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>Join a Group Ride</Text>
-      <Text style={styles.subtitle}>Join with a ride code or accept a private invitation from the trip leader.</Text>
+      <Text style={styles.kicker}>RIDE WITH YOUR PEOPLE</Text><Text style={styles.title}>Find your crew.</Text>
+      <Text style={styles.subtitle}>Meet on the road. Share the route. Keep everyone in sight.</Text>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Join with ride code</Text>
         <TextInput style={styles.codeInput} placeholder="XXXXXX" placeholderTextColor="#77809a" value={code}
@@ -65,15 +68,15 @@ export default function JoinRideScreen() {
     </ScrollView>
   );
 }
-const styles = StyleSheet.create({
-  container:{flexGrow:1,backgroundColor:'#1a1a2e',padding:24,justifyContent:'center'},
-  title:{color:'#fff',fontSize:24,fontWeight:'bold',textAlign:'center'},
-  subtitle:{color:'#999',fontSize:14,marginTop:8,marginBottom:22,textAlign:'center',lineHeight:20},
-  section:{backgroundColor:'#16213e',borderWidth:1,borderColor:'#0f3460',borderRadius:14,padding:16,marginTop:14},
-  sectionTitle:{color:'#fff',fontSize:16,fontWeight:'700',marginBottom:8},
-  hint:{color:'#9aa8bd',fontSize:12,lineHeight:18,marginBottom:8},
-  codeInput:{backgroundColor:'#101827',borderRadius:10,padding:16,fontSize:24,color:'#ff8a32',borderWidth:1,borderColor:'#34445c',textAlign:'center',letterSpacing:6,fontFamily:'monospace',fontWeight:'bold'},
-  tokenInput:{backgroundColor:'#101827',borderRadius:10,padding:13,fontSize:13,color:'#fff',borderWidth:1,borderColor:'#34445c'},
-  button:{backgroundColor:'#ed7625',borderRadius:10,padding:14,alignItems:'center',marginTop:12},
+const makeStyles = (c: RidePalette) => StyleSheet.create({
+  container:{flexGrow:1,backgroundColor:c.background,padding:22,justifyContent:'center'},
+  kicker:{color:c.green,fontSize:10,fontWeight:'900',letterSpacing:2.4},title:{color:c.text,fontSize:32,fontWeight:'900',letterSpacing:-1,marginTop:10},
+  subtitle:{color:c.muted,fontSize:14,marginTop:8,marginBottom:28,lineHeight:21},
+  section:{backgroundColor:c.surface,borderWidth:1,borderColor:c.border,borderRadius:9,padding:18,marginTop:14},
+  sectionTitle:{color:c.text,fontSize:16,fontWeight:'700',marginBottom:8},
+  hint:{color:c.muted,fontSize:12,lineHeight:18,marginBottom:8},
+  codeInput:{backgroundColor:c.input,borderRadius:10,padding:16,fontSize:24,color:c.accent,borderWidth:1,borderColor:c.border,textAlign:'center',letterSpacing:6,fontFamily:'monospace',fontWeight:'bold'},
+  tokenInput:{backgroundColor:'#101827',borderRadius:10,padding:13,fontSize:13,color:c.text,borderWidth:1,borderColor:'#34445c'},
+  button:{backgroundColor:c.accent,borderRadius:7,padding:14,alignItems:'center',marginTop:12},
   buttonText:{color:'#fff',fontSize:14,fontWeight:'700'},
 });
