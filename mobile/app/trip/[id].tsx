@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Share, S
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useRideTheme, RidePalette } from '../../src/theme';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
@@ -20,6 +21,8 @@ export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+  const theme = useRideTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [days, setDays] = useState<Day[]>([]);
@@ -352,34 +355,34 @@ export default function TripWorkspaceScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#101827' }, content: { padding: 18, paddingBottom: 40 },
-  center: { flex: 1, backgroundColor: '#101827', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
-  eyebrow: { color: '#ff9a50', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
-  title: { color: '#fff', fontSize: 27, fontWeight: '800', marginTop: 7 },
-  muted: { color: '#aab6c9', fontSize: 13, lineHeight: 19, marginTop: 6 },
-  mutedSmall: { color: '#9eacc1', fontSize: 11, lineHeight: 16, marginTop: 3 },
-  label: { color: '#cbd5e1', fontSize: 11, fontWeight: '700', marginTop: 10, marginBottom: 5 },
-  input: { backgroundColor: '#101827', borderWidth: 1, borderColor: '#3b4b62', borderRadius: 9, padding: 11, color: '#fff', marginTop: 7, fontSize: 13 },
-  hero: { backgroundColor: '#1a2940', borderRadius: 18, borderWidth: 1, borderColor: '#34445c', padding: 17, marginTop: 18 },
-  route: { color: '#fff', fontSize: 16, fontWeight: '700' }, arrow: { color: '#ff9a50', fontSize: 20, marginVertical: 4 },
-  stats: { flexDirection: 'row', gap: 28, marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#3b4b62' },
-  statValue: { color: '#fff', fontSize: 17, fontWeight: '800' }, statLabel: { color: '#95a4ba', fontSize: 9, marginTop: 4, fontWeight: '700' },
-  note: { color: '#d6a77f', fontSize: 10, lineHeight: 15, marginTop: 12 },
-  actions: { flexDirection: 'row', gap: 8, marginVertical: 14 }, primary: { flex: 1, backgroundColor: '#ed7625', borderRadius: 11, padding: 13, alignItems: 'center' },
-  primaryWide: { backgroundColor: '#ed7625', borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 14 },
-  primaryText: { color: '#fff', fontWeight: '800', fontSize: 12 }, secondary: { borderColor: '#53627a', borderWidth: 1, borderRadius: 11, padding: 13 }, secondaryText: { color: '#dce4f1', fontWeight: '700', fontSize: 12 },
-  card: { backgroundColor: '#192438', borderColor: '#2d3e57', borderWidth: 1, borderRadius: 16, padding: 15, marginTop: 12 },
-  section: { color: '#fff', fontSize: 17, fontWeight: '800', marginBottom: 12 },
-  point: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 11, borderTopWidth: 1, borderTopColor: '#34445b' },
-  marker: { width: 25, height: 25, borderRadius: 13, backgroundColor: '#58351f', alignItems: 'center', justifyContent: 'center' },
-  markerText: { color: '#ffad73', fontSize: 11, fontWeight: '800' }, pointType: { color: '#ffad73', fontSize: 9, fontWeight: '800' },
-  pointName: { color: '#fff', fontSize: 13, fontWeight: '700', marginTop: 2 }, link: { color: '#ffad73', fontSize: 11, fontWeight: '700' },
+const makeStyles = (c: RidePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.background }, content: { padding: 18, paddingBottom: 40 },
+  center: { flex: 1, backgroundColor: c.background, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  eyebrow: { color: c.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
+  title: { color: c.text, fontSize: 32, fontWeight: '900', letterSpacing: -0.8, marginTop: 7 },
+  muted: { color: c.muted, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  mutedSmall: { color: c.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  label: { color: c.text, fontSize: 11, fontWeight: '700', marginTop: 10, marginBottom: 5 },
+  input: { backgroundColor: c.background, borderWidth: 1, borderColor: c.border, borderRadius: 7, padding: 11, color: c.text, marginTop: 7, fontSize: 13 },
+  hero: { backgroundColor: c.surface, borderRadius: 10, borderWidth: 1, borderColor: c.border, padding: 17, marginTop: 18 },
+  route: { color: c.text, fontSize: 16, fontWeight: '700' }, arrow: { color: c.accent, fontSize: 20, marginVertical: 4 },
+  stats: { flexDirection: 'row', gap: 28, marginTop: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: c.border },
+  statValue: { color: c.text, fontSize: 17, fontWeight: '800' }, statLabel: { color: '#95a4ba', fontSize: 9, marginTop: 4, fontWeight: '700' },
+  note: { color: c.accent, fontSize: 10, lineHeight: 15, marginTop: 12 },
+  actions: { flexDirection: 'row', gap: 8, marginVertical: 14 }, primary: { flex: 1, backgroundColor: c.accent, borderRadius: 7, padding: 13, alignItems: 'center' },
+  primaryWide: { backgroundColor: c.accent, borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 14 },
+  primaryText: { color: c.text, fontWeight: '800', fontSize: 12 }, secondary: { borderColor: c.border, borderWidth: 1, borderRadius: 11, padding: 13 }, secondaryText: { color: c.text, fontWeight: '700', fontSize: 12 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 9, padding: 15, marginTop: 12 },
+  section: { color: c.text, fontSize: 17, fontWeight: '800', marginBottom: 12 },
+  point: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 11, borderTopWidth: 1, borderTopColor: c.border },
+  marker: { width: 25, height: 25, borderRadius: 13, backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  markerText: { color: c.accent, fontSize: 11, fontWeight: '800' }, pointType: { color: c.accent, fontSize: 9, fontWeight: '800' },
+  pointName: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 2 }, link: { color: c.accent, fontSize: 11, fontWeight: '700' },
   editorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  smallButton: { borderWidth: 1, borderColor: '#53627a', borderRadius: 7, paddingHorizontal: 9, paddingVertical: 6 },
-  smallButtonText: { color: '#ffad73', fontSize: 10, fontWeight: '700' },
-  riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#34445b' },
-  roleSelected: { borderColor: '#ff9a50', backgroundColor: '#3b2b22' },
-  day: { borderTopWidth: 1, borderTopColor: '#34445b', paddingVertical: 11 }, dayTitle: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  error: { color: '#ff9999', marginTop: 12 }, footer: { color: '#7f8da3', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
+  smallButton: { borderWidth: 1, borderColor: c.border, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 6 },
+  smallButtonText: { color: c.accent, fontSize: 10, fontWeight: '700' },
+  riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
+  roleSelected: { borderColor: c.accent, backgroundColor: c.accentSoft },
+  day: { borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 11 }, dayTitle: { color: c.text, fontWeight: '700', fontSize: 13 },
+  error: { color: c.danger, marginTop: 12 }, footer: { color: c.subtle, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
 });
