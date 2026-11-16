@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
@@ -14,7 +14,7 @@ type Waypoint = { id: string; sequence: number; waypoint_type: string; name: str
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
 type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
 type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
-type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; trip_day_id?: string | null };
+type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; price_currency: string; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
@@ -45,7 +45,9 @@ export default function TripWorkspaceScreen() {
   const [stayPrice, setStayPrice] = useState('');
 
   const isAdmin = !!user && trip?.admin_id === user.id;
+  const loadGeneration = useRef(0);
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     if (!id) return;
     setLoading(true); setError('');
     try {
@@ -57,6 +59,7 @@ export default function TripWorkspaceScreen() {
         supabase.rpc('get_trip_roster', { p_ride_id: id }),
         supabase.rpc('get_regroup_points', { p_ride_id: id }),
       ]);
+      if (generation !== loadGeneration.current) return;
       if (tripResult.error) throw tripResult.error;
       if (waypointResult.error) throw waypointResult.error;
       if (dayResult.error) throw dayResult.error;
@@ -71,11 +74,11 @@ export default function TripWorkspaceScreen() {
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
-    } catch (e: any) { setError(e?.message || 'Could not load this trip.'); }
-    finally { setLoading(false); }
+    } catch (e: any) { if (generation === loadGeneration.current) setError(e?.message || 'Could not load this trip.'); }
+    finally { if (generation === loadGeneration.current) setLoading(false); }
   }, [id]);
 
-  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useFocusEffect(useCallback(() => { void load(); return () => { ++loadGeneration.current; }; }, [load]));
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);
 
   async function openDirections(point: Waypoint) {
@@ -328,7 +331,7 @@ export default function TripWorkspaceScreen() {
             <Text style={styles.pointName}>{stay.name}</Text>
             <Text style={styles.mutedSmall}>{stay.stay_type} · {stay.check_in || 'Check-in TBD'} – {stay.check_out || 'Check-out TBD'}</Text>
             {!!stay.address && <Text style={styles.mutedSmall}>{stay.address}</Text>}
-            {stay.price_amount != null ? <Text style={styles.mutedSmall}>₹{stay.price_amount}</Text> : null}
+            {stay.price_amount != null ? <Text style={styles.mutedSmall}>{new Intl.NumberFormat(undefined, { style: 'currency', currency: stay.price_currency }).format(stay.price_amount)}</Text> : null}
           </View>
         ))}
         {isAdmin && <>

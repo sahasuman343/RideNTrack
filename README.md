@@ -79,7 +79,15 @@ Execute the SQL migration scripts in your **Supabase SQL Editor** in the followi
 3. `supabase/migrations/003_auth_profiles_trigger.sql` — Auto-creates rider profiles upon signup via a `SECURITY DEFINER` trigger, resolving Row Level Security issues.
 
 4. `supabase/migrations/004_fix_rls_recursion.sql` — Non-recursive membership policies.
-5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.\n6. `supabase/migrations/006_trip_planning.sql` — Trip metadata, searchable-location waypoints, multi-day itinerary and accommodation records.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:cb097bb35b00a247f27e98ec49cf50d69fe45f10dbaf4dff62cba73d0abba9b1 -->
+
+5. `supabase/migrations/005_ride_reliability.sql` — Private rider data and Presence, retry-safe GPS uploads, member-name and last-known-location RPCs.
+6. `supabase/migrations/006_trip_planning.sql` — Trip metadata, searchable-location waypoints, multi-day itinerary and accommodation records.
+7. `supabase/migrations/007_atomic_trip_creation.sql` — Atomic trip creation and day-aware waypoints.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 See [deployment and device checks](docs/ride-reliability.md) before updating existing installations.
 

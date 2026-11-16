@@ -14,13 +14,15 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   let refreshing = false;
   let refreshingLocations = false;
   let refreshingAlerts = false;
+  let pendingAlerts = false;
+  let pendingRefresh = false;
   let connected = false;
   let points: LocationUpdate[] = [];
   let members = new Map<string, string>();
   let lastPublished: LocationUpdate | null = null;
 
   const emit = (incoming: LocationUpdate[]) => {
-    if (disposed || incoming.length === 0) return;
+    if (disposed) return;
     const next = mergeLocations(points, incoming).filter(p => members.has(p.user_id));
     // Avoid waking React and the map when Presence/reconciliation repeats the
     // exact same rider positions.
@@ -36,7 +38,8 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   };
 
   async function refreshAlerts() {
-    if (disposed || refreshingAlerts) return;
+    if (disposed) return;
+    if (refreshingAlerts) { pendingAlerts = true; return; }
     refreshingAlerts = true;
     try {
       const { data, error } = await client.from('alerts').select('*')
@@ -51,6 +54,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to refresh ride alerts.');
     } finally {
       refreshingAlerts = false;
+      if (pendingAlerts && !disposed) { pendingAlerts = false; void refreshAlerts(); }
     }
   }
 
@@ -78,7 +82,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
 
   async function refresh() {
     if (disposed) return;
-    if (refreshing) return;
+    if (refreshing) { pendingRefresh = true; return; }
     refreshing = true;
     try {
       const [ride, names, locations, alerts] = await Promise.all([
@@ -98,6 +102,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       if (!disposed) observer.error(e instanceof Error ? e.message : 'Unable to load this ride.');
     } finally {
       refreshing = false;
+      if (pendingRefresh && !disposed) { pendingRefresh = false; void refresh(); }
     }
   }
 

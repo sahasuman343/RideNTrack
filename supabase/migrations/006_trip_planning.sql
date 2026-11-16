@@ -37,13 +37,16 @@ CREATE TABLE IF NOT EXISTS public.trip_days (
   title TEXT,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ride_id, id),
   UNIQUE (ride_id, day_number)
 );
 
 CREATE TABLE IF NOT EXISTS public.trip_stays (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   ride_id UUID NOT NULL REFERENCES public.rides(id) ON DELETE CASCADE,
-  trip_day_id UUID REFERENCES public.trip_days(id) ON DELETE SET NULL,
+  trip_day_id UUID,
+  FOREIGN KEY (ride_id, trip_day_id) REFERENCES public.trip_days(ride_id, id)
+    ON DELETE SET NULL (trip_day_id),
   name TEXT NOT NULL,
   stay_type TEXT NOT NULL DEFAULT 'hotel' CHECK (stay_type IN ('hotel','homestay','hostel','camping','guesthouse','other')),
   address TEXT,

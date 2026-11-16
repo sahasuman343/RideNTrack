@@ -85,7 +85,7 @@ export default function CreateRideScreen() {
   const router = useRouter();
 
   const days = useMemo(() => {
-    if (!startDate || !endDate || !/^\\d{4}-\\d{2}-\\d{2}$/.test(startDate) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(endDate)) return [];
+    if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return [];
     const start = new Date(startDate + 'T12:00:00Z'), end = new Date(endDate + 'T12:00:00Z');
     if (Number.isNaN(start.getTime()) || end < start) return [];
     const result: string[] = [];
@@ -124,16 +124,20 @@ export default function CreateRideScreen() {
       ];
       let routeGeometry: any = null, distance: number | null = null, duration: number | null = null;
       if (TOKEN && ordered.length >= 2) {
-        const coords = ordered.map(p => p.place.longitude + ',' + p.place.latitude).join(';');
-        const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + coords +
-          '?overview=full&geometries=geojson&steps=false&access_token=' + TOKEN);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.routes?.[0]) {
-            routeGeometry = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
-            distance = Math.round(data.routes[0].distance);
-            duration = Math.round(data.routes[0].duration);
+        try {
+          const coords = ordered.map(p => p.place.longitude + ',' + p.place.latitude).join(';');
+          const response = await fetch('https://api.mapbox.com/directions/v5/mapbox/driving/' + coords +
+            '?overview=full&geometries=geojson&steps=false&access_token=' + TOKEN);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.routes?.[0]) {
+              routeGeometry = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
+              distance = Math.round(data.routes[0].distance);
+              duration = Math.round(data.routes[0].duration);
+            }
           }
+        } catch {
+          routeGeometry = null; distance = null; duration = null;
         }
       }
       const waypointRows = ordered.map((item, index) => ({

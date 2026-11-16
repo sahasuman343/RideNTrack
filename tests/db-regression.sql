@@ -250,3 +250,45 @@ DO $$ DECLARE trip_id uuid; BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;
+
+-- Direct writes must preserve ride/day ownership, including updates.
+DO $$
+DECLARE
+  ride_a uuid := 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  ride_b uuid;
+  day_a uuid;
+  day_b uuid;
+  stay_id uuid;
+  waypoint_id uuid;
+BEGIN
+  SELECT id INTO STRICT ride_b FROM public.rides WHERE name = 'Atomic trip fixture';
+  INSERT INTO public.trip_days (ride_id, day_number) VALUES (ride_a, 99) RETURNING id INTO day_a;
+  INSERT INTO public.trip_days (ride_id, day_number) VALUES (ride_b, 99) RETURNING id INTO day_b;
+  INSERT INTO public.trip_stays (ride_id, name) VALUES (ride_a, 'Unassigned constraint fixture') RETURNING id INTO stay_id;
+  INSERT INTO public.trip_waypoints (ride_id, sequence, waypoint_type, name, latitude, longitude)
+    VALUES (ride_a, 99, 'stop', 'Unassigned constraint fixture', 0, 0) RETURNING id INTO waypoint_id;
+  BEGIN
+    INSERT INTO public.trip_stays (ride_id, trip_day_id, name) VALUES (ride_a, day_b, 'Invalid');
+    RAISE EXCEPTION 'cross-ride stay insert accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  BEGIN
+    INSERT INTO public.trip_waypoints (ride_id, trip_day_id, sequence, waypoint_type, name, latitude, longitude)
+      VALUES (ride_a, day_b, 100, 'stop', 'Invalid', 0, 0);
+    RAISE EXCEPTION 'cross-ride waypoint insert accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.trip_stays SET trip_day_id = day_b WHERE id = stay_id;
+    RAISE EXCEPTION 'cross-ride stay update accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.trip_waypoints SET trip_day_id = day_b WHERE id = waypoint_id;
+    RAISE EXCEPTION 'cross-ride waypoint update accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  UPDATE public.trip_stays SET trip_day_id = day_a WHERE id = stay_id;
+  UPDATE public.trip_waypoints SET trip_day_id = day_a WHERE id = waypoint_id;
+  DELETE FROM public.trip_days WHERE id = day_a;
+  IF NOT EXISTS (SELECT 1 FROM public.trip_stays WHERE id = stay_id AND ride_id = ride_a AND trip_day_id IS NULL)
+    OR NOT EXISTS (SELECT 1 FROM public.trip_waypoints WHERE id = waypoint_id AND ride_id = ride_a AND trip_day_id IS NULL) THEN
+    RAISE EXCEPTION 'day deletion must preserve unassigned stays and waypoints';
+  END IF;
+END $$;

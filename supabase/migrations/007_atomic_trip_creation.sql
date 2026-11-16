@@ -1,9 +1,16 @@
 -- Phase 1: atomic trip aggregate creation and day-aware waypoints.
 BEGIN;
 
+CREATE UNIQUE INDEX IF NOT EXISTS trip_days_ride_id_id_key
+  ON public.trip_days(ride_id, id);
+
 ALTER TABLE public.trip_waypoints
-  ADD COLUMN IF NOT EXISTS trip_day_id UUID
-  REFERENCES public.trip_days(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS trip_day_id UUID;
+
+ALTER TABLE public.trip_waypoints
+  ADD CONSTRAINT trip_waypoints_ride_day_fkey
+  FOREIGN KEY (ride_id, trip_day_id) REFERENCES public.trip_days(ride_id, id)
+  ON DELETE SET NULL (trip_day_id);
 
 CREATE INDEX IF NOT EXISTS idx_trip_waypoints_day_sequence
   ON public.trip_waypoints(trip_day_id, sequence);

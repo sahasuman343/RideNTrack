@@ -139,7 +139,9 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
  *    during the permission Settings return transition.
  */
 export function enableBackgroundLocationUpdates(params: Params): Promise<BackgroundLocationResult> {
+  const version = generation;
   return serialize(async () => {
+    if (version !== generation) return { isBackgroundEnabled: false };
     if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
       params.onError?.('Background GPS requires an installed Android development or preview build.');
       return { isBackgroundEnabled: false, permissionGranted: false };
@@ -174,6 +176,7 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
           },
         });
       }
+      if (version !== generation) return { isBackgroundEnabled: false };
       fallback?.remove();
       fallback = null;
       context = params;
@@ -182,6 +185,7 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       }));
       return { isBackgroundEnabled: true, permissionGranted: true };
     } catch (e) {
+      if (version !== generation) return { isBackgroundEnabled: false };
       // Keep foreground GPS alive if Android rejects the foreground service.
       const message = e instanceof Error ? e.message : 'Android could not start background GPS.';
       params.onError?.(message);

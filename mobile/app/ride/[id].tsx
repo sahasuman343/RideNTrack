@@ -205,6 +205,7 @@ export default function LiveRideScreen() {
     if (!userId) return;
     setGpsError(null);
     setMessage(null);
+    let startupFailed = false;
     try {
       const result = await enableBackgroundLocationUpdates({
         rideId: id,
@@ -212,14 +213,14 @@ export default function LiveRideScreen() {
         displayName: name,
         publish,
         onLocationUpdate: setPosition,
-        onError: setGpsError,
+        onError: error => { startupFailed = true; setGpsError(error); },
       });
       if (result.permissionGranted) setBackgroundPermissionGranted(true);
       if (result.isBackgroundEnabled) {
         setTracking('background');
         setBackgroundPermissionGranted(true);
         setMessage(null);
-      } else if (result.permissionGranted) {
+      } else if (result.permissionGranted && !startupFailed) {
         setMessage('Background permission granted. Tap Start background GPS again to activate it.');
       }
     } catch (e) {

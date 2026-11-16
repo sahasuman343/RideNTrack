@@ -11,7 +11,7 @@ function loader(stubs = {}) {
     filename = path.resolve(filename);
     if (cache.has(filename)) return cache.get(filename).exports;
     const module = { exports: {} }; cache.set(filename,module);
-    const js = ts.transpileModule(fs.readFileSync(filename,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const js = ts.transpileModule(fs.readFileSync(filename,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
     const localRequire = name => {
       if (name in stubs) return stubs[name];
       if (name === '@ridentrack/shared') return load('shared/types.ts');
@@ -184,6 +184,9 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
 test('Android background permission and native GPS service start are separate user actions', async () => {
   const storage = new Map();
   let requested = 0, started = 0, startedOptions, permissionGranted = false, foregroundWatch = 0;
+  let releaseStart, starting;
+  let startBarrier;
+  let stopped = 0, nativeStarted = false;
   const service = loader({
     'expo-constants': { default:{executionEnvironment:'standalone'},ExecutionEnvironment:{StoreClient:'storeClient'},__esModule:true },
     'expo-task-manager': { isTaskDefined:()=>true },
@@ -194,10 +197,10 @@ test('Android background permission and native GPS service start are separate us
       isBackgroundLocationAvailableAsync:async()=>true,
       getBackgroundPermissionsAsync:async()=>({status:permissionGranted?'granted':'undetermined'}),
       requestBackgroundPermissionsAsync:async()=>{requested++;permissionGranted=true;return {status:'granted'};},
-      hasStartedLocationUpdatesAsync:async()=>false,
-      startLocationUpdatesAsync:async(_task,options)=>{started++;startedOptions=options;},
+      hasStartedLocationUpdatesAsync:async()=>nativeStarted,
+      startLocationUpdatesAsync:async(_task,options)=>{started++;startedOptions=options;if (starting) starting();if (startBarrier) await startBarrier;nativeStarted=true;},
       watchPositionAsync:async()=>{foregroundWatch++;return {remove(){}};},
-      stopLocationUpdatesAsync:async()=>{},
+      stopLocationUpdatesAsync:async()=>{stopped++;nativeStarted=false;},
     },
     '@react-native-async-storage/async-storage': {
       getItem:async key=>storage.get(key)||null,
@@ -229,4 +232,100 @@ test('Android background permission and native GPS service start are separate us
   assert.equal(startedOptions.distanceInterval,15);
   assert.equal(startedOptions.foregroundService.notificationTitle,'RideNTrack · Sharing location');
   await service.stopBackgroundLocationUpdates();
+  startBarrier = new Promise(resolve => { releaseStart = resolve; });
+  const hasStarted = new Promise(resolve => { starting = resolve; });
+  const enable = service.enableBackgroundLocationUpdates(params);
+  await hasStarted;
+  const stop = service.stopBackgroundLocationUpdates();
+  releaseStart();
+  assert.equal((await enable).isBackgroundEnabled, false);
+  await stop;
+  assert.equal(storage.size, 0, 'cancelled enable must not persist context');
+  assert.equal(nativeStarted, false);
+  assert.equal(stopped, 2);
+});
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+test('ride reconciliation removes departed riders and queues reconnect and alert refreshes', async () => {
+  const pending = [], handlers = {}, updates = [], alertUpdates = [];
+  let subscribe, memberRows = [{ user_id: 'a', display_name: 'A' }], locationRows = [point('a','2026-10-01T12:00:00Z')];
+  const channel = {
+    on(kind, filter, callback) { handlers[filter.event === 'sync' ? 'presence' : filter.table] = callback; return this; },
+    subscribe(callback) { subscribe = callback; return this; },
+    presenceState: () => ({}), track: async () => 'ok',
+  };
+  const client = {
+    channel: () => channel, removeChannel() {},
+    rpc: async name => ({ data: name === 'get_ride_members' ? memberRows : locationRows }),
+    from(table) {
+      const query = { select: () => query, eq: () => query, order: () => query,
+        single: async () => ({ data: { id: 'r' } }),
+        limit: () => new Promise(resolve => pending.push(resolve)),
+      }; return query;
+    },
+  };
+  const watcher = loader()('shared/live.ts').watchRide(client, 'r', 'a', {
+    ride() {}, locations: rows => updates.push(rows), alerts: rows => alertUpdates.push(rows), connection() {}, error() {},
+  });
+  try {
+    subscribe('SUBSCRIBED');
+    assert.equal(pending.length, 1);
+    pending.shift()({ data: [] }); await tick();
+    assert.equal(pending.length, 1, 'reconnect queues a full refresh');
+    memberRows = []; locationRows = [];
+    pending.shift()({ data: [] }); await tick();
+    const emptyRefresh = watcher.refresh();
+    pending.shift()({ data: [] }); await emptyRefresh;
+    handlers.alerts(); handlers.alerts();
+    assert.equal(pending.length, 1);
+    pending.shift()({ data: [{ id: 'old' }] }); await tick();
+    assert.equal(pending.length, 1, 'alert event queues another request');
+    pending.shift()({ data: [{ id: 'new' }] }); await tick();
+    assert.equal(alertUpdates.at(-1)[0].id, 'new');
+  } finally {
+    if (pending.length) { pending.shift()({ data: [] }); await tick(); }
+    watcher.stop();
+  }
+  assert.deepEqual(updates.map(rows => rows.length), [1, 0]);
+});
+
+test('auth startup cannot overwrite auth events; account changes clear cached profiles', async () => {
+  const states = [], effects = [], refs = [];
+  let stateIndex = 0, refIndex = 0, authChange, resolveStartup;
+  const profiles = [];
+  const react = {
+    createContext: () => ({ Provider() {} }), createElement() {},
+    useState(initial) { const index = stateIndex++; states[index] ??= initial; return [states[index], value => { states[index] = value; }]; },
+    useRef(initial) { const index = refIndex++; return refs[index] ??= { current: initial }; },
+    useEffect(fn) { effects.push(fn); }, useContext() {},
+  };
+  const provider = loader({
+    react,
+    '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
+    '../lib/supabase': { supabase: {
+      auth: {
+        getSession: () => new Promise(resolve => { resolveStartup = resolve; }),
+        onAuthStateChange: callback => { authChange = callback; return { data: { subscription: { unsubscribe() {} } } }; },
+      },
+      from() { const query = { select: () => query, eq: () => query, single: () => new Promise(resolve => profiles.push(resolve)) }; return query; },
+    } },
+  })('mobile/src/hooks/useAuth.tsx');
+  provider.AuthProvider({ children: null });
+  const cleanup = effects[0]();
+  try {
+    const sessionA = { user: { id: 'a' } }, sessionB = { user: { id: 'b' } };
+    authChange('SIGNED_IN', sessionA);
+    profiles.shift()({ data: { id: 'a', display_name: 'A' } }); await tick();
+    assert.equal(states[1].id, 'a');
+    authChange('TOKEN_REFRESHED', sessionA);
+    assert.equal(states[1].id, 'a', 'same-user events preserve the cached profile');
+    authChange('SIGNED_IN', sessionB);
+    assert.equal(states[1], null, 'different user clears cached profile immediately');
+    profiles.pop()({ data: null, error: { message: 'offline' } }); await tick();
+    resolveStartup({ data: { session: sessionA } }); await tick();
+    assert.equal(states[0], sessionB, 'late startup result cannot restore user A');
+    assert.equal(states[1], null);
+    profiles.shift()({ data: { id: 'a' } }); await tick();
+    assert.equal(states[1], null, 'late user A profile must remain hidden');
+  } finally { cleanup(); }
 });

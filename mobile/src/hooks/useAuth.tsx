@@ -26,6 +26,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+    let authEpoch = 0;
+    const startupEpoch = authEpoch;
 
     // Safety timeout: Ensure loading finishes within 3 seconds even if network is offline/slow
     const timeout = setTimeout(() => {
@@ -34,9 +36,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     supabase.auth.getSession()
       .then((res) => {
-        if (!isMounted) return;
+        if (!isMounted || authEpoch !== startupEpoch) return;
         const currentSession = res?.data?.session ?? null;
         setSession(currentSession);
+        if (activeUserId.current !== (currentSession?.user.id ?? null)) setProfile(null);
         activeUserId.current = currentSession?.user.id ?? null;
         if (currentSession?.user) fetchProfile(currentSession.user.id);
       })
@@ -52,7 +55,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: authData } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return;
+      ++authEpoch;
       setSession(session);
+      if (activeUserId.current !== (session?.user.id ?? null)) setProfile(null);
       activeUserId.current = session?.user.id ?? null;
       if (session?.user) fetchProfile(session.user.id);
       else { setProfile(null); void stopBackgroundLocationUpdates().catch(console.warn); }
@@ -100,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
     if (data?.session) {
       setSession(data.session);
+      if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);
       activeUserId.current = data.user?.id ?? null;
       if (data.user) fetchProfile(data.user.id);
     }
