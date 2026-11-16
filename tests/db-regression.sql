@@ -10,6 +10,7 @@ BEGIN
     'public.bulk_insert_location_updates(jsonb)'::regprocedure,
     'public.create_trip_plan(jsonb,jsonb,jsonb,jsonb)'::regprocedure,
     'public.save_trip_itinerary(uuid,jsonb)'::regprocedure,
+    'public.save_trip_route(uuid,jsonb,jsonb)'::regprocedure,
     'public.add_trip_stay(uuid,jsonb)'::regprocedure,
     'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
     'public.accept_trip_invitation(uuid)'::regprocedure,
@@ -131,6 +132,43 @@ BEGIN
     RAISE EXCEPTION 'itinerary reorder or day reassignment failed';
   END IF;
 
+  -- Full route replacement keeps existing waypoint IDs and day links while adding a new stop.
+  PERFORM public.save_trip_route(created_id,
+    '{"origin":"B revised","destination":"A revised","origin_coords":[78,13],"destination_coords":[77,12],"route_geometry":{"type":"Feature","geometry":{"type":"LineString","coordinates":[[78,13],[77.5,12.5],[77,12]]},"properties":{}},"estimated_distance_meters":125000,"estimated_duration_seconds":7200}'::jsonb,
+    jsonb_build_array(
+      jsonb_build_object('id',(SELECT id FROM public.trip_waypoints WHERE ride_id=created_id AND name='B'),'sequence',0,'waypoint_type','origin','name','B revised','address','B revised','latitude',13,'longitude',78,'day_number',1),
+      jsonb_build_object('id',NULL,'sequence',1,'waypoint_type','fuel','name','Fuel stop','address','Fuel stop','latitude',12.5,'longitude',77.5,'day_number',1),
+      jsonb_build_object('id',(SELECT id FROM public.trip_waypoints WHERE ride_id=created_id AND name='A'),'sequence',2,'waypoint_type','destination','name','A revised','address','A revised','latitude',12,'longitude',77,'day_number',2)
+    )
+  );
+  IF (SELECT count(*) FROM public.trip_waypoints WHERE ride_id=created_id) <> 3
+     OR NOT EXISTS (SELECT 1 FROM public.trip_waypoints WHERE ride_id=created_id AND name='B revised' AND sequence=0)
+     OR NOT EXISTS (SELECT 1 FROM public.trip_waypoints WHERE ride_id=created_id AND name='Fuel stop' AND sequence=1)
+     OR NOT EXISTS (SELECT 1 FROM public.trip_waypoints WHERE ride_id=created_id AND name='A revised' AND sequence=2)
+     OR NOT EXISTS (SELECT 1 FROM public.rides WHERE id=created_id AND origin='B revised' AND destination='A revised'
+       AND estimated_distance_meters=125000 AND estimated_duration_seconds=7200
+       AND route_geometry->'geometry'->>'type'='LineString') THEN
+    RAISE EXCEPTION 'full route edit did not update route and waypoint aggregate';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.trip_waypoints w JOIN public.trip_days d ON d.id=w.trip_day_id
+      WHERE w.ride_id=created_id AND w.name='A revised' AND d.day_number=2) THEN
+    RAISE EXCEPTION 'full route edit did not preserve waypoint day assignment';
+  END IF;
+
+  BEGIN
+    PERFORM public.save_trip_route(created_id,
+      '{"origin":"Should not persist","destination":"A","origin_coords":[78,13],"destination_coords":[77,12],"route_geometry":null}'::jsonb,
+      '[{"sequence":0,"waypoint_type":"origin","name":"Bad","latitude":999,"longitude":78},{"sequence":1,"waypoint_type":"destination","name":"A","latitude":12,"longitude":77}]'::jsonb
+    );
+    RAISE EXCEPTION 'invalid route coordinates unexpectedly accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'invalid route coordinates unexpectedly accepted' THEN RAISE; END IF;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id=created_id AND origin='B revised')
+     OR (SELECT count(*) FROM public.trip_waypoints WHERE ride_id=created_id) <> 3 THEN
+    RAISE EXCEPTION 'failed route edit left partial changes';
+  END IF;
+
   BEGIN
     PERFORM public.add_trip_stay(created_id,
       '{"name":"Invalid price","price_amount":-1,"day_number":1}'::jsonb);
@@ -231,6 +269,10 @@ DO $$ DECLARE trip_id uuid; BEGIN
   BEGIN
     PERFORM public.save_trip_itinerary(trip_id, '[]'::jsonb);
     RAISE EXCEPTION 'non-admin itinerary edit allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM public.save_trip_route(trip_id,'{}'::jsonb,'[]'::jsonb);
+    RAISE EXCEPTION 'non-admin route edit allowed';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     PERFORM public.add_trip_stay(trip_id, '{"name":"Unauthorized stay"}'::jsonb);
