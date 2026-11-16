@@ -33,7 +33,7 @@ test('trip workspace exposes deletion only behind the leader check and confirms 
   assert.match(source,/Delete this trip permanently\?/);
   assert.match(source,/Delete permanently/);
   assert.match(source,/supabase\.rpc\('delete_trip'/);
-  assert.match(source,/router\.replace\('\/(tabs)'\)/);
+  assert.match(source,/router\.replace\('\/\(tabs\)'\)/);
 });
 
 const shared = loader()('shared/types.ts');
