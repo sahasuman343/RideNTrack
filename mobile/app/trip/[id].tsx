@@ -421,7 +421,7 @@ export default function TripWorkspaceScreen() {
 }
 
 const makeStyles = (c: RidePalette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.background }, editTripButton: { borderWidth: 1, borderColor: c.accent, backgroundColor: c.accentSoft, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }, editTripText: { color: c.text, fontSize: 13, fontWeight: '800' },
+  editTripButton: { borderWidth: 1, borderColor: c.accent, backgroundColor: c.accentSoft, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 12 }, editTripText: { color: c.text, fontSize: 13, fontWeight: '800' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' }, editModal: { maxHeight: '90%', backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
   container: { flex: 1, backgroundColor: c.background }, content: { padding: 18, paddingBottom: 40 },
   center: { flex: 1, backgroundColor: c.background, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
