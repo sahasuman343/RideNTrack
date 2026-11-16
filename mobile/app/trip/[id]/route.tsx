@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { supabase } from '../../src/lib/supabase';
-import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, RidePalette } from '../../src/theme';
+import { supabase } from '../../../src/lib/supabase';
+import { useAuth } from '../../../src/hooks/useAuth';
+import { useRideTheme, RidePalette } from '../../../src/theme';
 import { formatRouteDistance, formatRouteDuration, parseDirectionsRoute, routeCoordinates, validateRoutePoints, type RoutePoint, type RouteWaypointType } from '@ridentrack/shared';
 
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
