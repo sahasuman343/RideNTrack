@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useRideTheme, RidePalette } from '../../src/theme';
 
 export default function ProfileScreen() {
   const { profile, signOut } = useAuth();
+  const theme = useRideTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
   return (
     <View style={styles.container}>
@@ -31,32 +34,32 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e', padding: 24, alignItems: 'center', paddingTop: 60 },
+const makeStyles = (c: RidePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.background, padding: 24, alignItems: 'center', paddingTop: 60 },
   avatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#FF6B00',
+    backgroundColor: c.green,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarText: { color: '#fff', fontSize: 32, fontWeight: 'bold' },
+  avatarText: { color: c.text, fontSize: 32, fontWeight: 'bold' },
   name: { color: '#fff', fontSize: 24, fontWeight: '600', marginTop: 16 },
-  username: { color: '#999', fontSize: 14, marginTop: 4 },
+  username: { color: c.muted, fontSize: 14, marginTop: 4 },
   info: { width: '100%', marginTop: 32, gap: 16 },
   infoRow: {
-    backgroundColor: '#16213e',
-    borderRadius: 12,
+    backgroundColor: c.surface,
+    borderRadius: 8,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#0f3460',
+    borderColor: c.border,
   },
   infoLabel: { color: '#999', fontSize: 12 },
   infoValue: { color: '#fff', fontSize: 16, marginTop: 4 },
   logoutButton: {
     marginTop: 32,
-    backgroundColor: '#e74c3c',
+    backgroundColor: c.danger,
     borderRadius: 12,
     padding: 16,
     width: '100%',
