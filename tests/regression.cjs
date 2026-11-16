@@ -41,6 +41,8 @@ test('route validation requires ordered origin and destination with valid coordi
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,latitude:91}:p)),/coordinates/i);
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,name:' '}:p)),/name/i);
   assert.match(routeTools.validateRoutePoints([points[0],{...points[1],waypoint_type:'destination'},points[2]]),/first and last/i);
+  const tooMany=Array.from({length:26},(_,i)=>({sequence:i,waypoint_type:i===0?'origin':i===25?'destination':'stop',name:'P'+i,latitude:12,longitude:77}));
+  assert.match(routeTools.validateRoutePoints(tooMany),/25 route points/i);
 });
 test('route coordinate order is longitude then latitude', () => {
   assert.deepEqual(routeTools.routeCoordinates(routeFixture()),[[77.5946,12.9716],[77.1173,13.3379],[74.3188,14.5479]]);
