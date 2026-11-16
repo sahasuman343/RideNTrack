@@ -160,6 +160,13 @@ export default function RouteEditorScreen() {
     setRouteGeometry(null);setCalculatedSignature('');
   }
 
+  function cyclePointDay(index:number) {
+    const current=points[index].trip_day_id || null;
+    const currentIndex=days.findIndex(day=>day.id===current);
+    const next=currentIndex+1;
+    updatePoint(index,{trip_day_id:next>=days.length?null:days[next].id});
+  }
+
   async function calculateRoute() {
     const validation=validateRoutePoints(points);
     if(validation){Alert.alert('Check your route',validation);return;}
@@ -253,6 +260,9 @@ export default function RouteEditorScreen() {
                 <Text style={styles.changeText}>Change ↗</Text>
               </TouchableOpacity>
               {!!point.address&&<Text style={styles.mutedSmall}>{point.address}</Text>}
+              {days.length>0&&<TouchableOpacity style={styles.dayButton} onPress={()=>cyclePointDay(index)}>
+                <Text style={styles.dayButtonText}>{days.find(day=>day.id===point.trip_day_id)?.title || (point.trip_day_id?'Assigned day':'Unassigned')} · change day</Text>
+              </TouchableOpacity>}
               {index>0&&index<points.length-1&&<View style={styles.editorRow}>
                 <TouchableOpacity style={styles.smallButton} disabled={index===1} onPress={()=>moveStop(index,-1)}><Text style={styles.smallButtonText}>↑ Move up</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.smallButton} disabled={index===points.length-2} onPress={()=>moveStop(index,1)}><Text style={styles.smallButtonText}>↓ Move down</Text></TouchableOpacity>
@@ -309,7 +319,7 @@ const makeStyles=(c:RidePalette)=>StyleSheet.create({
   placeName:{color:c.text,fontSize:14,fontWeight:'700',flex:1},placePlaceholder:{color:c.subtle,fontSize:14,flex:1},
   changeText:{color:c.accent,fontSize:11,fontWeight:'800'},editorRow:{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:9},
   smallButton:{borderWidth:1,borderColor:c.border,borderRadius:8,paddingHorizontal:10,paddingVertical:7},
-  smallButtonText:{color:c.accent,fontSize:10,fontWeight:'800'},removeButton:{paddingHorizontal:9,paddingVertical:7},removeText:{color:c.danger,fontSize:10,fontWeight:'800'},
+  smallButtonText:{color:c.accent,fontSize:10,fontWeight:'800'},dayButton:{alignSelf:'flex-start',marginTop:7,paddingVertical:5},dayButtonText:{color:c.muted,fontSize:10,fontWeight:'700'},removeButton:{paddingHorizontal:9,paddingVertical:7},removeText:{color:c.danger,fontSize:10,fontWeight:'800'},
   addButton:{backgroundColor:c.greenSoft,borderRadius:9,paddingHorizontal:10,paddingVertical:10},addText:{color:c.green,fontSize:11,fontWeight:'800'},
   input:{backgroundColor:c.background,borderWidth:1,borderColor:c.border,borderRadius:9,padding:12,color:c.text,fontSize:14,marginTop:5},
   suggestion:{paddingVertical:12,borderBottomWidth:1,borderBottomColor:c.border},
