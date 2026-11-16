@@ -142,6 +142,7 @@ export default function RouteEditorScreen() {
     }
   }
   function addStop(type:RouteWaypointType='stop') {
+    if(points.length>=25){Alert.alert('Route point limit','Mapbox directions support up to 25 points, including origin and destination.');return;}
     const destinationIndex=points.length-1;
     const newPoint:RoutePoint={id:null,sequence:destinationIndex,waypoint_type:type,name:'',address:'',latitude:0,longitude:0,provider_place_id:null,trip_day_id:null,day_number:null};
     setPoints(current=>[...current.slice(0,-1),newPoint,{...current[current.length-1],sequence:destinationIndex+1}]);
