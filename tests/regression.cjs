@@ -552,3 +552,28 @@ test('route editor uses dedicated place search modal and never leaves dummy plac
   assert.match(tripSource, /router\.push\('\/trip\/' \+ trip\.id \+ '\/route'\)/);
   assert.match(tripSource, /promptDayAssignment/);
 });
+
+
+test('Google Maps navigation URL opens a motorcycle leg from current location', () => {
+  const url = new URL(shared.buildGoogleMapsNavigationUrl({ latitude: 12.9716, longitude: 77.5946 }));
+  assert.equal(url.origin + url.pathname, 'https://www.google.com/maps/dir/');
+  assert.equal(url.searchParams.get('api'), '1');
+  assert.equal(url.searchParams.get('destination'), '12.9716,77.5946');
+  assert.equal(url.searchParams.get('travelmode'), 'two-wheeler');
+  assert.equal(url.searchParams.get('dir_action'), 'navigate');
+  assert.equal(url.searchParams.get('origin'), null, 'Google Maps should use the device current location');
+});
+test('Google Maps navigation URL preserves a destination Place ID and rejects invalid coordinates', () => {
+  const url = new URL(shared.buildGoogleMapsNavigationUrl({
+    latitude: 13.0827, longitude: 80.2707, placeId: 'ChIJ-test-place-id',
+  }));
+  assert.equal(url.searchParams.get('destination_place_id'), 'ChIJ-test-place-id');
+  assert.throws(() => shared.buildGoogleMapsNavigationUrl({ latitude: 91, longitude: 77 }), /valid destination coordinate/i);
+});
+test('trip workspace exposes external next-stop navigation without replacing the group ride map', () => {
+  const source=fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'),'utf8');
+  assert.match(source,/buildGoogleMapsNavigationUrl/);
+  assert.match(source,/Navigate to next stop/);
+  assert.match(source,/Navigate here/);
+  assert.match(source,/Linking\.openURL\(url\)/);
+});
