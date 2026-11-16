@@ -50,3 +50,14 @@ The RPC is transactional. Any invalid child record or failed insert rolls back t
 - Multiple stays are supported per trip and can be linked to a trip day.
 - Only the trip admin can use the editing controls; database RPCs independently enforce admin ownership.
 - Actual arrival/departure events and offline conflict resolution are intentionally deferred to later phases.
+
+
+## Full route editing milestone
+
+- A dedicated route workshop lets the trip leader replace origin/destination, search for places, add/remove intermediate stops and reorder stops.
+- Mapbox Directions recalculates the road route, GeoJSON geometry, distance and driving-time estimate.
+- A native map preview displays the calculated route and route points when the app is running in a development/production build with a configured Mapbox token.
+- Route changes are saved through `save_trip_route` in one database transaction. Existing waypoint IDs are retained where possible so regroup-point references are not needlessly broken; new points are inserted and removed points are deleted.
+- Existing trip-day assignments are carried through route edits. New stops remain unassigned until assigned through the itinerary workflow.
+- The database RPC enforces trip-admin ownership, validates route point order, types, coordinates, day ownership and GeoJSON geometry, and updates parent route metadata and waypoints atomically.
+- Mapbox's `driving` profile is a general driving estimate, not a motorcycle-specific route or ETA. Riders should verify road suitability and local conditions.
