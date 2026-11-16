@@ -2,14 +2,16 @@ import 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../src/hooks/useAuth';
+import { useRideTheme } from '../src/theme';
 // Initialize background location task definition
 import '../src/services/backgroundLocation';
 
 export default function RootLayout() {
+  const theme = useRideTheme();
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#1a1a2e' } }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
