@@ -9,6 +9,7 @@ This document is the implementation source of truth. Each phase should be delive
 - [x] Date and price validation at aggregate write boundary.
 - [x] Transaction/RLS regression tests (added; CI verification pending).
 - [x] Itinerary edit/reorder and multiple stays (transactional RPCs, admin UI and database regression coverage).
+- [ ] Full route editing workshop (origin/destination/place search, add/remove/reorder stops, day assignment, Mapbox route preview and recalculated driving estimate; migration 011 and regression coverage added, CI verification pending).
 
 ## Phase 2 — Group Ride Control Center
 - [x] Trip invitations with expiry and acceptance state (migration 009, token-based acceptance and targeted-email checks).
