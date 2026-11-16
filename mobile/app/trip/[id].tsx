@@ -372,17 +372,18 @@ export default function TripWorkspaceScreen() {
 
       <View style={styles.card}>
         <Text style={styles.section}>Route & itinerary</Text>
-        {waypoints.find(point => point.waypoint_type !== 'origin') ? (
-          <TouchableOpacity
-            style={styles.primaryWide}
-            onPress={() => {
-              const nextStop = waypoints.find(point => point.waypoint_type !== 'origin');
-              if (nextStop) void openDirections(nextStop);
-            }}
-          >
-            <Text style={styles.primaryText}>Navigate to next stop ↗</Text>
-          </TouchableOpacity>
-        ) : null}
+        {(() => {
+          const nextStop = waypoints.find(point => point.waypoint_type !== 'origin');
+          if (!nextStop) return null;
+          return (
+            <TouchableOpacity
+              style={styles.primaryWide}
+              onPress={() => void openDirections(nextStop)}
+            >
+              <Text style={styles.primaryText}>Navigate to next stop: {nextStop.name} ↗</Text>
+            </TouchableOpacity>
+          );
+        })()}
         {waypoints.map((point, index) => {
           const assignedDay = days.find(day => day.id === point.trip_day_id);
           return <View key={point.id} style={styles.point}>

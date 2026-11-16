@@ -585,4 +585,12 @@ test('live ride screen offers external navigation while keeping the in-app group
   assert.match(source,/trip_waypoints/);
   assert.match(source,/Navigate to \{nextWaypoint\.name\}/);
   assert.match(source,/active && nextWaypoint/);
+  assert.match(source,/targetWaypointIndex/);
+});
+
+test('my rides screen JSX is free of raw newline text strings that cause React Native invariant crashes', () => {
+  const source = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  // Must not have literal \n outside of text blocks/strings
+  assert.doesNotMatch(source, /<View[^>]*>\\n/);
+  assert.doesNotMatch(source, /<\/View>\\n/);
 });

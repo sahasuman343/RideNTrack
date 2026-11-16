@@ -76,7 +76,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   sectionTitle:{color:c.text,fontSize:16,fontWeight:'700',marginBottom:8},
   hint:{color:c.muted,fontSize:12,lineHeight:18,marginBottom:8},
   codeInput:{backgroundColor:c.input,borderRadius:10,padding:16,fontSize:24,color:c.accent,borderWidth:1,borderColor:c.border,textAlign:'center',letterSpacing:6,fontFamily:'monospace',fontWeight:'bold'},
-  tokenInput:{backgroundColor:'#101827',borderRadius:10,padding:13,fontSize:13,color:c.text,borderWidth:1,borderColor:'#34445c'},
+  tokenInput:{backgroundColor:c.input,borderRadius:10,padding:13,fontSize:13,color:c.text,borderWidth:1,borderColor:c.border},
   button:{backgroundColor:c.accent,borderRadius:7,padding:14,alignItems:'center',marginTop:12},
   buttonText:{color:'#fff',fontSize:14,fontWeight:'700'},
 });

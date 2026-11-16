@@ -46,7 +46,21 @@ export default function MyRidesScreen() {
   }
 
   return (
-    <View style={styles.container}>\n      <View style={styles.masthead}><Text style={styles.kicker}>R I D E N T R A C K</Text><Text style={styles.pageTitle}>Your riding log.</Text><Text style={styles.intro}>Every road has a story. Pick up where you left off.</Text></View>\n      <View style={styles.quickActions}><TouchableOpacity style={styles.actionPrimary} onPress={() => router.push('/create')}><Text style={styles.actionPrimaryText}>＋ Plan a trip</Text></TouchableOpacity><TouchableOpacity style={styles.actionSecondary} onPress={() => router.push('/join')}><Text style={styles.actionSecondaryText}>Join a ride ↗</Text></TouchableOpacity></View>\n      <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {rides.length}</Text>
+    <View style={styles.container}>
+      <View style={styles.masthead}>
+        <Text style={styles.kicker}>R I D E N T R A C K</Text>
+        <Text style={styles.pageTitle}>Your riding log.</Text>
+        <Text style={styles.intro}>Every road has a story. Pick up where you left off.</Text>
+      </View>
+      <View style={styles.quickActions}>
+        <TouchableOpacity style={styles.actionPrimary} onPress={() => router.push('/create')}>
+          <Text style={styles.actionPrimaryText}>＋ Plan a trip</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionSecondary} onPress={() => router.push('/join')}>
+          <Text style={styles.actionSecondaryText}>Join a ride ↗</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {rides.length}</Text>
       {rides.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyMark}>01 / 00</Text><Text style={styles.emptyText}>The road is waiting.</Text>

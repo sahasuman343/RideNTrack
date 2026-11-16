@@ -61,7 +61,9 @@ export default function LiveRideScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [route, setRoute] = useState<Ride['route_geometry']>();
-  const [nextWaypoint, setNextWaypoint] = useState<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null } | null>(null);
+  const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
+  const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
+  const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
@@ -163,20 +165,27 @@ export default function LiveRideScreen() {
   }, [mapReady,follow,position,cameraPadding]);
   useEffect(() => {
     let cancelled = false;
-    setNextWaypoint(null);
+    setUpcomingWaypoints([]);
+    setTargetWaypointIndex(0);
     void supabase.from('trip_waypoints')
-      .select('name,latitude,longitude,provider_place_id')
+      .select('name,latitude,longitude,provider_place_id,sequence')
       .eq('ride_id', id)
       .neq('waypoint_type', 'origin')
       .order('sequence', { ascending: true })
-      .limit(1)
-      .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (!error && data) setNextWaypoint(data);
+        if (!error && Array.isArray(data)) setUpcomingWaypoints(data);
       });
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (!position || !nextWaypoint || targetWaypointIndex >= upcomingWaypoints.length - 1) return;
+    const distance = distanceMeters(position, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude });
+    if (distance < 250) {
+      setTargetWaypointIndex(curr => Math.min(curr + 1, upcomingWaypoints.length - 1));
+    }
+  }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude, targetWaypointIndex, upcomingWaypoints.length]);
 
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
@@ -356,9 +365,18 @@ export default function LiveRideScreen() {
           <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>
         </TouchableOpacity>}
       />}
-      {active && nextWaypoint && <TouchableOpacity style={s.navButton} onPress={() => void navigateToNextWaypoint()}>
-        <Text style={s.buttonText}>Navigate to {nextWaypoint.name} ↗</Text>
-      </TouchableOpacity>}
+      {active && nextWaypoint && <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+        <TouchableOpacity style={[s.navButton, { flex: 1, marginBottom: 0 }]} onPress={() => void navigateToNextWaypoint()}>
+          <Text style={s.buttonText}>Navigate to {nextWaypoint.name} ↗</Text>
+        </TouchableOpacity>
+        {upcomingWaypoints.length > 1 && <TouchableOpacity
+          style={[s.control, { minHeight: 48, justifyContent: 'center', paddingHorizontal: 12 }]}
+          onPress={() => setTargetWaypointIndex(curr => (curr + 1) % upcomingWaypoints.length)}
+          accessibilityLabel="Switch to next stop on route"
+        >
+          <Text style={s.text}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
+        </TouchableOpacity>}
+      </View>}
       <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
