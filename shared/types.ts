@@ -183,3 +183,28 @@ export { watchRide, type Connection } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
 
 export * from './route';
+
+
+/**
+ * Builds a Google Maps directions URL for a motorcycle leg.
+ * Omitting the origin lets Google Maps use the device's current location.
+ */
+export function buildGoogleMapsNavigationUrl(destination: {
+  latitude: number;
+  longitude: number;
+  placeId?: string | null;
+}): string {
+  if (!validCoordinates(destination.latitude, destination.longitude)) {
+    throw new Error('A valid destination coordinate is required for navigation.');
+  }
+  const params = new URLSearchParams({
+    api: '1',
+    destination: destination.latitude + ',' + destination.longitude,
+    travelmode: 'two-wheeler',
+    dir_action: 'navigate',
+  });
+  if (destination.placeId?.trim()) {
+    params.set('destination_place_id', destination.placeId.trim());
+  }
+  return 'https://www.google.com/maps/dir/?' + params.toString();
+}
