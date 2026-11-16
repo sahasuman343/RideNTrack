@@ -27,6 +27,36 @@ function loader(stubs = {}) {
   return load;
 }
 const shared = loader()('shared/types.ts');
+const routeTools = loader()('shared/route.ts');
+const routeFixture = () => [
+  { id:'origin-id',sequence:0,waypoint_type:'origin',name:'Bengaluru',latitude:12.9716,longitude:77.5946 },
+  { id:'stop-id',sequence:1,waypoint_type:'stop',name:'Tumakuru',latitude:13.3379,longitude:77.1173 },
+  { id:'destination-id',sequence:2,waypoint_type:'destination',name:'Gokarna',latitude:14.5479,longitude:74.3188 },
+];
+test('route validation requires ordered origin and destination with valid coordinates', () => {
+  const points=routeFixture();
+  assert.equal(routeTools.validateRoutePoints(points),null);
+  assert.match(routeTools.validateRoutePoints(points.slice(1)),/origin/i);
+  assert.match(routeTools.validateRoutePoints(points.map((p,i)=>({...p,sequence:i+1}))),/contiguous/i);
+  assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,latitude:91}:p)),/coordinates/i);
+  assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,name:' '}:p)),/name/i);
+  assert.match(routeTools.validateRoutePoints([points[0],{...points[1],waypoint_type:'destination'},points[2]]),/first and last/i);
+});
+test('route coordinate order is longitude then latitude', () => {
+  assert.deepEqual(routeTools.routeCoordinates(routeFixture()),[[77.5946,12.9716],[77.1173,13.3379],[74.3188,14.5479]]);
+});
+test('Mapbox directions response is normalized and estimates are formatted', () => {
+  const result=routeTools.parseDirectionsRoute({routes:[{geometry:{type:'LineString',coordinates:[[77,12],[78,13]]},distance:12345,duration:3661}]});
+  assert.deepEqual(result.geometry.coordinates,[[77,12],[78,13]]);
+  assert.equal(result.distance,12345);
+  assert.equal(result.duration,3661);
+  assert.equal(routeTools.formatRouteDistance(12345),'12 km');
+  assert.equal(routeTools.formatRouteDuration(3661),'1 hr 1 min');
+  assert.throws(()=>routeTools.parseDirectionsRoute({routes:[]}),/valid route/i);
+  assert.throws(()=>routeTools.parseDirectionsRoute({routes:[{geometry:{type:'LineString',coordinates:[[200,12],[78,13]]},distance:1,duration:1}]}),/invalid route coordinates/i);
+  assert.throws(()=>routeTools.parseDirectionsRoute({routes:[{geometry:{type:'LineString',coordinates:[[77,12],[78,13]]},distance:-1,duration:1}]}),/invalid distance/i);
+});
+
 const signupInput = { email:' new@example.test ',password:'test-only',username:' new-rider ',displayName:' New Rider ' };
 test('taken usernames never reach signup; availability failures remain retryable', async () => {
   let submissions = 0;
