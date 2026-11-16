@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndi
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters } from '@ridentrack/shared';
+import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -61,6 +61,7 @@ export default function LiveRideScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [route, setRoute] = useState<Ride['route_geometry']>();
+  const [nextWaypoint, setNextWaypoint] = useState<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
@@ -160,6 +161,36 @@ export default function LiveRideScreen() {
       }
     }
   }, [mapReady,follow,position,cameraPadding]);
+  useEffect(() => {
+    let cancelled = false;
+    setNextWaypoint(null);
+    void supabase.from('trip_waypoints')
+      .select('name,latitude,longitude,provider_place_id')
+      .eq('ride_id', id)
+      .neq('waypoint_type', 'origin')
+      .order('sequence', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setNextWaypoint(data);
+      });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  async function navigateToNextWaypoint() {
+    if (!nextWaypoint) return;
+    try {
+      await Linking.openURL(buildGoogleMapsNavigationUrl({
+        latitude: nextWaypoint.latitude,
+        longitude: nextWaypoint.longitude,
+        placeId: nextWaypoint.provider_place_id,
+      }));
+    } catch (e: any) {
+      Dialog.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
+    }
+  }
+
   useEffect(() => {
     if (ride?.route_geometry) { setRoute(ride.route_geometry); return; }
     if (!ride || !Array.isArray(ride.origin_coords) || !Array.isArray(ride.destination_coords) || !MAPBOX_TOKEN) return;
@@ -325,6 +356,9 @@ export default function LiveRideScreen() {
           <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>
         </TouchableOpacity>}
       />}
+      {active && nextWaypoint && <TouchableOpacity style={s.navButton} onPress={() => void navigateToNextWaypoint()}>
+        <Text style={s.buttonText}>Navigate to {nextWaypoint.name} ↗</Text>
+      </TouchableOpacity>}
       <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
