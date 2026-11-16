@@ -3,56 +3,199 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, Touc
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
+import * as Location from 'expo-location';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
 type WaypointKind = 'fuel' | 'stop';
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 
-function LocationSearch({ label, placeholder, value, onChange, kind = 'place' }: {
-  label: string; placeholder: string; value: Place | null; onChange: (place: Place | null) => void; kind?: string;
+function LocationSearch({ label, placeholder, value, onChange, kind = 'place', showCurrentLocation = false }: {
+  label: string; placeholder: string; value: Place | null; onChange: (place: Place | null) => void;
+  kind?: string; showCurrentLocation?: boolean;
 }) {
   const [query, setQuery] = useState(value?.name || '');
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [searchOrigin, setSearchOrigin] = useState<[number, number] | null>(null);
+  const [searchError, setSearchError] = useState('');
+  const [locationError, setLocationError] = useState('');
+  const requestId = React.useRef(0);
+
   useEffect(() => { if (value) setQuery(value.name); }, [value?.id]);
+
   useEffect(() => {
-    if (value && query === value.name) { setSuggestions([]); return; }
-    if (query.trim().length < 3 || !TOKEN) { setSuggestions([]); return; }
+    let cancelled = false;
+    Location.getLastKnownPositionAsync().then(position => {
+      if (!cancelled && position) setSearchOrigin([position.coords.longitude, position.coords.latitude]);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (value && trimmed === value.name) {
+      setSuggestions([]);
+      setSearchError('');
+      setLoading(false);
+      return;
+    }
+    if (trimmed.length < 2 || !TOKEN) {
+      setSuggestions([]);
+      setSearchError('');
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
+    const currentRequest = ++requestId.current;
     const timer = setTimeout(async () => {
       setLoading(true);
+      setSearchError('');
       try {
-        const url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' + encodeURIComponent(query.trim()) +
-          '.json?autocomplete=true&limit=6&country=IN&language=en&types=poi,address,place,locality,neighborhood&access_token=' + TOKEN;
+        const params = new URLSearchParams({
+          autocomplete: 'true',
+          fuzzyMatch: 'true',
+          limit: '8',
+          country: 'IN',
+          language: 'en',
+          worldview: 'IN',
+          types: 'poi,address,place,locality,neighborhood,postcode,region',
+          access_token: TOKEN,
+        });
+        if (searchOrigin) params.set('proximity', searchOrigin.join(','));
+        const url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
+          encodeURIComponent(trimmed) + '.json?' + params.toString();
         const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) throw new Error('Location search is temporarily unavailable');
+        if (!response.ok) throw new Error('Search is temporarily unavailable. Please try again.');
         const json = await response.json();
-        setSuggestions((json.features || []).map((item: any) => ({
-          id: item.id, name: item.text || item.place_name, address: item.place_name,
-          longitude: item.center[0], latitude: item.center[1],
-        })));
-      } catch (e) {
-        if (!controller.signal.aborted) setSuggestions([]);
-      } finally { if (!controller.signal.aborted) setLoading(false); }
-    }, 350);
+        if (controller.signal.aborted || currentRequest !== requestId.current) return;
+        const seen = new Set<string>();
+        const results: Place[] = (json.features || []).reduce((items: Place[], item: any) => {
+          if (!Array.isArray(item.center) || item.center.length < 2) return items;
+          const id = String(item.id || item.place_name);
+          if (seen.has(id)) return items;
+          seen.add(id);
+          items.push({
+            id,
+            name: item.text || item.place_name || 'Unnamed place',
+            address: item.place_name || item.text || 'Address unavailable',
+            longitude: Number(item.center[0]),
+            latitude: Number(item.center[1]),
+          });
+          return items;
+        }, []);
+        setSuggestions(results);
+        if (results.length === 0) setSearchError('No matching places. Try a nearby landmark, locality or PIN code.');
+      } catch (error: any) {
+        if (!controller.signal.aborted && currentRequest === requestId.current) {
+          setSuggestions([]);
+          setSearchError(error?.message || 'Could not search locations.');
+        }
+      } finally {
+        if (!controller.signal.aborted && currentRequest === requestId.current) setLoading(false);
+      }
+    }, 280);
+
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [query, value?.id]);
+  }, [query, value?.id, searchOrigin?.[0], searchOrigin?.[1]]);
+
+  async function useCurrentLocation() {
+    setLocating(true);
+    setLocationError('');
+    try {
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (!permission.granted) permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        setLocationError('Allow location access to use your current position. You can still search manually.');
+        return;
+      }
+
+      let position = await Location.getLastKnownPositionAsync({
+        maxAge: 60000,
+        requiredAccuracy: 500,
+      });
+      if (!position || Date.now() - position.timestamp > 60000) {
+        position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      }
+
+      const { latitude, longitude } = position.coords;
+      let addressParts: string[] = [];
+      try {
+        const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const address = addresses[0];
+        if (address) {
+          addressParts = [
+            address.name,
+            address.street,
+            address.district,
+            address.city || address.subregion,
+            address.region,
+            address.postalCode,
+          ].filter((part): part is string => Boolean(part));
+        }
+      } catch {
+        // Coordinates are still valid; reverse geocoding is best-effort.
+      }
+      const readableAddress = [...new Set(addressParts)].join(', ');
+      const place: Place = {
+        id: 'device-location:' + latitude.toFixed(6) + ',' + longitude.toFixed(6),
+        name: readableAddress ? readableAddress.split(',')[0] : 'Current location',
+        address: readableAddress || ('Current location (' + latitude.toFixed(5) + ', ' + longitude.toFixed(5) + ')'),
+        latitude,
+        longitude,
+      };
+      setSearchOrigin([longitude, latitude]);
+      onChange(place);
+      setQuery(place.name);
+      setSuggestions([]);
+      setSearchError('');
+    } catch (error: any) {
+      setLocationError(error?.message || 'Could not get your current location. Check GPS and try again.');
+    } finally {
+      setLocating(false);
+    }
+  }
+
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         style={styles.input}
         value={query}
-        onChangeText={text => { setQuery(text); onChange(null); }}
+        onChangeText={text => {
+          setQuery(text);
+          onChange(null);
+          setLocationError('');
+        }}
         placeholder={placeholder}
         placeholderTextColor="#77809a"
         autoCorrect={false}
+        autoCapitalize="words"
+        returnKeyType="search"
       />
+      {showCurrentLocation ? (
+        <TouchableOpacity
+          style={styles.currentLocationButton}
+          onPress={useCurrentLocation}
+          disabled={locating}
+          accessibilityRole="button"
+          accessibilityLabel="Use current location as trip origin"
+        >
+          {locating ? <ActivityIndicator color="#ffad70" size="small" /> : <Text style={styles.currentLocationIcon}>◎</Text>}
+          <Text style={styles.currentLocationText}>{locating ? 'Getting current location…' : 'Use current location'}</Text>
+        </TouchableOpacity>
+      ) : null}
       {loading ? <ActivityIndicator color="#FF8A32" style={{ alignSelf: 'flex-start', marginTop: 8 }} /> : null}
       {suggestions.length > 0 && (
         <View style={styles.suggestions}>
           {suggestions.map(place => (
-            <TouchableOpacity key={place.id} style={styles.suggestion} onPress={() => { onChange(place); setQuery(place.name); setSuggestions([]); }}>
+            <TouchableOpacity key={place.id} style={styles.suggestion} onPress={() => {
+              onChange(place);
+              setQuery(place.name);
+              setSuggestions([]);
+              setSearchError('');
+            }}>
               <Text style={styles.suggestionTitle}>{place.name}</Text>
               <Text style={styles.suggestionAddress}>{place.address}</Text>
             </TouchableOpacity>
@@ -60,11 +203,12 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place' }:
         </View>
       )}
       {value ? <Text style={styles.selected}>✓ {value.address}</Text> : null}
+      {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
+      {searchError ? <Text style={styles.help}>{searchError}</Text> : null}
       {!TOKEN ? <Text style={styles.help}>Add EXPO_PUBLIC_MAPBOX_TOKEN to enable searchable places.</Text> : null}
     </View>
   );
 }
-
 export default function CreateRideScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -220,7 +364,7 @@ export default function CreateRideScreen() {
       <View style={styles.card}>
         <Text style={styles.section}>Route & places</Text>
         <Text style={styles.helper}>Search for real places and select a suggestion. A typed string alone is not saved as a location.</Text>
-        <LocationSearch label="Origin *" placeholder="Search starting point" value={origin} onChange={setOrigin} />
+        <LocationSearch label="Origin *" placeholder="Search starting point" value={origin} onChange={setOrigin} showCurrentLocation />
         <LocationSearch label="Destination *" placeholder="Search final destination" value={destination} onChange={setDestination} />
         <LocationSearch label="Group meetup point" placeholder="Optional: where riders meet" value={meetup} onChange={setMeetup} />
         {stops.map((stop, index) => (
@@ -279,6 +423,10 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 76, textAlignVertical: 'top' },
   helper: { color: '#98a6bd', fontSize: 12, lineHeight: 18 },
   selected: { color: '#75d7a2', fontSize: 11, marginTop: 5 },
+  currentLocationButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: '#8b5937', backgroundColor: '#30271f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, marginTop: 2 },
+  currentLocationIcon: { color: '#ffad70', fontSize: 16, fontWeight: '800' },
+  currentLocationText: { color: '#ffad70', fontSize: 12, fontWeight: '700' },
+  error: { color: '#ff9b9b', fontSize: 11, lineHeight: 16, marginTop: 4 },
   help: { color: '#ffbd80', fontSize: 11, marginTop: 5 },
   suggestions: { backgroundColor: '#23324a', borderColor: '#455570', borderWidth: 1, borderRadius: 10, overflow: 'hidden', marginTop: 2 },
   suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: '#394962' },
