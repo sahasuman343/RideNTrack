@@ -26,6 +26,16 @@ function loader(stubs = {}) {
   }
   return load;
 }
+
+test('trip workspace exposes deletion only behind the leader check and confirms before RPC', () => {
+  const source=fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'),'utf8');
+  assert.match(source,/isAdmin && <TouchableOpacity style=\{styles\.dangerButton\}/);
+  assert.match(source,/Delete this trip permanently\?/);
+  assert.match(source,/Delete permanently/);
+  assert.match(source,/supabase\.rpc\('delete_trip'/);
+  assert.match(source,/router\.replace\('\/(tabs)'\)/);
+});
+
 const shared = loader()('shared/types.ts');
 const routeTools = loader()('shared/route.ts');
 const routeFixture = () => [
