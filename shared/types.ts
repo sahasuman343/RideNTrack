@@ -181,3 +181,5 @@ export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
 
 export { watchRide, type Connection } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
+
+export * from './route';
