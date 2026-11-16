@@ -49,10 +49,6 @@ export default function TripWorkspaceScreen() {
   const [editTripVisible, setEditTripVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editOrigin, setEditOrigin] = useState('');
-  const [editDestination, setEditDestination] = useState('');
-  const [editStartDate, setEditStartDate] = useState('');
-  const [editEndDate, setEditEndDate] = useState('');
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -95,28 +91,14 @@ export default function TripWorkspaceScreen() {
     if (!trip) return;
     setEditName(trip.name || '');
     setEditDescription(trip.description || '');
-    setEditOrigin(trip.origin || '');
-    setEditDestination(trip.destination || '');
-    setEditStartDate(trip.start_date || '');
-    setEditEndDate(trip.end_date || '');
     setEditTripVisible(true);
   }
 
   async function saveTripDetails() {
-    if (!editName.trim() || !editOrigin.trim() || !editDestination.trim()) {
-      Alert.alert('Missing trip details', 'Trip name, origin and destination are required.');
-      return;
-    }
-    if (editStartDate && editEndDate && editEndDate < editStartDate) {
-      Alert.alert('Invalid dates', 'End date must be on or after start date.');
-      return;
-    }
     setSaving(true); setError('');
     try {
       const { error: updateError } = await supabase.from('rides').update({
         name: editName.trim(), description: editDescription.trim() || null,
-        origin: editOrigin.trim(), destination: editDestination.trim(),
-        start_date: editStartDate.trim() || null, end_date: editEndDate.trim() || null,
       }).eq('id', id);
       if (updateError) throw updateError;
       setEditTripVisible(false);
@@ -401,14 +383,6 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Trip name" placeholderTextColor={theme.subtle} />
             <Text style={styles.label}>Description</Text>
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
-            <Text style={styles.label}>Origin</Text>
-            <TextInput style={styles.input} value={editOrigin} onChangeText={setEditOrigin} placeholder="Starting point" placeholderTextColor={theme.subtle} />
-            <Text style={styles.label}>Destination</Text>
-            <TextInput style={styles.input} value={editDestination} onChangeText={setEditDestination} placeholder="Destination" placeholderTextColor={theme.subtle} />
-            <Text style={styles.label}>Start date · YYYY-MM-DD</Text>
-            <TextInput style={styles.input} value={editStartDate} onChangeText={setEditStartDate} placeholder="2026-11-16" placeholderTextColor={theme.subtle} />
-            <Text style={styles.label}>End date · YYYY-MM-DD</Text>
-            <TextInput style={styles.input} value={editEndDate} onChangeText={setEditEndDate} placeholder="2026-11-18" placeholderTextColor={theme.subtle} />
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
           </ScrollView>
