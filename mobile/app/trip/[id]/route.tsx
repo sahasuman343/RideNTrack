@@ -164,7 +164,7 @@ export default function RouteEditorScreen() {
     const current=points[index].trip_day_id || null;
     const currentIndex=days.findIndex(day=>day.id===current);
     const next=currentIndex+1;
-    updatePoint(index,{trip_day_id:next>=days.length?null:days[next].id});
+    setPoints(current=>current.map((point,i)=>i===index?{...point,trip_day_id:next>=days.length?null:days[next].id}:point));
   }
 
   async function calculateRoute() {
