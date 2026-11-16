@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
+import { useRideTheme, RidePalette } from '../../src/theme';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
 type WaypointKind = 'fuel' | 'stop';
@@ -21,6 +22,8 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place', s
   const [searchError, setSearchError] = useState('');
   const [locationError, setLocationError] = useState('');
   const requestId = React.useRef(0);
+  const theme = useRideTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
   useEffect(() => { if (value) setQuery(value.name); }, [value?.id]);
 
@@ -182,11 +185,11 @@ function LocationSearch({ label, placeholder, value, onChange, kind = 'place', s
           accessibilityRole="button"
           accessibilityLabel="Use current location as trip origin"
         >
-          {locating ? <ActivityIndicator color="#ffad70" size="small" /> : <Text style={styles.currentLocationIcon}>◎</Text>}
+          {locating ? <ActivityIndicator color={theme.accent} size="small" /> : <Text style={styles.currentLocationIcon}>◎</Text>}
           <Text style={styles.currentLocationText}>{locating ? 'Getting current location…' : 'Use current location'}</Text>
         </TouchableOpacity>
       ) : null}
-      {loading ? <ActivityIndicator color="#FF8A32" style={{ alignSelf: 'flex-start', marginTop: 8 }} /> : null}
+      {loading ? <ActivityIndicator color={theme.accent} style={{ alignSelf: 'flex-start', marginTop: 8 }} /> : null}
       {suggestions.length > 0 && (
         <View style={styles.suggestions}>
           {suggestions.map(place => (
@@ -227,6 +230,8 @@ export default function CreateRideScreen() {
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
+  const theme = useRideTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const days = useMemo(() => {
     if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return [];
@@ -331,9 +336,9 @@ export default function CreateRideScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Text style={styles.eyebrow}>PLAN YOUR NEXT ADVENTURE</Text>
-      <Text style={styles.title}>Create a trip</Text>
-      <Text style={styles.subtitle}>Build the journey first. Add your riders and start tracking when it is time to ride.</Text>
+      <Text style={styles.eyebrow}>FIELD NOTES  /  NEW ROUTE</Text>
+      <Text style={styles.title}>Plan the miles.</Text>
+      <Text style={styles.subtitle}>Choose the roads, mark the stops, then bring your crew along.</Text>
 
       <View style={styles.card}>
         <Text style={styles.section}>Trip details</Text>
@@ -409,42 +414,42 @@ export default function CreateRideScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#101827' },
+const makeStyles = (c: RidePalette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.background },
   content: { padding: 18, paddingBottom: 44 },
-  eyebrow: { color: '#FF8A32', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
-  title: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6 },
-  subtitle: { color: '#aab4c8', fontSize: 14, lineHeight: 21, marginTop: 7, marginBottom: 18 },
-  card: { backgroundColor: '#192438', borderColor: '#293951', borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 14, gap: 14 },
-  section: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  eyebrow: { color: c.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginTop: 8 },
+  title: { color: c.text, fontSize: 34, fontWeight: '900', letterSpacing: -1, marginTop: 6 },
+  subtitle: { color: c.muted, fontSize: 14, lineHeight: 21, marginTop: 7, marginBottom: 18 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 17, marginBottom: 12, gap: 15 },
+  section: { color: c.text, fontSize: 18, fontWeight: '800' },
   field: { gap: 7 },
-  label: { color: '#d7deeb', fontSize: 13, fontWeight: '700' },
-  input: { backgroundColor: '#101a2b', borderColor: '#35445c', borderWidth: 1, borderRadius: 11, paddingHorizontal: 13, paddingVertical: 12, color: '#fff', fontSize: 14 },
+  label: { color: c.text, fontSize: 13, fontWeight: '700' },
+  input: { backgroundColor: c.input, borderColor: c.border, borderWidth: 1, borderRadius: 7, paddingHorizontal: 13, paddingVertical: 12, color: c.text, fontSize: 14 },
   multiline: { minHeight: 76, textAlignVertical: 'top' },
-  helper: { color: '#98a6bd', fontSize: 12, lineHeight: 18 },
-  selected: { color: '#75d7a2', fontSize: 11, marginTop: 5 },
-  currentLocationButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: '#8b5937', backgroundColor: '#30271f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8, marginTop: 2 },
-  currentLocationIcon: { color: '#ffad70', fontSize: 16, fontWeight: '800' },
-  currentLocationText: { color: '#ffad70', fontSize: 12, fontWeight: '700' },
-  error: { color: '#ff9b9b', fontSize: 11, lineHeight: 16, marginTop: 4 },
-  help: { color: '#ffbd80', fontSize: 11, marginTop: 5 },
-  suggestions: { backgroundColor: '#23324a', borderColor: '#455570', borderWidth: 1, borderRadius: 10, overflow: 'hidden', marginTop: 2 },
-  suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: '#394962' },
-  suggestionTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  helper: { color: c.muted, fontSize: 12, lineHeight: 18 },
+  selected: { color: c.green, fontSize: 11, marginTop: 5 },
+  currentLocationButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: c.accent, backgroundColor: c.accentSoft, borderRadius: 7, paddingHorizontal: 12, paddingVertical: 8, marginTop: 2 },
+  currentLocationIcon: { color: c.accent, fontSize: 16, fontWeight: '800' },
+  currentLocationText: { color: c.accent, fontSize: 12, fontWeight: '700' },
+  error: { color: c.danger, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  help: { color: c.accent, fontSize: 11, marginTop: 5 },
+  suggestions: { backgroundColor: c.surfaceRaised, borderColor: c.border, borderWidth: 1, borderRadius: 10, overflow: 'hidden', marginTop: 2 },
+  suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: c.border },
+  suggestionTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
   suggestionAddress: { color: '#aab6ca', fontSize: 11, marginTop: 3 },
   row: { flexDirection: 'row', gap: 10 },
   half: { flex: 1, gap: 7 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  chip: { borderRadius: 20, borderWidth: 1, borderColor: '#46546b', paddingHorizontal: 11, paddingVertical: 8 },
-  chipActive: { backgroundColor: '#5b321f', borderColor: '#FF8A32' },
-  chipText: { color: '#bdc7d8', fontSize: 11, textTransform: 'capitalize' },
-  chipTextActive: { color: '#ffb77e', fontWeight: '800' },
-  stopBlock: { borderTopWidth: 1, borderTopColor: '#33425a', paddingTop: 12, gap: 8 },
+  chip: { borderRadius: 20, borderWidth: 1, borderColor: c.border, paddingHorizontal: 11, paddingVertical: 8 },
+  chipActive: { backgroundColor: c.accentSoft, borderColor: c.accent },
+  chipText: { color: c.muted, fontSize: 11, textTransform: 'capitalize' },
+  chipTextActive: { color: c.accent, fontWeight: '800' },
+  stopBlock: { borderTopWidth: 1, borderTopColor: c.border, paddingTop: 12, gap: 8 },
   stopHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  remove: { color: '#ff8e8e', fontSize: 12, fontWeight: '700' },
-  addButton: { borderWidth: 1, borderColor: '#52627b', borderStyle: 'dashed', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
-  addText: { color: '#ffad70', fontSize: 12, fontWeight: '700' },
-  primary: { backgroundColor: '#f47721', borderRadius: 13, padding: 16, alignItems: 'center', marginTop: 3 },
-  primaryText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  footer: { color: '#8290a6', fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12 },
+  remove: { color: c.danger, fontSize: 12, fontWeight: '700' },
+  addButton: { borderWidth: 1, borderColor: c.border, borderStyle: 'dashed', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  addText: { color: c.accent, fontSize: 12, fontWeight: '700' },
+  primary: { backgroundColor: c.accent, borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 3 },
+  primaryText: { color: c.text, fontSize: 16, fontWeight: '800' },
+  footer: { color: c.subtle, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12 },
 });
