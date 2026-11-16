@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { buildGoogleMapsNavigationUrl } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
@@ -11,7 +12,7 @@ type Trip = {
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
   ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
 };
-type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; notes?: string; trip_day_id?: string | null };
+type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; provider_place_id?: string | null; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
 type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
 type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
@@ -136,8 +137,16 @@ export default function TripWorkspaceScreen() {
   }
 
   async function openDirections(point: Waypoint) {
-    const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(point.latitude + ',' + point.longitude);
-    await Linking.openURL(url);
+    try {
+      const url = buildGoogleMapsNavigationUrl({
+        latitude: point.latitude,
+        longitude: point.longitude,
+        placeId: point.provider_place_id,
+      });
+      await Linking.openURL(url);
+    } catch (e: any) {
+      Alert.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
+    }
   }
   function moveWaypoint(index: number, offset: number) {
     const target = index + offset;
@@ -363,6 +372,17 @@ export default function TripWorkspaceScreen() {
 
       <View style={styles.card}>
         <Text style={styles.section}>Route & itinerary</Text>
+        {waypoints.find(point => point.waypoint_type !== 'origin') ? (
+          <TouchableOpacity
+            style={styles.primaryWide}
+            onPress={() => {
+              const nextStop = waypoints.find(point => point.waypoint_type !== 'origin');
+              if (nextStop) void openDirections(nextStop);
+            }}
+          >
+            <Text style={styles.primaryText}>Navigate to next stop ↗</Text>
+          </TouchableOpacity>
+        ) : null}
         {waypoints.map((point, index) => {
           const assignedDay = days.find(day => day.id === point.trip_day_id);
           return <View key={point.id} style={styles.point}>
@@ -371,7 +391,11 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.pointType}>{point.waypoint_type.toUpperCase()}</Text>
               <Text style={styles.pointName}>{point.name}</Text>
               {!!point.address && <Text style={styles.mutedSmall}>{point.address}</Text>}
-              <TouchableOpacity onPress={() => void openDirections(point)}><Text style={styles.link}>Open map ↗</Text></TouchableOpacity>
+              {point.waypoint_type !== 'origin' && (
+                <TouchableOpacity onPress={() => void openDirections(point)}>
+                  <Text style={styles.link}>Navigate here ↗</Text>
+                </TouchableOpacity>
+              )}
               {isAdmin && <View style={styles.editorRow}>
                 <TouchableOpacity style={styles.smallButton} disabled={index === 0} onPress={() => moveWaypoint(index, -1)}><Text style={styles.smallButtonText}>↑</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.smallButton} disabled={index === waypoints.length - 1} onPress={() => moveWaypoint(index, 1)}><Text style={styles.smallButtonText}>↓</Text></TouchableOpacity>
