@@ -931,6 +931,41 @@ test('db-regression script tests all RPC privileges and avoids unprivileged dire
   assert.equal(dbRegressionSource.match(/INSERT INTO public\.ride_participants/g)?.length, 1);
 });
 
+test('trip cards expose a direct delete button with confirmation and RPC execution', () => {
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  assert.match(indexSource, /handleDeleteTrip/);
+  assert.match(indexSource, /delete_trip/);
+  assert.match(indexSource, /leave_ride/);
+  assert.match(indexSource, /cardDeleteBtn/);
+  assert.match(indexSource, /cardDeletePill/);
+  assert.match(indexSource, /Permanently delete/);
+});
+
+test('trip planner allows quick creation with essentials, calendar date picker, and optional customizations', () => {
+  const createSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/create.tsx'), 'utf8');
+  const calendarSource = fs.readFileSync(path.resolve('mobile/src/components/CalendarPickerModal.tsx'), 'utf8');
+
+  // Calendar date picker integration
+  assert.match(createSource, /CalendarPickerModal/);
+  assert.match(createSource, /formatDateNice/);
+  assert.match(createSource, /Tap to select ride dates/);
+  assert.match(createSource, /handlePresetToday/);
+  assert.match(createSource, /handlePresetTomorrow/);
+  assert.match(createSource, /handlePresetThisWeekend/);
+  assert.match(createSource, /handlePresetNextWeekend/);
+
+  // Quick creation with essentials (Name, Origin, Destination, Dates)
+  assert.match(createSource, /Quick Trip Setup/);
+  assert.match(createSource, /Create trip plan/);
+  assert.match(createSource, /Customize Trip/);
+
+  // CalendarPickerModal logic
+  assert.match(calendarSource, /Select Trip Dates/);
+  assert.match(calendarSource, /This Weekend/);
+  assert.match(calendarSource, /formatDateNice/);
+  assert.match(calendarSource, /formatYMD/);
+});
+
 
 
 

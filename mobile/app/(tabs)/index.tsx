@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ride, type RiderAnalytics } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
@@ -10,6 +10,7 @@ export default function MyRidesScreen() {
   const [rides, setRides] = useState<Ride[]>([]);
   const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
   const { user } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
@@ -41,6 +42,61 @@ export default function MyRidesScreen() {
     setRefreshing(true);
     await fetchRides();
     setRefreshing(false);
+  }
+
+  function handleDeleteTrip(item: Ride) {
+    const isLeader = item.admin_id === user?.id;
+    if (isLeader) {
+      Alert.alert(
+        'Delete Trip?',
+        `Permanently delete "${item.name}"? All routes, waypoints, stages, and records will be deleted.`,
+        [
+          { text: 'Keep Trip', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              setDeletingRideId(item.id);
+              try {
+                const { error } = await supabase.rpc('delete_trip', { p_ride_id: item.id });
+                if (error) throw error;
+                setRides(prev => prev.filter(r => r.id !== item.id));
+                await fetchRides();
+              } catch (err: any) {
+                Alert.alert('Could not delete trip', err?.message || 'Please try again.');
+              } finally {
+                setDeletingRideId(null);
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Leave Ride?',
+        `Remove "${item.name}" from your journeys? You can rejoin anytime with code ${item.ride_code}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Leave',
+            style: 'destructive',
+            onPress: async () => {
+              setDeletingRideId(item.id);
+              try {
+                const { error } = await supabase.rpc('leave_ride', { p_ride_id: item.id });
+                if (error) throw error;
+                setRides(prev => prev.filter(r => r.id !== item.id));
+                await fetchRides();
+              } catch (err: any) {
+                Alert.alert('Could not leave ride', err?.message || 'Please try again.');
+              } finally {
+                setDeletingRideId(null);
+              }
+            },
+          },
+        ]
+      );
+    }
   }
 
   function getStatusColor(status: string) {
@@ -118,12 +174,48 @@ export default function MyRidesScreen() {
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.rideName}>{item.name}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                  <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
+                <View style={styles.cardHeaderRight}>
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+                    <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.cardDeleteBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete trip ${item.name}`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    disabled={deletingRideId === item.id}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleDeleteTrip(item);
+                    }}
+                  >
+                    {deletingRideId === item.id ? (
+                      <ActivityIndicator size="small" color={theme.danger} />
+                    ) : (
+                      <Text style={styles.cardDeleteIcon}>🗑️</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
               <Text style={styles.route}>{item.origin} → {item.destination}</Text>
-              <View style={styles.cardFooter}><Text style={styles.code}>RIDE CODE  {item.ride_code}</Text><Text style={styles.openLabel}>OPEN JOURNEY  ↗</Text></View>
+              <View style={styles.cardFooter}>
+                <Text style={styles.code}>RIDE CODE  {item.ride_code}</Text>
+                <View style={styles.cardFooterActions}>
+                  <TouchableOpacity
+                    style={styles.cardDeletePill}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete ${item.name}`}
+                    disabled={deletingRideId === item.id}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleDeleteTrip(item);
+                    }}
+                  >
+                    <Text style={styles.cardDeletePillText}>Delete</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.openLabel}>OPEN JOURNEY  ↗</Text>
+                </View>
+              </View>
             </TouchableOpacity>
           )}
         />
@@ -150,11 +242,17 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   emptySubtext: { color: c.muted, fontSize: 14, marginTop: 8, lineHeight: 21 },
   card: { backgroundColor: c.surface, borderRadius: 8, padding: 17, marginBottom: 10, borderWidth: 1, borderColor: c.border },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardDeleteBtn: { padding: 4, borderRadius: 6, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border },
+  cardDeleteIcon: { fontSize: 12 },
   rideName: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
   statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 },
   statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   route: { color: c.muted, fontSize: 13, marginTop: 13, lineHeight: 20 },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 11, borderTopWidth: 1, borderTopColor: c.border },
+  cardFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  cardDeletePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
+  cardDeletePillText: { color: c.danger, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   code: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   openLabel: { color: c.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   analyticsCard: { marginHorizontal: 22, marginBottom: 18, backgroundColor: c.surface, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 14 },
