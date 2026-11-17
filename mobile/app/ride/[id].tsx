@@ -43,17 +43,18 @@ export default function LiveRideScreen() {
   const [expanded, setExpanded] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(200);
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
+  const active = ride?.status === 'active';
   const cameraPadding = useMemo(() => {
     const maxTop = Math.max(20, Math.floor(windowHeight * 0.25));
     const maxBottom = Math.max(50, Math.floor(windowHeight * 0.45));
     const maxHoriz = Math.max(10, Math.floor(windowWidth * 0.2));
     return {
-      paddingTop: Math.min(insets.top + 135, maxTop),
+      paddingTop: Math.min(insets.top + (active ? 155 : 135), maxTop),
       paddingBottom: Math.min(sheetHeight + 28, maxBottom),
       paddingLeft: Math.min(45, maxHoriz),
       paddingRight: Math.min(45, maxHoriz),
     };
-  }, [insets.top, sheetHeight, windowHeight, windowWidth]);
+  }, [insets.top, sheetHeight, windowHeight, windowWidth, active]);
   const lastCameraPosition = useRef<{ lat: number; lng: number } | null>(null);
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,13 +63,14 @@ export default function LiveRideScreen() {
   const [mapError, setMapError] = useState(false);
   const [route, setRoute] = useState<Ride['route_geometry']>();
   const [trailCoordinates, setTrailCoordinates] = useState<[number, number][]>([]);
+  const [routeDeviation, setRouteDeviation] = useState<number | null>(null);
+  const [lastArrivedWaypoint, setLastArrivedWaypoint] = useState<string | null>(null);
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
   const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
   const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
-  const active = ride?.status === 'active';
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
   // Keep map input tied to actual GPS samples. Per-frame JS marker animation
@@ -107,8 +109,11 @@ export default function LiveRideScreen() {
     if (Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
       const deviation = distanceToRouteMeters(position, routeCoordinates);
       const limit = ride.route_deviation_threshold_meters || 500;
+      setRouteDeviation(deviation);
       if (deviation > limit) void publishSafetyAlert('route-deviation', 'route_deviation', position.lat, position.lng,
         'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).');
+    } else {
+      setRouteDeviation(null);
     }
     const leader = (admin ? position : participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now)));
     if (admin && leader && Number.isFinite(leader.lat) && Number.isFinite(leader.lng)) {
@@ -232,9 +237,34 @@ export default function LiveRideScreen() {
     if (!position || !nextWaypoint || targetWaypointIndex >= upcomingWaypoints.length - 1) return;
     const distance = distanceMeters(position, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude });
     if (distance < 250) {
+      const arrivedName = nextWaypoint.name;
+      setLastArrivedWaypoint(arrivedName);
       setTargetWaypointIndex(curr => Math.min(curr + 1, upcomingWaypoints.length - 1));
+      const timer = setTimeout(() => setLastArrivedWaypoint(null), 8000);
+      return () => clearTimeout(timer);
     }
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude, targetWaypointIndex, upcomingWaypoints.length]);
+
+  const distanceCoveredMeters = useMemo(() => {
+    if (trailCoordinates.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < trailCoordinates.length; i++) {
+      const prev = trailCoordinates[i - 1];
+      const curr = trailCoordinates[i];
+      sum += distanceMeters(
+        { lat: prev[1], lng: prev[0] },
+        { lat: curr[1], lng: curr[0] },
+      );
+    }
+    return Math.round(sum);
+  }, [trailCoordinates]);
+
+  const distanceToNextStopMeters = useMemo(() => {
+    if (!position || !nextWaypoint) return null;
+    return Math.round(distanceMeters(position, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude }));
+  }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude]);
+
+  const currentSpeedKmh = position?.speed ? Math.round(position.speed * 3.6) : 0;
 
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
@@ -410,8 +440,62 @@ export default function LiveRideScreen() {
       </Mapbox.ShapeSource>
     </Mapbox.MapView> : <View style={s.fallback}><Text style={s.heading}>Your ride, together.</Text><Text style={s.muted}>The native map needs a development build and a Mapbox token. Your rider list and foreground GPS remain available.</Text></View>}
     <View style={[s.top,{ top: insets.top + 10 }]}><TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}><Text style={s.text}>‹</Text></TouchableOpacity><View style={s.title}><Text numberOfLines={1} style={s.heading}>{ride.name}</Text><Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text></View>{admin && <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}><Text style={s.text}>✎</Text></TouchableOpacity>}<TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}><Text style={s.text}>↗</Text></TouchableOpacity></View>
-    <View style={[s.controls,{ top: insets.top + 94 }]}><TouchableOpacity accessibilityLabel="Follow my location" style={[s.control,follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}><Text style={s.text}>◎ Me</Text></TouchableOpacity><TouchableOpacity style={s.control} onPress={fitGroup}><Text style={s.text}>⊞ Group</Text></TouchableOpacity></View>
-    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + 150 }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
+
+    {active && (
+      <View style={[s.hudContainer, { top: insets.top + 74 }]}>
+        <View style={s.hudItem}>
+          <Text style={s.hudValue}>{currentSpeedKmh}</Text>
+          <Text style={s.hudLabel}>KM/H</Text>
+        </View>
+        <View style={s.hudDivider} />
+        <View style={s.hudItem}>
+          <Text style={s.hudValue}>
+            {distanceCoveredMeters >= 1000
+              ? (distanceCoveredMeters / 1000).toFixed(1) + ' km'
+              : distanceCoveredMeters + ' m'}
+          </Text>
+          <Text style={s.hudLabel}>TRAIL</Text>
+        </View>
+        <View style={s.hudDivider} />
+        <View style={s.hudItem}>
+          <Text style={s.hudValue}>
+            {distanceToNextStopMeters != null
+              ? (distanceToNextStopMeters >= 1000
+                  ? (distanceToNextStopMeters / 1000).toFixed(1) + ' km'
+                  : distanceToNextStopMeters + ' m')
+              : '—'}
+          </Text>
+          <Text style={s.hudLabel}>NEXT STOP</Text>
+        </View>
+      </View>
+    )}
+
+    <View style={[s.controls, { top: insets.top + (active ? 134 : 74) }]}>
+      <TouchableOpacity accessibilityLabel="Follow my location" style={[s.control, follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}>
+        <Text style={s.text}>◎ Me</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={s.control} onPress={fitGroup}>
+        <Text style={s.text}>⊞ Group</Text>
+      </TouchableOpacity>
+    </View>
+
+    {routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
+      <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) }]}>
+        <Text style={s.deviationWarningText}>
+          ⚠️ Route Deviation: ~{Math.round(routeDeviation)} m from planned route
+        </Text>
+      </View>
+    )}
+
+    {lastArrivedWaypoint && (
+      <View style={[s.arrivalToast, { top: insets.top + (active ? 186 : 124) }]}>
+        <Text style={s.arrivalToastText}>
+          🏁 Arrived at {lastArrivedWaypoint}! Next stop loaded.
+        </Text>
+      </View>
+    )}
+
+    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
     <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
       <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
       {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
@@ -464,4 +548,13 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   navButton:{backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center',marginBottom:10},
   actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:c.text,fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:c.danger,fontSize:13},
   warning:{position:'absolute',left:16,right:16,backgroundColor:c.accentSoft,borderRadius:15,padding:12,gap:4},warningText:{color:c.text,fontSize:12,lineHeight:18},link:{color:c.accent,fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:c.accentSoft,marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:c.shadow + '88'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:c.surface,gap:12},alertOption:{padding:20,borderRadius:9,backgroundColor:c.surfaceRaised},emergency:{backgroundColor:c.accentSoft},fallback:{padding:36,paddingTop:225,gap:14},
+  hudContainer:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:12,borderWidth:1,borderColor:c.border,paddingVertical:8,paddingHorizontal:12,flexDirection:'row',alignItems:'center',justifyContent:'space-around',elevation:4},
+  hudItem:{alignItems:'center'},
+  hudValue:{color:c.text,fontSize:15,fontWeight:'900'},
+  hudLabel:{color:c.muted,fontSize:8,fontWeight:'800',letterSpacing:0.8,marginTop:2},
+  hudDivider:{width:1,height:24,backgroundColor:c.border},
+  deviationWarning:{position:'absolute',left:14,right:14,backgroundColor:c.accentSoft,borderColor:c.accent,borderWidth:1,borderRadius:10,padding:10,alignItems:'center'},
+  deviationWarningText:{color:c.danger,fontSize:12,fontWeight:'800'},
+  arrivalToast:{position:'absolute',left:14,right:14,backgroundColor:c.greenSoft,borderColor:c.green,borderWidth:1,borderRadius:10,padding:10,alignItems:'center'},
+  arrivalToastText:{color:c.green,fontSize:12,fontWeight:'800'},
 });

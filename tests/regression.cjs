@@ -697,3 +697,31 @@ test('route workshop includes repair and accommodation stop pills', () => {
   assert.match(routeSource, /openAddStop\('repair'\)/);
   assert.match(routeSource, /openAddStop\('accommodation'\)/);
 });
+
+test('riding HUD renders speed, trail distance, and next stop distance during active ride', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /hudContainer/);
+  assert.match(rideSource, /hudItem/);
+  assert.match(rideSource, /hudValue/);
+  assert.match(rideSource, /currentSpeedKmh/);
+  assert.match(rideSource, /distanceCoveredMeters/);
+  assert.match(rideSource, /distanceToNextStopMeters/);
+  assert.match(rideSource, /active && \(/);
+});
+
+test('waypoint progression advances when rider arrives within 250m and shows arrival toast', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /distance < 250/);
+  assert.match(rideSource, /setLastArrivedWaypoint/);
+  assert.match(rideSource, /arrivalToast/);
+  assert.match(rideSource, /Arrived at \{lastArrivedWaypoint\}! Next stop loaded/);
+});
+
+test('route deviation alert triggers when distance exceeds deviation threshold', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /distanceToRouteMeters/);
+  assert.match(rideSource, /route_deviation_threshold_meters \|\| 500/);
+  assert.match(rideSource, /deviationWarning/);
+  assert.match(rideSource, /Route Deviation: ~\{Math\.round\(routeDeviation\)\} m/);
+});
+
