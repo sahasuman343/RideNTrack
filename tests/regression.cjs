@@ -776,4 +776,80 @@ test('emergency SOS workflow supports group broadcast, SMS with GPS, and selecte
   assert.match(rideSource, /Emergency alert broadcast to group with your live coordinates/);
 });
 
+test('motorcycle profile migration defines fuel tank, mileage, reserve, and category columns', () => {
+  const migrationSource = fs.readFileSync(path.resolve('supabase/migrations/016_motorcycle_profile_and_touring_intelligence.sql'), 'utf8');
+  assert.match(migrationSource, /motorcycle_make TEXT/);
+  assert.match(migrationSource, /motorcycle_model TEXT/);
+  assert.match(migrationSource, /fuel_tank_capacity_liters NUMERIC/);
+  assert.match(migrationSource, /mileage_km_per_liter NUMERIC/);
+  assert.match(migrationSource, /fuel_reserve_liters NUMERIC/);
+  assert.match(migrationSource, /motorcycle_category TEXT/);
+});
+
+test('motorcycle fuel plan calculates safe range, consumption, and recommended fuel stops', () => {
+  const bike = {
+    make: 'Royal Enfield',
+    model: 'Himalayan 450',
+    fuelTankCapacityLiters: 17,
+    mileageKmPerLiter: 30,
+    fuelReserveLiters: 3,
+    category: 'adventure',
+  };
+
+  // 450 km ride (450,000 meters)
+  const plan = shared.calculateMotorcycleFuelPlan(450000, bike);
+  assert.equal(plan.totalDistanceKm, 450);
+  assert.equal(plan.totalTheoreticalRangeKm, 510); // 17 * 30
+  assert.equal(plan.safeRangeKm, 420); // (17 - 3) * 30
+  assert.equal(plan.estimatedFuelConsumedLiters, 15); // 450 / 30
+  assert.equal(plan.recommendedFuelStops, 1); // ceil(450 / 420) - 1
+  assert.equal(plan.isAdvisory, true);
+  assert.match(plan.advisoryNote, /Advisory estimate based on Himalayan 450/);
+
+  // Unconfigured bike returns safe defaults
+  const unconfigured = shared.calculateMotorcycleFuelPlan(450000, null);
+  assert.equal(unconfigured.totalDistanceKm, 450);
+  assert.equal(unconfigured.safeRangeKm, null);
+  assert.equal(unconfigured.isAdvisory, true);
+});
+
+test('weather condition interpreter maps WMO codes and generates motorcyclist cautions', () => {
+  const clear = shared.getWeatherConditionFromCode(0);
+  assert.equal(clear.condition, 'Clear Sky');
+  assert.equal(clear.icon, '☀️');
+
+  const rain = shared.getWeatherConditionFromCode(61);
+  assert.equal(rain.condition, 'Rain');
+  assert.match(rain.warning, /Wet roads/);
+
+  const fog = shared.getWeatherConditionFromCode(45);
+  assert.match(fog.condition, /Fog/);
+  assert.match(fog.warning, /visibility/i);
+
+  const storm = shared.getWeatherConditionFromCode(95);
+  assert.match(storm.condition, /Thunderstorm/);
+  assert.match(storm.warning, /lightning/i);
+});
+
+test('profile screen supports motorcycle configuration and displays safe fuel range', () => {
+  const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
+  assert.match(profileSource, /motorcycle_make/);
+  assert.match(profileSource, /motorcycle_model/);
+  assert.match(profileSource, /fuel_tank_capacity_liters/);
+  assert.match(profileSource, /mileage_km_per_liter/);
+  assert.match(profileSource, /fuel_reserve_liters/);
+  assert.match(profileSource, /Motorcycle profile & machine/);
+  assert.match(profileSource, /Estimated fuel range \(advisory\)/);
+});
+
+test('trip workspace renders touring intelligence, motorcycle fuel advisory, and weather forecast', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /Touring Intelligence & Motorcycle Fuel/);
+  assert.match(tripSource, /Motorcycle Fuel Advisory/);
+  assert.match(tripSource, /Route Weather Forecast/);
+  assert.match(tripSource, /Open-Meteo/);
+  assert.match(tripSource, /Touring Advisories & Safety/);
+});
+
+
 

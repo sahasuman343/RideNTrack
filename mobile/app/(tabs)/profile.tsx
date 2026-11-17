@@ -14,12 +14,24 @@ export default function ProfileScreen() {
   const [phone, setPhone] = useState(profile?.phone || '');
   const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
+  const [make, setMake] = useState(profile?.motorcycle_make || '');
+  const [model, setModel] = useState(profile?.motorcycle_model || '');
+  const [category, setCategory] = useState(profile?.motorcycle_category || 'adventure');
+  const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
+  const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
+  const [reserve, setReserve] = useState(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
 
   function openEditor() {
     setDisplayName(profile?.display_name || '');
     setPhone(profile?.phone || '');
     setEmergencyContact(profile?.emergency_contact || '');
     setAvatarUrl(profile?.avatar_url || '');
+    setMake(profile?.motorcycle_make || '');
+    setModel(profile?.motorcycle_model || '');
+    setCategory(profile?.motorcycle_category || 'adventure');
+    setTankCapacity(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
+    setMileage(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
+    setReserve(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
     setEditing(true);
   }
   async function saveProfile() {
@@ -33,6 +45,18 @@ export default function ProfileScreen() {
     if (avatarUrl.trim() && !/^https?:\/\//i.test(avatarUrl.trim())) {
       Alert.alert('Invalid photo URL', 'Use a public HTTPS or HTTP image URL.'); return;
     }
+    const tankNum = tankCapacity.trim() ? Number(tankCapacity) : null;
+    if (tankNum != null && (!Number.isFinite(tankNum) || tankNum <= 0 || tankNum > 100)) {
+      Alert.alert('Invalid fuel tank capacity', 'Enter a valid capacity between 1 and 100 liters.'); return;
+    }
+    const mileageNum = mileage.trim() ? Number(mileage) : null;
+    if (mileageNum != null && (!Number.isFinite(mileageNum) || mileageNum <= 0 || mileageNum > 150)) {
+      Alert.alert('Invalid mileage', 'Enter a valid mileage between 1 and 150 km/l.'); return;
+    }
+    const reserveNum = reserve.trim() ? Number(reserve) : null;
+    if (reserveNum != null && (!Number.isFinite(reserveNum) || reserveNum < 0 || reserveNum > 30)) {
+      Alert.alert('Invalid reserve', 'Enter a valid reserve between 0 and 30 liters.'); return;
+    }
     setSaving(true);
     try {
       await updateProfile({
@@ -40,14 +64,27 @@ export default function ProfileScreen() {
         phone: phone.trim() || null,
         emergency_contact: emergencyContact.trim() || null,
         avatar_url: avatarUrl.trim() || null,
+        motorcycle_make: make.trim() || null,
+        motorcycle_model: model.trim() || null,
+        motorcycle_category: (category as any) || null,
+        fuel_tank_capacity_liters: tankNum,
+        mileage_km_per_liter: mileageNum,
+        fuel_reserve_liters: reserveNum,
       });
       setEditing(false);
-      Alert.alert('Profile updated', 'Your rider details have been saved.');
+      Alert.alert('Profile updated', 'Your rider details and motorcycle profile have been saved.');
     } catch (error) {
       Alert.alert('Could not update profile', error instanceof Error ? error.message : 'Please try again.');
     } finally { setSaving(false); }
   }
   const dark = mode === 'dark' || (mode === 'system' && theme.background === '#14221D');
+
+  const safeRangeKm = profile?.fuel_tank_capacity_liters && profile?.mileage_km_per_liter
+    ? Math.round(Math.max(0.5, profile.fuel_tank_capacity_liters - (profile.fuel_reserve_liters || 0)) * profile.mileage_km_per_liter)
+    : null;
+  const totalRangeKm = profile?.fuel_tank_capacity_liters && profile?.mileage_km_per_liter
+    ? Math.round(profile.fuel_tank_capacity_liters * profile.mileage_km_per_liter)
+    : null;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -56,13 +93,40 @@ export default function ProfileScreen() {
         <View style={styles.avatar}><Text style={styles.avatarText}>{profile?.display_name?.[0]?.toUpperCase() || '?'}</Text></View>}
       <Text style={styles.name}>{profile?.display_name || 'Rider'}</Text>
       <Text style={styles.username}>@{profile?.username || 'unknown'}</Text>
-      <TouchableOpacity style={styles.editButton} onPress={openEditor}><Text style={styles.editText}>Edit profile</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.editButton} onPress={openEditor}><Text style={styles.editText}>Edit profile & motorcycle</Text></TouchableOpacity>
 
       <View style={styles.card}>
         <Text style={styles.section}>Rider details</Text>
         <View style={styles.infoRow}><Text style={styles.infoLabel}>Phone</Text><Text style={styles.infoValue}>{profile?.phone || 'Not set'}</Text></View>
         <View style={styles.infoRow}><Text style={styles.infoLabel}>Emergency contact</Text><Text style={styles.infoValue}>{profile?.emergency_contact || 'Not set'}</Text></View>
         <View style={styles.infoRow}><Text style={styles.infoLabel}>Username</Text><Text style={styles.infoValue}>@{profile?.username || 'unknown'}</Text></View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.section}>Motorcycle profile & machine</Text>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Machine</Text>
+          <Text style={styles.infoValue}>{profile?.motorcycle_make ? `${profile.motorcycle_make} ${profile.motorcycle_model || ''}` : 'Not configured'}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Category</Text>
+          <Text style={styles.infoValue}>{profile?.motorcycle_category ? profile.motorcycle_category.toUpperCase() : 'TOURER'}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Fuel tank & reserve</Text>
+          <Text style={styles.infoValue}>{profile?.fuel_tank_capacity_liters ? `${profile.fuel_tank_capacity_liters} L (${profile.fuel_reserve_liters ?? 3} L reserve)` : 'Not configured'}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Approximate mileage</Text>
+          <Text style={styles.infoValue}>{profile?.mileage_km_per_liter ? `${profile.mileage_km_per_liter} km/l` : 'Not configured'}</Text>
+        </View>
+        {safeRangeKm != null && totalRangeKm != null && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Estimated fuel range (advisory)</Text>
+            <Text style={[styles.infoValue, { color: theme.green }]}>~{safeRangeKm} km safe range · ~{totalRangeKm} km tank maximum</Text>
+            <Text style={styles.hint}>Advisory estimate. Actual fuel consumption varies with riding pace, elevation, wind, and luggage.</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.card}>
@@ -79,8 +143,8 @@ export default function ProfileScreen() {
       </TouchableOpacity>
 
       <Modal visible={editing} transparent animationType="slide" onRequestClose={() => setEditing(false)}>
-        <View style={styles.overlay}><View style={styles.modal}>
-          <Text style={styles.modalTitle}>Edit rider profile</Text>
+        <View style={styles.overlay}><ScrollView style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
+          <Text style={styles.modalTitle}>Edit rider & motorcycle profile</Text>
           <Text style={styles.fieldLabel}>Display name</Text>
           <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholder="Your name" placeholderTextColor={theme.subtle} />
           <Text style={styles.fieldLabel}>Phone number</Text>
@@ -89,10 +153,43 @@ export default function ProfileScreen() {
           <TextInput style={styles.input} value={emergencyContact} onChangeText={setEmergencyContact} keyboardType="phone-pad" placeholder="Emergency contact phone (+91...)" placeholderTextColor={theme.subtle} />
           <Text style={styles.fieldLabel}>Profile photo URL</Text>
           <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
-          <Text style={styles.hint}>Use a publicly accessible image URL. Leave blank to use your initials.</Text>
+
+          <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
+          <Text style={styles.fieldLabel}>Make / Manufacturer</Text>
+          <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
+          <Text style={styles.fieldLabel}>Model</Text>
+          <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="e.g. Himalayan 450, 390 Adventure" placeholderTextColor={theme.subtle} />
+          <Text style={styles.fieldLabel}>Motorcycle category</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+            {(['adventure', 'tourer', 'cruiser', 'sport', 'commuter', 'scooter'] as const).map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.catPill, category === cat && { backgroundColor: theme.accent, borderColor: theme.accent }]}
+                onPress={() => setCategory(cat)}
+              >
+                <Text style={[styles.catPillText, category === cat && { color: '#fff' }]}>{cat.toUpperCase()}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Tank capacity (L)</Text>
+              <TextInput style={styles.input} value={tankCapacity} onChangeText={setTankCapacity} keyboardType="decimal-pad" placeholder="e.g. 17" placeholderTextColor={theme.subtle} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Approx mileage (km/l)</Text>
+              <TextInput style={styles.input} value={mileage} onChangeText={setMileage} keyboardType="decimal-pad" placeholder="e.g. 30" placeholderTextColor={theme.subtle} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Reserve (L)</Text>
+              <TextInput style={styles.input} value={reserve} onChangeText={setReserve} keyboardType="decimal-pad" placeholder="e.g. 3" placeholderTextColor={theme.subtle} />
+            </View>
+          </View>
+          <Text style={styles.hint}>Used for advisory fuel planning along your routes. Estimates are non-guaranteed.</Text>
+
           <TouchableOpacity disabled={saving} style={styles.saveButton} onPress={() => void saveProfile()}><Text style={styles.saveText}>{saving ? 'Saving…' : 'Save changes'}</Text></TouchableOpacity>
           <TouchableOpacity style={styles.cancelButton} onPress={() => setEditing(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
-        </View></View>
+        </ScrollView></View>
       </Modal>
     </ScrollView>
   );
@@ -126,6 +223,8 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   modalTitle: { color: c.text, fontSize: 21, fontWeight: '800', marginBottom: 14 },
   fieldLabel: { color: c.text, fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 5 },
   input: { backgroundColor: c.input, color: c.text, borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 13, fontSize: 15 },
+  catPill: { borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: c.surfaceRaised },
+  catPillText: { fontSize: 11, fontWeight: '700', color: c.text },
   hint: { color: c.muted, fontSize: 11, marginTop: 7, lineHeight: 16 },
   saveButton: { backgroundColor: c.accent, padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 20 },
   saveText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },

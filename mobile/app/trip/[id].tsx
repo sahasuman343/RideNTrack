@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus } from '@ridentrack/shared';
+import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calculateMotorcycleFuelPlan, generateTouringAdvisories, getWeatherConditionFromCode, type RouteWeatherPoint } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
@@ -22,7 +22,7 @@ type Stay = { id: string; name: string; stay_type: string; address?: string; che
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const theme = useRideTheme();
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -62,6 +62,78 @@ export default function TripWorkspaceScreen() {
   const [stageDestCoords, setStageDestCoords] = useState('');
   const [stageDayNumber, setStageDayNumber] = useState('1');
   const [stageNotes, setStageNotes] = useState('');
+
+  const [weatherPoints, setWeatherPoints] = useState<RouteWeatherPoint[]>([]);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+
+  useEffect(() => {
+    if (!trip) return;
+    let cancelled = false;
+    async function fetchWeather() {
+      const pointsToFetch: Array<{ label: string; coords: [number, number] }> = [];
+      if (trip?.origin_coords && trip.origin_coords.length === 2 && Number.isFinite(trip.origin_coords[0]) && Number.isFinite(trip.origin_coords[1])) {
+        pointsToFetch.push({ label: trip.origin || 'Start', coords: trip.origin_coords });
+      }
+      if (trip?.destination_coords && trip.destination_coords.length === 2 && Number.isFinite(trip.destination_coords[0]) && Number.isFinite(trip.destination_coords[1])) {
+        pointsToFetch.push({ label: trip.destination || 'Destination', coords: trip.destination_coords });
+      }
+      if (pointsToFetch.length === 0) return;
+      setWeatherLoading(true);
+      try {
+        const results: RouteWeatherPoint[] = [];
+        for (const pt of pointsToFetch) {
+          const [lng, lat] = pt.coords;
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`;
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (json?.current) {
+            const cond = getWeatherConditionFromCode(json.current.weather_code);
+            results.push({
+              label: pt.label,
+              latitude: lat,
+              longitude: lng,
+              temperatureC: json.current.temperature_2m,
+              humidityPercent: json.current.relative_humidity_2m,
+              windSpeedKmh: json.current.wind_speed_10m,
+              weatherCode: json.current.weather_code,
+              condition: cond.condition,
+              icon: cond.icon,
+              retrievedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              source: 'Open-Meteo API',
+            });
+          }
+        }
+        if (!cancelled) setWeatherPoints(results);
+      } catch {
+        /* Ignore network weather failures */
+      } finally {
+        if (!cancelled) setWeatherLoading(false);
+      }
+    }
+    void fetchWeather();
+    return () => { cancelled = true; };
+  }, [trip?.origin_coords, trip?.destination_coords, trip?.origin, trip?.destination]);
+
+  const fuelPlan = useMemo(() => {
+    const distMeters = trip?.estimated_distance_meters || 0;
+    return calculateMotorcycleFuelPlan(distMeters, {
+      make: profile?.motorcycle_make,
+      model: profile?.motorcycle_model,
+      category: profile?.motorcycle_category,
+      fuelTankCapacityLiters: profile?.fuel_tank_capacity_liters,
+      mileageKmPerLiter: profile?.mileage_km_per_liter,
+      fuelReserveLiters: profile?.fuel_reserve_liters,
+    });
+  }, [trip?.estimated_distance_meters, profile]);
+
+  const advisories = useMemo(() => {
+    return generateTouringAdvisories({
+      distanceMeters: trip?.estimated_distance_meters || 0,
+      fuelPlan,
+      weatherPoints,
+    });
+  }, [trip?.estimated_distance_meters, fuelPlan, weatherPoints]);
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -565,6 +637,84 @@ export default function TripWorkspaceScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Touring Intelligence & Fuel Planning */}
+      <View style={styles.card}>
+        <Text style={styles.section}>Touring Intelligence & Motorcycle Fuel</Text>
+
+        <View style={styles.intelBlock}>
+          <Text style={styles.intelTitle}>
+            ⛽ Motorcycle Fuel Advisory · {profile?.motorcycle_model ? `${profile.motorcycle_make || ''} ${profile.motorcycle_model}` : 'Motorcycle'}
+          </Text>
+          <View style={styles.fuelRow}>
+            <View style={styles.fuelStat}>
+              <Text style={styles.fuelStatValue}>{fuelPlan.totalDistanceKm} km</Text>
+              <Text style={styles.fuelStatLabel}>DISTANCE</Text>
+            </View>
+            <View style={styles.fuelStat}>
+              <Text style={styles.fuelStatValue}>{fuelPlan.estimatedFuelConsumedLiters ? fuelPlan.estimatedFuelConsumedLiters + ' L' : '—'}</Text>
+              <Text style={styles.fuelStatLabel}>EST. FUEL</Text>
+            </View>
+            <View style={styles.fuelStat}>
+              <Text style={styles.fuelStatValue}>{fuelPlan.safeRangeKm ? fuelPlan.safeRangeKm + ' km' : '—'}</Text>
+              <Text style={styles.fuelStatLabel}>SAFE RANGE</Text>
+            </View>
+            <View style={styles.fuelStat}>
+              <Text style={styles.fuelStatValue}>{fuelPlan.recommendedFuelStops != null ? fuelPlan.recommendedFuelStops : '—'}</Text>
+              <Text style={styles.fuelStatLabel}>REC. STOPS</Text>
+            </View>
+          </View>
+          {fuelPlan.estimatedCostInr != null && (
+            <Text style={styles.fuelCostText}>Estimated fuel expense: ~₹{fuelPlan.estimatedCostInr} (@ ₹105/L)</Text>
+          )}
+          <Text style={styles.mutedSmall}>{fuelPlan.advisoryNote}</Text>
+        </View>
+
+        <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
+          <Text style={styles.intelTitle}>⛅ Route Weather Forecast</Text>
+          {weatherLoading && weatherPoints.length === 0 ? (
+            <ActivityIndicator size="small" color={theme.accent} style={{ marginVertical: 8 }} />
+          ) : weatherPoints.length === 0 ? (
+            <Text style={styles.mutedSmall}>Weather forecast will load when origin and destination coordinates are set.</Text>
+          ) : (
+            <View style={{ gap: 8, marginVertical: 6 }}>
+              {weatherPoints.map(wp => (
+                <View key={wp.label} style={styles.weatherCard}>
+                  <Text style={{ fontSize: 24 }}>{wp.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pointName}>{wp.label}: {wp.condition}</Text>
+                    <Text style={styles.mutedSmall}>
+                      {wp.temperatureC}°C · Humidity {wp.humidityPercent}% · Wind {wp.windSpeedKmh} km/h
+                    </Text>
+                    <Text style={[styles.mutedSmall, { fontSize: 10 }]}>
+                      Source: {wp.source} · Checked {wp.retrievedAt}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {advisories.length > 0 && (
+          <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
+            <Text style={styles.intelTitle}>⚠️ Touring Advisories & Safety</Text>
+            {advisories.map((adv, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.advisoryItem,
+                  adv.level === 'warning' ? styles.advisoryWarning :
+                  adv.level === 'caution' ? styles.advisoryCaution : styles.advisoryInfo,
+                ]}
+              >
+                <Text style={styles.advisoryTitle}>{adv.title}</Text>
+                <Text style={styles.advisoryDesc}>{adv.description}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
         {regroupPoints.map(point => <View key={point.id} style={styles.riderRow}>
@@ -879,4 +1029,18 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
   dangerButton: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 }, dangerText: { color: c.danger, fontWeight: '900', fontSize: 12 },
   error: { color: c.danger, marginTop: 12 }, footer: { color: c.subtle, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
+  intelBlock: { marginBottom: 14 },
+  intelTitle: { color: c.text, fontSize: 14, fontWeight: '800', marginBottom: 8 },
+  fuelRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 10, marginBottom: 8 },
+  fuelStat: { alignItems: 'center' },
+  fuelStatValue: { color: c.text, fontSize: 15, fontWeight: '800' },
+  fuelStatLabel: { color: c.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 2 },
+  fuelCostText: { color: c.accent, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  weatherCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 10 },
+  advisoryItem: { borderRadius: 10, padding: 10, marginBottom: 6, borderWidth: 1 },
+  advisoryTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 2 },
+  advisoryDesc: { color: c.muted, fontSize: 11, lineHeight: 16 },
+  advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
+  advisoryCaution: { backgroundColor: '#FEF9C3', borderColor: '#CA8A04' },
+  advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
 });

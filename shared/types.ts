@@ -7,6 +7,12 @@ export interface User {
   emergency_contact?: string;
   avatar_url?: string;
   created_at: string;
+  motorcycle_make?: string | null;
+  motorcycle_model?: string | null;
+  fuel_tank_capacity_liters?: number | null;
+  mileage_km_per_liter?: number | null;
+  fuel_reserve_liters?: number | null;
+  motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
 }
 
 export type Profile = User;
@@ -257,3 +263,6 @@ export function buildGoogleMapsNavigationUrl(destination: {
   }
   return 'https://www.google.com/maps/dir/?' + params.join('&');
 }
+
+export * from './touring';
+
