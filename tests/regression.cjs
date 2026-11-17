@@ -725,3 +725,55 @@ test('route deviation alert triggers when distance exceeds deviation threshold',
   assert.match(rideSource, /Route Deviation: ~\{Math\.round\(routeDeviation\)\} m/);
 });
 
+test('rider live status differentiates riding, stopped, disconnected, and completed', () => {
+  const now = 1700000000000;
+  // 1. Fresh fix with speed >= 5 km/h (speed is in m/s: 2 m/s = 7.2 km/h)
+  const riding = shared.getRiderLiveStatus({ timestamp: new Date(now - 10000).toISOString(), speed: 2 }, 'active', now);
+  assert.equal(riding.status, 'riding');
+  assert.equal(riding.label, 'Riding');
+
+  // 2. Fresh fix with speed < 5 km/h (speed is in m/s: 0.5 m/s = 1.8 km/h)
+  const stopped = shared.getRiderLiveStatus({ timestamp: new Date(now - 15000).toISOString(), speed: 0.5 }, 'active', now);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.label, 'Stopped');
+
+  // 3. Stale fix (> 2 minutes old): Disconnected, not emergency
+  const disconnected = shared.getRiderLiveStatus({ timestamp: new Date(now - 180000).toISOString(), speed: 20 }, 'active', now);
+  assert.equal(disconnected.status, 'disconnected');
+  assert.equal(disconnected.label, 'Disconnected');
+  assert.match(disconnected.lastSeenText, /Last seen/);
+
+  // 4. Completed ride
+  const completed = shared.getRiderLiveStatus({ timestamp: new Date(now - 10000).toISOString(), speed: 2 }, 'completed', now);
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.label, 'Completed');
+});
+
+test('regroup alert migration, ALERT_LABELS, and proximity regroup confirmation', () => {
+  const migrationSource = fs.readFileSync(path.resolve('supabase/migrations/015_regroup_alert_and_sos.sql'), 'utf8');
+  assert.match(migrationSource, /'regroup'/);
+  assert.match(migrationSource, /ALTER TABLE public\.alerts ADD CONSTRAINT alerts_type_check/);
+
+  assert.ok(shared.ALERT_LABELS.regroup);
+  assert.match(shared.ALERT_LABELS.regroup, /Regroup/);
+
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /get_regroup_points/);
+  assert.match(rideSource, /confirm_regroup_arrival/);
+  assert.match(rideSource, /regroupBanner/);
+  assert.match(rideSource, /Near Regroup/);
+});
+
+test('emergency SOS workflow supports group broadcast, SMS with GPS, and selected contact sharing', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /sosTopButton/);
+  assert.match(rideSource, /triggerSosWorkflow/);
+  assert.match(rideSource, /broadcastSosToGroup/);
+  assert.match(rideSource, /sendEmergencySms/);
+  assert.match(rideSource, /dialEmergencyContact/);
+  assert.match(rideSource, /shareLiveLocation/);
+  assert.match(rideSource, /maps\.google\.com\/\?q=/);
+  assert.match(rideSource, /Emergency alert broadcast to group with your live coordinates/);
+});
+
+

@@ -143,7 +143,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup';
   message?: string;
   lat: number;
   lng: number;
@@ -171,7 +171,33 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   mechanical: '🔧 Mechanical Issue',
   route_deviation: '🧭 Route Deviation',
   rider_behind: '🏍️ Rider Behind',
+  regroup: '📢 Regroup Now',
 };
+
+export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
+
+export function getRiderLiveStatus(
+  point: { timestamp: string; speed?: number | null; is_active?: boolean },
+  rideStatus?: string,
+  now = Date.now()
+): { status: RiderLiveStatus; label: string; lastSeenText?: string } {
+  if (rideStatus === 'completed' || point.is_active === false) {
+    return { status: 'completed', label: 'Completed' };
+  }
+  const parsedTime = Date.parse(point.timestamp);
+  const ageMs = Number.isFinite(parsedTime) ? now - parsedTime : Number.POSITIVE_INFINITY;
+  if (ageMs > 120000) { // > 2 minutes
+    const lastSeenText = Number.isFinite(parsedTime)
+      ? 'Last seen ' + new Date(parsedTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'No GPS fix';
+    return { status: 'disconnected', label: 'Disconnected', lastSeenText };
+  }
+  const speedKmh = (point.speed || 0) * 3.6;
+  if (speedKmh >= 5) {
+    return { status: 'riding', label: 'Riding' };
+  }
+  return { status: 'stopped', label: 'Stopped' };
+}
 
 export interface SyncStatus {
   isOnline: boolean;

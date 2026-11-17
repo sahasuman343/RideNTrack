@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl } from '@ridentrack/shared';
+import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl, getRiderLiveStatus, type RiderLiveStatus } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -68,6 +68,9 @@ export default function LiveRideScreen() {
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
   const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
   const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
+  const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean }>>([]);
+  const [arrivingRegroupPoint, setArrivingRegroupPoint] = useState<{ id: string; name: string } | null>(null);
+  const [sosModal, setSosModal] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
@@ -80,16 +83,20 @@ export default function LiveRideScreen() {
     type: 'FeatureCollection' as const,
     features: animated
       .filter(p => typeof p?.lng === 'number' && typeof p?.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat))
-      .map(p => ({
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-        properties: {
-          name: p.display_name || 'Rider',
-          mine: p.user_id === userId,
-          stale: isStale(p.timestamp, now),
-        },
-      })),
-  }), [animated, userId, now]);
+      .map(p => {
+        const liveStatus = getRiderLiveStatus(p, ride?.status, now);
+        return {
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
+          properties: {
+            name: p.display_name || 'Rider',
+            mine: p.user_id === userId,
+            stale: liveStatus.status === 'disconnected',
+            status: liveStatus.status,
+          },
+        };
+      }),
+  }), [animated, userId, now, ride?.status]);
   const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()),15000); return () => clearInterval(timer); }, []);
   useEffect(() => {
@@ -182,8 +189,22 @@ export default function LiveRideScreen() {
         if (cancelled) return;
         if (!error && Array.isArray(data)) setUpcomingWaypoints(data);
       });
+    void supabase.rpc('get_regroup_points', { p_ride_id: id })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && Array.isArray(data)) setRegroupPoints(data as any);
+      });
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (!position || regroupPoints.length === 0) {
+      setArrivingRegroupPoint(null);
+      return;
+    }
+    const nearest = regroupPoints.find(rp => !rp.my_arrived && distanceMeters(position, { lat: rp.latitude, lng: rp.longitude }) < 300);
+    setArrivingRegroupPoint(nearest ? { id: nearest.id, name: nearest.name } : null);
+  }, [position?.lat, position?.lng, regroupPoints]);
 
   useEffect(() => {
     if (!id || !userId) return;
@@ -363,6 +384,94 @@ export default function LiveRideScreen() {
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not save alert.'); }
     finally { setBusy(false); }
   }
+
+  async function confirmArrival(regroupPointId: string) {
+    setBusy(true);
+    try {
+      const { error: confirmError } = await supabase.rpc('confirm_regroup_arrival', { p_regroup_point_id: regroupPointId });
+      if (confirmError) throw confirmError;
+      setRegroupPoints(prev => prev.map(p => p.id === regroupPointId ? { ...p, my_arrived: true } : p));
+      setArrivingRegroupPoint(null);
+      setMessage('✅ Confirmed arrival at regroup point!');
+    } catch (e: any) {
+      setMessage(e?.message || 'Could not confirm arrival.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function triggerSosWorkflow() {
+    setModal(false);
+    setSosModal(true);
+  }
+
+  async function broadcastSosToGroup() {
+    setSosModal(false);
+    if (!position || !userId || isStale(position.timestamp)) {
+      setMessage('Wait for a fresh GPS fix before sending an emergency alert.');
+      return;
+    }
+    await sendAlert('emergency');
+    setMessage('🚨 Emergency alert broadcast to group with your live coordinates.');
+  }
+
+  async function dialEmergencyContact() {
+    setSosModal(false);
+    const phone = profile?.emergency_contact || '112';
+    try {
+      await Linking.openURL('tel:' + phone);
+    } catch {
+      setMessage('Could not launch phone dialer.');
+    }
+  }
+
+  async function sendEmergencySms() {
+    setSosModal(false);
+    if (!position) {
+      setMessage('No GPS fix available.');
+      return;
+    }
+    const phone = profile?.emergency_contact || '';
+    if (!phone) {
+      Dialog.alert('No Emergency Contact Set', 'Set an emergency contact in your Profile to send 1-tap SOS SMS.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Go to Profile', onPress: () => router.push('/(tabs)/profile') },
+      ]);
+      return;
+    }
+    if (userId && !isStale(position.timestamp)) {
+      void sendAlert('emergency');
+    }
+    const mapsLink = `https://maps.google.com/?q=${position.lat},${position.lng}`;
+    const body = `EMERGENCY SOS: I need help during my motorcycle ride "${ride?.name || 'Ride'}". My current location is: ${mapsLink}`;
+    const sep = Platform.OS === 'ios' ? '&' : '?';
+    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(body)}`;
+    try {
+      const canOpen = await Linking.canOpenURL(smsUrl);
+      if (canOpen) {
+        await Linking.openURL(smsUrl);
+      } else {
+        await Share.share({ message: body });
+      }
+      setMessage('🚨 Emergency SOS initiated.');
+    } catch {
+      setMessage('Could not launch SMS.');
+    }
+  }
+
+  async function shareLiveLocation() {
+    if (!position) {
+      setMessage('Waiting for GPS position to share.');
+      return;
+    }
+    const mapsLink = `https://maps.google.com/?q=${position.lat},${position.lng}`;
+    const text = `🏍️ Tracking my motorcycle ride "${ride?.name || 'Ride'}" on RideNTrack.\nMy current location: ${mapsLink}\nJoin Code: ${ride?.ride_code || ''}`;
+    try {
+      await Share.share({ message: text });
+    } catch {
+      setMessage('Could not open share options.');
+    }
+  }
   const pending = sync.pendingLocationsCount + sync.pendingAlertsCount;
   const status = !sync.isOnline ? 'Offline · saved on device' : connection !== 'live' ? 'Reconnecting…' :
     !active ? ride?.status === 'completed' ? 'Ride completed' : 'Ready to ride' :
@@ -425,7 +534,13 @@ export default function LiveRideScreen() {
         <Mapbox.CircleLayer id="rider-halo" style={{ circleRadius: 18, circleColor: theme.accent, circleOpacity: 0.18 }} />
         <Mapbox.CircleLayer id="rider-dot" style={{
           circleRadius: 8,
-          circleColor: ['case', ['==', ['get', 'stale'], true], theme.subtle, ['==', ['get', 'mine'], true], theme.accent, theme.green],
+          circleColor: [
+            'case',
+            ['==', ['get', 'mine'], true], theme.accent,
+            ['==', ['get', 'status'], 'disconnected'], theme.subtle,
+            ['==', ['get', 'status'], 'stopped'], '#EAB308',
+            theme.green,
+          ],
           circleStrokeWidth: 3,
           circleStrokeColor: '#fff',
         }} />
@@ -439,7 +554,26 @@ export default function LiveRideScreen() {
         }} />
       </Mapbox.ShapeSource>
     </Mapbox.MapView> : <View style={s.fallback}><Text style={s.heading}>Your ride, together.</Text><Text style={s.muted}>The native map needs a development build and a Mapbox token. Your rider list and foreground GPS remain available.</Text></View>}
-    <View style={[s.top,{ top: insets.top + 10 }]}><TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}><Text style={s.text}>‹</Text></TouchableOpacity><View style={s.title}><Text numberOfLines={1} style={s.heading}>{ride.name}</Text><Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text></View>{admin && <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}><Text style={s.text}>✎</Text></TouchableOpacity>}<TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}><Text style={s.text}>↗</Text></TouchableOpacity></View>
+    <View style={[s.top,{ top: insets.top + 10 }]}>
+      <TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}>
+        <Text style={s.text}>‹</Text>
+      </TouchableOpacity>
+      <View style={s.title}>
+        <Text numberOfLines={1} style={s.heading}>{ride.name}</Text>
+        <Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text>
+      </View>
+      <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
+        <Text style={s.sosTopButtonText}>SOS</Text>
+      </TouchableOpacity>
+      {admin && (
+        <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
+          <Text style={s.text}>✎</Text>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}>
+        <Text style={s.text}>↗</Text>
+      </TouchableOpacity>
+    </View>
 
     {active && (
       <View style={[s.hudContainer, { top: insets.top + 74 }]}>
@@ -479,6 +613,15 @@ export default function LiveRideScreen() {
       </TouchableOpacity>
     </View>
 
+    {arrivingRegroupPoint && (
+      <View style={[s.regroupBanner, { top: insets.top + (active ? 186 : 124) }]}>
+        <Text numberOfLines={1} style={s.regroupBannerText}>📍 Near Regroup: {arrivingRegroupPoint.name}</Text>
+        <TouchableOpacity style={s.confirmRegroupButton} disabled={busy} onPress={() => void confirmArrival(arrivingRegroupPoint.id)}>
+          <Text style={s.confirmRegroupText}>Confirm arrival</Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
     {routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
       <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) }]}>
         <Text style={s.deviationWarningText}>
@@ -510,16 +653,61 @@ export default function LiveRideScreen() {
         updateCellsBatchingPeriod={50}
         removeClippedSubviews
         ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
-        renderItem={({ item: p }) => <TouchableOpacity style={s.rider} onPress={() => {
-          setFollow(false);
-          if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
-            try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
-          }
-        }}>
-          <View style={[s.avatar,isStale(p.timestamp,now) && s.stale]}><Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text></View>
-          <View style={s.grow}><Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text><Text style={s.muted}>{isStale(p.timestamp,now) ? 'Last known position' : 'Live location'}</Text></View>
-          <Text style={s.text}>{isStale(p.timestamp,now) ? '—' : Math.round(p.speed * 3.6)} km/h</Text>
-        </TouchableOpacity>}
+        renderItem={({ item: p }) => {
+          const riderStatus = getRiderLiveStatus(p, ride.status, now);
+          const isDisconnected = riderStatus.status === 'disconnected';
+          return (
+            <TouchableOpacity style={s.rider} onPress={() => {
+              setFollow(false);
+              if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
+                try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
+              }
+            }}>
+              <View style={[
+                s.avatar,
+                riderStatus.status === 'riding' ? s.avatarRiding :
+                riderStatus.status === 'stopped' ? s.avatarStopped :
+                riderStatus.status === 'completed' ? s.avatarCompleted : s.stale
+              ]}>
+                <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
+              </View>
+              <View style={s.grow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
+                  <View style={[
+                    s.statusPill,
+                    riderStatus.status === 'riding' ? s.statusPillRiding :
+                    riderStatus.status === 'stopped' ? s.statusPillStopped :
+                    riderStatus.status === 'completed' ? s.statusPillCompleted : s.statusPillDisconnected
+                  ]}>
+                    <Text style={[
+                      s.statusPillText,
+                      riderStatus.status === 'riding' ? s.statusPillTextRiding :
+                      riderStatus.status === 'stopped' ? s.statusPillTextStopped :
+                      riderStatus.status === 'completed' ? s.statusPillTextCompleted : s.statusPillTextDisconnected
+                    ]}>
+                      {riderStatus.label}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.muted}>
+                  {isDisconnected
+                    ? (riderStatus.lastSeenText || 'Last known position')
+                    : riderStatus.status === 'completed'
+                    ? 'Ride completed'
+                    : 'Live location'}
+                </Text>
+              </View>
+              <Text style={s.text}>
+                {riderStatus.status === 'riding'
+                  ? Math.round((p.speed || 0) * 3.6) + ' km/h'
+                  : riderStatus.status === 'stopped'
+                  ? '0 km/h'
+                  : '—'}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
       />}
       {active && nextWaypoint && <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
         <TouchableOpacity style={[s.navButton, { flex: 1, marginBottom: 0 }]} onPress={() => void navigateToNextWaypoint()}>
@@ -533,18 +721,21 @@ export default function LiveRideScreen() {
           <Text style={s.text}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
         </TouchableOpacity>}
       </View>}
-      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Send alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
+      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={s.secondary} disabled={!position} onPress={() => void shareLiveLocation()} accessibilityLabel="Share live location with contact"><Text style={s.text}>Share</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
       {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
     </View>
-    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? Dialog.alert('Send emergency alert?', 'Notify your group that you need help.', [{ text: 'Cancel',style: 'cancel' },{ text: 'Send alert',onPress: () => void sendAlert(type) }]) : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+    <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
   </View>;
 }
 const makeStyles = (c: RidePalette) => StyleSheet.create({
   screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
   text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'700'},top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},title:{flex:1,padding:13,borderRadius:10,backgroundColor:c.surface},square:{width:44,height:48,borderRadius:9,backgroundColor:c.surface,alignItems:'center',justifyContent:'center'},
+  sosTopButton:{width:46,height:48,borderRadius:9,backgroundColor:c.danger,alignItems:'center',justifyContent:'center'},sosTopButtonText:{color:'#fff',fontSize:13,fontWeight:'900'},
   controls:{position:'absolute',right:14,flexDirection:'row',gap:8},control:{backgroundColor:c.surface,paddingHorizontal:16,minHeight:44,justifyContent:'center',borderRadius:12,borderWidth:1,borderColor:c.border},selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
   sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8},sheetHeader:{paddingTop:10,paddingBottom:16},handle:{width:38,height:4,backgroundColor:c.border,borderRadius:3,alignSelf:'center',marginBottom:14},row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},eyebrow:{color:c.green,fontSize:11,fontWeight:'600',marginBottom:5},code:{backgroundColor:c.surfaceRaised,padding:9,borderRadius:10,letterSpacing:2,fontSize:11,color:c.muted},
-  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:c.border},avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},stale:{backgroundColor:c.subtle},grow:{flex:1},
+  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:c.border},avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},avatarRiding:{backgroundColor:c.green},avatarStopped:{backgroundColor:'#EAB308'},avatarCompleted:{backgroundColor:c.accent},stale:{backgroundColor:c.subtle},grow:{flex:1},
+  statusPill:{paddingHorizontal:6,paddingVertical:2,borderRadius:6},statusPillText:{fontSize:10,fontWeight:'700'},statusPillRiding:{backgroundColor:c.greenSoft},statusPillTextRiding:{color:c.green,fontSize:10,fontWeight:'700'},statusPillStopped:{backgroundColor:'#FEF9C3'},statusPillTextStopped:{color:'#854D0E',fontSize:10,fontWeight:'700'},statusPillDisconnected:{backgroundColor:c.surfaceRaised},statusPillTextDisconnected:{color:c.muted,fontSize:10,fontWeight:'700'},statusPillCompleted:{backgroundColor:c.accentSoft},statusPillTextCompleted:{color:c.accent,fontSize:10,fontWeight:'700'},
   navButton:{backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center',marginBottom:10},
   actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:c.text,fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:c.danger,fontSize:13},
   warning:{position:'absolute',left:16,right:16,backgroundColor:c.accentSoft,borderRadius:15,padding:12,gap:4},warningText:{color:c.text,fontSize:12,lineHeight:18},link:{color:c.accent,fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:c.accentSoft,marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:c.shadow + '88'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:c.surface,gap:12},alertOption:{padding:20,borderRadius:9,backgroundColor:c.surfaceRaised},emergency:{backgroundColor:c.accentSoft},fallback:{padding:36,paddingTop:225,gap:14},
@@ -557,4 +748,10 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   deviationWarningText:{color:c.danger,fontSize:12,fontWeight:'800'},
   arrivalToast:{position:'absolute',left:14,right:14,backgroundColor:c.greenSoft,borderColor:c.green,borderWidth:1,borderRadius:10,padding:10,alignItems:'center'},
   arrivalToastText:{color:c.green,fontSize:12,fontWeight:'800'},
+  regroupBanner:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderColor:c.accent,borderWidth:1,borderRadius:12,padding:12,flexDirection:'row',alignItems:'center',justifyContent:'space-between',elevation:4},
+  regroupBannerText:{color:c.text,fontSize:13,fontWeight:'700',flex:1},
+  confirmRegroupButton:{backgroundColor:c.accent,paddingHorizontal:12,paddingVertical:8,borderRadius:8},
+  confirmRegroupText:{color:c.text,fontSize:12,fontWeight:'800'},
+  sosEmergencyOption:{padding:16,borderRadius:10,backgroundColor:c.danger,alignItems:'center'},
+  sosEmergencyText:{color:'#fff',fontSize:15,fontWeight:'800'},
 });
