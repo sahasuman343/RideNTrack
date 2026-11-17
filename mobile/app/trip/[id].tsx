@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { buildGoogleMapsNavigationUrl } from '@ridentrack/shared';
+import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
+  origin_coords?: [number, number] | null; destination_coords?: [number, number] | null;
   status: string; trip_type?: string; start_date?: string | null; end_date?: string | null;
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
   ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
@@ -28,6 +29,7 @@ export default function TripWorkspaceScreen() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
+  const [stages, setStages] = useState<TripStage[]>([]);
   const [roster, setRoster] = useState<Rider[]>([]);
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
@@ -51,6 +53,16 @@ export default function TripWorkspaceScreen() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
+  // Stage modal state
+  const [stageModalVisible, setStageModalVisible] = useState(false);
+  const [stageName, setStageName] = useState('');
+  const [stageStart, setStageStart] = useState('');
+  const [stageDestination, setStageDestination] = useState('');
+  const [stageStartCoords, setStageStartCoords] = useState('');
+  const [stageDestCoords, setStageDestCoords] = useState('');
+  const [stageDayNumber, setStageDayNumber] = useState('1');
+  const [stageNotes, setStageNotes] = useState('');
+
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
   const load = useCallback(async () => {
@@ -58,13 +70,14 @@ export default function TripWorkspaceScreen() {
     if (!id) return;
     setLoading(true); setError('');
     try {
-      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
         supabase.from('trip_stays').select('*').eq('ride_id', id).order('check_in'),
         supabase.rpc('get_trip_roster', { p_ride_id: id }),
         supabase.rpc('get_regroup_points', { p_ride_id: id }),
+        supabase.rpc('get_trip_stages', { p_ride_id: id }),
       ]);
       if (generation !== loadGeneration.current) return;
       if (tripResult.error) throw tripResult.error;
@@ -77,6 +90,7 @@ export default function TripWorkspaceScreen() {
       setWaypoints((waypointResult.data || []) as Waypoint[]);
       setDays((dayResult.data || []) as Day[]);
       setStays((stayResult.data || []) as Stay[]);
+      setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
@@ -158,6 +172,166 @@ export default function TripWorkspaceScreen() {
     } catch (e: any) {
       setError(e?.message || 'Could not leave this ride.');
       setSaving(false);
+    }
+  }
+
+  function openCreateStage(dayNum?: number) {
+    setStageName('');
+    setStageStart(trip?.origin || '');
+    setStageDestination(trip?.destination || '');
+    setStageStartCoords(Array.isArray(trip?.origin_coords) ? trip.origin_coords.join(', ') : '77.5946, 12.9716');
+    setStageDestCoords(Array.isArray(trip?.destination_coords) ? trip.destination_coords.join(', ') : '78.0, 13.0');
+    setStageDayNumber(String(dayNum || 1));
+    setStageNotes('');
+    setStageModalVisible(true);
+  }
+
+  async function saveStage() {
+    if (!stageName.trim() || !stageStart.trim() || !stageDestination.trim()) {
+      Alert.alert('Missing stage details', 'Enter a stage title, start location and destination.');
+      return;
+    }
+    const startPairs = stageStartCoords.split(',').map(s => Number(s.trim()));
+    const destPairs = stageDestCoords.split(',').map(s => Number(s.trim()));
+    if (startPairs.length < 2 || !Number.isFinite(startPairs[0]) || !Number.isFinite(startPairs[1]) ||
+        destPairs.length < 2 || !Number.isFinite(destPairs[0]) || !Number.isFinite(destPairs[1])) {
+      Alert.alert('Invalid coordinates', 'Enter coordinates as: longitude, latitude (e.g. 77.5946, 12.9716)');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const { error: stageError } = await supabase.rpc('save_trip_stage', {
+        p_ride_id: id,
+        p_stage: {
+          name: stageName.trim(),
+          start_name: stageStart.trim(),
+          destination_name: stageDestination.trim(),
+          start_coords: [startPairs[0], startPairs[1]],
+          destination_coords: [destPairs[0], destPairs[1]],
+          day_number: Number(stageDayNumber) || 1,
+          notes: stageNotes.trim() || null,
+          status: 'planned',
+        },
+      });
+      if (stageError) throw stageError;
+      setStageModalVisible(false);
+      await load();
+      Alert.alert('Stage added', 'Riding stage has been saved to your itinerary.');
+    } catch (e: any) {
+      setError(e?.message || 'Could not save stage.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function confirmDeleteStage(stageId: string, name: string) {
+    if (!isAdmin || saving) return;
+    Alert.alert(
+      'Delete stage?',
+      `Remove stage “${name}” from this trip? Waypoints and other stages will be preserved.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error: delError } = await supabase.rpc('delete_trip_stage', {
+                p_ride_id: id,
+                p_stage_id: stageId,
+              });
+              if (delError) throw delError;
+              await load();
+            } catch (e: any) {
+              setError(e?.message || 'Could not delete stage.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  async function cycleStageStatus(stage: TripStage) {
+    const cycle: Record<StageStatus, StageStatus> = {
+      planned: 'in_progress',
+      in_progress: 'completed',
+      completed: 'planned',
+      skipped: 'planned',
+    };
+    const nextStatus = cycle[stage.status] || 'planned';
+    setSaving(true);
+    try {
+      const { error: statusError } = await supabase.rpc('update_stage_status', {
+        p_stage_id: stage.id,
+        p_status: nextStatus,
+      });
+      if (statusError) throw statusError;
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Could not update stage status.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function shareItinerary() {
+    if (!trip) return;
+    const lines: string[] = [
+      `🏍️ ${trip.name.toUpperCase()}`,
+      `Route: ${trip.origin} → ${trip.destination}`,
+      `Total Distance: ${distance} · ${duration}`,
+    ];
+    if (trip.description) lines.push(`Notes: ${trip.description}`);
+    lines.push('');
+
+    if (days.length > 0) {
+      lines.push('📅 TOUR ITINERARY:');
+      for (const day of days) {
+        lines.push(`--- Day ${day.day_number}: ${day.title || 'Day ' + day.day_number} (${day.trip_date || 'Date TBD'}) ---`);
+        if (day.notes) lines.push(`Note: ${day.notes}`);
+
+        const dayStages = stages.filter(s => s.trip_day_id === day.id || s.day_number === day.day_number);
+        if (dayStages.length > 0) {
+          lines.push('Riding Stages:');
+          for (const s of dayStages) {
+            const distStr = s.estimated_distance_meters ? `${(s.estimated_distance_meters / 1000).toFixed(0)} km` : '';
+            const statusIcon = s.status === 'completed' ? '✅' : s.status === 'in_progress' ? '🟡' : '⏳';
+            lines.push(`  ${statusIcon} Stage ${s.stage_number}: ${s.name} (${s.start_name} → ${s.destination_name}${distStr ? ' · ' + distStr : ''})`);
+            if (s.notes) lines.push(`     Memo: ${s.notes}`);
+          }
+        }
+
+        const dayWaypoints = waypoints.filter(w => w.trip_day_id === day.id);
+        if (dayWaypoints.length > 0) {
+          lines.push('Planned Stops:');
+          for (const w of dayWaypoints) {
+            lines.push(`  • [${w.waypoint_type.toUpperCase()}] ${w.name}${w.notes ? ' — ' + w.notes : ''}`);
+          }
+        }
+        lines.push('');
+      }
+    } else {
+      lines.push('STOPS:');
+      for (const w of waypoints) {
+        lines.push(`  • [${w.waypoint_type.toUpperCase()}] ${w.name}${w.notes ? ' — ' + w.notes : ''}`);
+      }
+      lines.push('');
+    }
+
+    lines.push(`Join group ride on RideNTrack with code: ${trip.ride_code}`);
+    lines.push('RideNTrack: Your journey. Your machine. Your adventure.');
+
+    try {
+      await Share.share({
+        title: trip.name,
+        message: lines.join('\n'),
+      });
+    } catch {
+      /* Sharing was cancelled */
     }
   }
 
@@ -312,6 +486,47 @@ export default function TripWorkspaceScreen() {
   const distance = trip?.estimated_distance_meters ? (trip.estimated_distance_meters / 1000).toFixed(0) + ' km' : 'Pending';
   const duration = trip?.estimated_duration_seconds ? Math.round(trip.estimated_duration_seconds / 3600) + ' hr map estimate' : 'Pending';
 
+  function renderStageCard(stage: TripStage) {
+    const statusMeta = {
+      planned: { label: 'Planned', color: theme.muted, icon: '⏳' },
+      in_progress: { label: 'Riding', color: theme.accent, icon: '🟡' },
+      completed: { label: 'Completed', color: theme.green, icon: '✅' },
+      skipped: { label: 'Skipped', color: theme.subtle, icon: '⏭️' },
+    }[stage.status] || { label: 'Planned', color: theme.muted, icon: '⏳' };
+
+    const dist = stage.estimated_distance_meters ? `${(stage.estimated_distance_meters / 1000).toFixed(0)} km` : null;
+
+    return (
+      <View key={stage.id} style={styles.stageCard}>
+        <View style={styles.stageHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.stageTitle}>Stage {stage.stage_number}: {stage.name}</Text>
+            <Text style={styles.stageEndpoints}>{stage.start_name} → {stage.destination_name}</Text>
+            {dist && <Text style={styles.stageMetaText}>{dist}</Text>}
+          </View>
+          <TouchableOpacity
+            style={[styles.stageStatusPill, { borderColor: statusMeta.color }]}
+            onPress={() => void cycleStageStatus(stage)}
+          >
+            <Text style={[styles.stageStatusText, { color: statusMeta.color }]}>
+              {statusMeta.icon} {statusMeta.label}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {!!stage.notes && (
+          <Text style={styles.stageNotes}>📝 {stage.notes}</Text>
+        )}
+        {isAdmin && (
+          <View style={styles.stageActions}>
+            <TouchableOpacity onPress={() => confirmDeleteStage(stage.id, stage.name)}>
+              <Text style={styles.remove}>Remove stage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  }
+
   if (loading && !trip) return <View style={styles.center}><ActivityIndicator color="#ff8a32" /><Text style={styles.muted}>Loading trip workspace…</Text></View>;
   if (!trip) return <View style={styles.center}><Text style={styles.title}>Trip unavailable</Text><Text style={styles.muted}>{error || 'You may not have access to this trip.'}</Text><TouchableOpacity onPress={() => router.back()}><Text style={styles.link}>Go back</Text></TouchableOpacity></View>;
 
@@ -331,6 +546,11 @@ export default function TripWorkspaceScreen() {
       <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/ride/' + trip.id)}><Text style={styles.primaryText}>Open live ride tracker →</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => router.push('/(tabs)')}><Text style={styles.secondaryText}>My trips</Text></TouchableOpacity>
+      </View>
+      <View style={styles.actions}>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void shareItinerary()}>
+          <Text style={styles.secondaryText}>📤 Share touring itinerary</Text>
+        </TouchableOpacity>
       </View>
       {isAdmin && <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
@@ -451,15 +671,80 @@ export default function TripWorkspaceScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.section}>Day-by-day plan</Text>
-        {days.length === 0 ? <Text style={styles.muted}>No dated itinerary days were created for this trip.</Text> : days.map(day => (
-          <View key={day.id} style={styles.day}>
-            <Text style={styles.dayTitle}>{day.title || 'Day ' + day.day_number}</Text>
-            <Text style={styles.mutedSmall}>{day.trip_date || 'Date not set'}</Text>
-            {!!day.notes && <Text style={styles.mutedSmall}>{day.notes}</Text>}
-            <Text style={styles.mutedSmall}>{waypoints.filter(point => point.trip_day_id === day.id).length} planned stops · {stays.filter(stay => stay.trip_day_id === day.id).length} stays</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <Text style={styles.section}>Day-by-day plan & stages</Text>
+          {isAdmin && (
+            <TouchableOpacity style={styles.smallButton} onPress={() => openCreateStage(1)}>
+              <Text style={styles.smallButtonText}>＋ Add stage</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {days.length === 0 ? (
+          <View>
+            <Text style={styles.muted}>No dated itinerary days were created for this trip.</Text>
+            {stages.length > 0 && (
+              <View style={{ marginTop: 10, gap: 8 }}>
+                <Text style={styles.stageSectionHeader}>RIDING STAGES ({stages.length})</Text>
+                {stages.map(stage => renderStageCard(stage))}
+              </View>
+            )}
           </View>
-        ))}
+        ) : (
+          days.map(day => {
+            const dayStages = stages.filter(s => s.trip_day_id === day.id || s.day_number === day.day_number);
+            const dayWaypoints = waypoints.filter(point => point.trip_day_id === day.id);
+            const dayStays = stays.filter(stay => stay.trip_day_id === day.id);
+
+            return (
+              <View key={day.id} style={styles.day}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.dayTitle}>{day.title || 'Day ' + day.day_number}</Text>
+                    <Text style={styles.mutedSmall}>{day.trip_date || 'Date not set'}</Text>
+                    {!!day.notes && <Text style={styles.mutedSmall}>📝 {day.notes}</Text>}
+                  </View>
+                  {isAdmin && (
+                    <TouchableOpacity style={styles.smallButton} onPress={() => openCreateStage(day.day_number)}>
+                      <Text style={styles.smallButtonText}>＋ Add stage</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Stages in this day */}
+                {dayStages.length > 0 && (
+                  <View style={{ marginTop: 10, gap: 8 }}>
+                    <Text style={styles.stageSectionHeader}>RIDING STAGES ({dayStages.length})</Text>
+                    {dayStages.map(stage => renderStageCard(stage))}
+                  </View>
+                )}
+
+                {/* Stops in this day */}
+                {dayWaypoints.length > 0 && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={styles.stageSectionHeader}>PLANNED STOPS ({dayWaypoints.length})</Text>
+                    {dayWaypoints.map(wp => (
+                      <View key={wp.id} style={styles.dayStopRow}>
+                        <Text style={styles.dayStopText}>
+                          {wp.waypoint_type.toUpperCase()}: {wp.name}
+                          {wp.notes ? ` · 📝 ${wp.notes}` : ''}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Stays in this day */}
+                {dayStays.length > 0 && (
+                  <View style={{ marginTop: 8 }}>
+                    {dayStays.map(st => (
+                      <Text key={st.id} style={styles.dayStayText}>🏨 Overnight: {st.name}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })
+        )}
       </View>
 
       <View style={styles.card}>
@@ -484,6 +769,47 @@ export default function TripWorkspaceScreen() {
           <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void addStay()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Add accommodation'}</Text></TouchableOpacity>
         </>}
       </View>
+      <Modal visible={stageModalVisible} transparent animationType="slide" onRequestClose={() => setStageModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.section}>Add Riding Stage</Text>
+            <Text style={styles.mutedSmall}>Divide this day's ride into a focused stage with start and finish milestones.</Text>
+            
+            <Text style={styles.label}>Stage Name *</Text>
+            <TextInput style={styles.input} value={stageName} onChangeText={setStageName} placeholder="e.g. Morning Ghat Pass" placeholderTextColor={theme.subtle} />
+            
+            <Text style={styles.label}>Start Location *</Text>
+            <TextInput style={styles.input} value={stageStart} onChangeText={setStageStart} placeholder="Start city / town" placeholderTextColor={theme.subtle} />
+            
+            <Text style={styles.label}>Destination *</Text>
+            <TextInput style={styles.input} value={stageDestination} onChangeText={setStageDestination} placeholder="Destination city / town" placeholderTextColor={theme.subtle} />
+
+            <View style={styles.row}>
+              <View style={styles.half}>
+                <Text style={styles.label}>Start coords (lng, lat)</Text>
+                <TextInput style={styles.input} value={stageStartCoords} onChangeText={setStageStartCoords} placeholder="77.59, 12.97" placeholderTextColor={theme.subtle} />
+              </View>
+              <View style={styles.half}>
+                <Text style={styles.label}>Dest coords (lng, lat)</Text>
+                <TextInput style={styles.input} value={stageDestCoords} onChangeText={setStageDestCoords} placeholder="75.78, 13.31" placeholderTextColor={theme.subtle} />
+              </View>
+            </View>
+
+            <Text style={styles.label}>Assign to Day Number (1–{Math.max(days.length, 1)})</Text>
+            <TextInput style={styles.input} value={stageDayNumber} onChangeText={setStageDayNumber} keyboardType="number-pad" placeholder="1" placeholderTextColor={theme.subtle} />
+
+            <Text style={styles.label}>Road conditions & stage notes (optional)</Text>
+            <TextInput style={styles.input} value={stageNotes} onChangeText={setStageNotes} placeholder="e.g. Steep descent, hairpins, beware of oncoming buses" placeholderTextColor={theme.subtle} multiline />
+
+            <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveStage()}>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save Riding Stage'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => setStageModalVisible(false)}>
+              <Text style={styles.secondaryText}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
       <Modal visible={editTripVisible} transparent animationType="slide" onRequestClose={() => setEditTripVisible(false)}>
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
@@ -535,6 +861,22 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
   roleSelected: { borderColor: c.accent, backgroundColor: c.accentSoft },
   day: { borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 11 }, dayTitle: { color: c.text, fontWeight: '700', fontSize: 13 },
+  stageCard: { backgroundColor: c.background, borderColor: c.border, borderWidth: 1, borderRadius: 8, padding: 12, marginTop: 6 },
+  stageHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  stageTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
+  stageEndpoints: { color: c.muted, fontSize: 11, marginTop: 2 },
+  stageMetaText: { color: c.accent, fontSize: 10, fontWeight: '700', marginTop: 3 },
+  stageStatusPill: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  stageStatusText: { fontSize: 10, fontWeight: '800' },
+  stageNotes: { color: c.text, fontSize: 11, lineHeight: 15, marginTop: 6, fontStyle: 'italic' },
+  stageActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
+  stageSectionHeader: { color: c.subtle, fontSize: 10, fontWeight: '800', letterSpacing: 1, marginTop: 8, marginBottom: 4 },
+  dayStopRow: { paddingVertical: 2 },
+  dayStopText: { color: c.text, fontSize: 11 },
+  dayStayText: { color: c.accent, fontSize: 11, fontWeight: '600', marginTop: 4 },
+  remove: { color: c.danger, fontSize: 11, fontWeight: '700' },
+  half: { flex: 1 },
+  row: { flexDirection: 'row', gap: 10 },
   dangerButton: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 }, dangerText: { color: c.danger, fontWeight: '900', fontSize: 12 },
   error: { color: c.danger, marginTop: 12 }, footer: { color: c.subtle, fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 18 },
 });

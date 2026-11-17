@@ -650,3 +650,50 @@ test('live ride map renders actual GPS trail distinct from planned route', () =>
   assert.match(rideSource, /lineColor:\s*['"]#de7136['"]/);
   assert.match(rideSource, /lineColor:\s*['"]#38bdf8['"]/);
 });
+
+test('touring planner supports expanded stop categories including repair and accommodation', () => {
+  assert.ok(routeTools.WAYPOINT_META.repair);
+  assert.equal(routeTools.WAYPOINT_META.repair.icon, '🔧');
+  assert.ok(routeTools.WAYPOINT_META.accommodation);
+  assert.equal(routeTools.WAYPOINT_META.accommodation.icon, '🏨');
+  assert.ok(routeTools.EDITABLE_WAYPOINT_TYPES.includes('repair'));
+  assert.ok(routeTools.EDITABLE_WAYPOINT_TYPES.includes('accommodation'));
+
+  const points = [
+    { sequence: 0, waypoint_type: 'origin', name: 'Start', latitude: 12.97, longitude: 77.59 },
+    { sequence: 1, waypoint_type: 'repair', name: 'Tyre Mechanic', latitude: 13.00, longitude: 77.50 },
+    { sequence: 2, waypoint_type: 'accommodation', name: 'Hilltop Resort', latitude: 13.10, longitude: 77.40 },
+    { sequence: 3, waypoint_type: 'destination', name: 'Finish', latitude: 13.20, longitude: 77.30 },
+  ];
+  assert.equal(routeTools.validateRoutePoints(points), null);
+});
+
+test('trip stages migration defines atomic RPCs and cascading foreign keys', () => {
+  const migrationSource = fs.readFileSync(path.resolve('supabase/migrations/014_trip_stages.sql'), 'utf8');
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS public\.trip_stages/);
+  assert.match(migrationSource, /ride_id UUID NOT NULL REFERENCES public\.rides\(id\) ON DELETE CASCADE/);
+  assert.match(migrationSource, /trip_day_id UUID REFERENCES public\.trip_days\(id\) ON DELETE CASCADE/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.save_trip_stage/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.delete_trip_stage/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.update_stage_status/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.get_trip_stages/);
+  assert.match(migrationSource, /stage_number = v_counter/); // Renumber remaining stages contiguously
+});
+
+test('trip workspace integrates multi-day stages and touring itinerary sharing', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /get_trip_stages/);
+  assert.match(tripSource, /save_trip_stage/);
+  assert.match(tripSource, /delete_trip_stage/);
+  assert.match(tripSource, /update_stage_status/);
+  assert.match(tripSource, /renderStageCard/);
+  assert.match(tripSource, /shareItinerary/);
+  assert.match(tripSource, /Share\.share/);
+  assert.match(tripSource, /Day-by-day plan & stages/);
+});
+
+test('route workshop includes repair and accommodation stop pills', () => {
+  const routeSource = fs.readFileSync(path.resolve('mobile/app/trip/[id]/route.tsx'), 'utf8');
+  assert.match(routeSource, /openAddStop\('repair'\)/);
+  assert.match(routeSource, /openAddStop\('accommodation'\)/);
+});

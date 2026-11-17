@@ -1,4 +1,4 @@
-export type RouteWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination';
+export type RouteWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination' | 'repair' | 'accommodation';
 
 export const WAYPOINT_META: Record<RouteWaypointType, { label: string; icon: string; short: string; description: string }> = {
   origin: { label: 'Start Point', icon: '🟢', short: 'START', description: 'Journey origin' },
@@ -9,9 +9,11 @@ export const WAYPOINT_META: Record<RouteWaypointType, { label: string; icon: str
   rest: { label: 'Rest Break', icon: '☕', short: 'REST', description: 'Chai / coffee & stretch break' },
   sightseeing: { label: 'Scenic View', icon: '📸', short: 'VIEW', description: 'Attraction or scenic viewpoint' },
   meetup: { label: 'Meetup Point', icon: '📍', short: 'MEET', description: 'Rider regrouping location' },
+  repair: { label: 'Repair & Service', icon: '🔧', short: 'REPAIR', description: 'Motorcycle mechanic / puncture shop' },
+  accommodation: { label: 'Stay / Hotel', icon: '🏨', short: 'STAY', description: 'Overnight stay or campsite' },
 };
 
-export const EDITABLE_WAYPOINT_TYPES: RouteWaypointType[] = ['stop', 'fuel', 'food', 'rest', 'sightseeing', 'meetup'];
+export const EDITABLE_WAYPOINT_TYPES: RouteWaypointType[] = ['stop', 'fuel', 'food', 'rest', 'sightseeing', 'repair', 'accommodation', 'meetup'];
 
 export type RoutePoint = {
   id?: string | null;
@@ -25,6 +27,7 @@ export type RoutePoint = {
   notes?: string | null;
   is_optional?: boolean;
   trip_day_id?: string | null;
+  trip_stage_id?: string | null;
   day_number?: number | null;
 };
 

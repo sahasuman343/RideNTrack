@@ -7,7 +7,7 @@ import * as Location from 'expo-location';
 import { useRideTheme, RidePalette } from '../../src/theme';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
-type WaypointKind = 'fuel' | 'stop';
+type WaypointKind = 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'repair';
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 
 function LocationSearch({ label, placeholder, value, onChange, kind = 'place', showCurrentLocation = false }: {
@@ -379,15 +379,19 @@ export default function CreateRideScreen() {
         {stops.map((stop, index) => (
           <View key={stop.key} style={styles.stopBlock}>
             <View style={styles.stopHeader}>
-              <Text style={styles.label}>{stop.kind === 'fuel' ? 'Fuel stop' : 'Waypoint'} {index + 1}</Text>
+              <Text style={styles.label}>{stop.kind.toUpperCase()} STOP {index + 1}</Text>
               <TouchableOpacity onPress={() => setStops(current => current.filter(s => s.key !== stop.key))}><Text style={styles.remove}>Remove</Text></TouchableOpacity>
             </View>
             <LocationSearch label="Location" placeholder="Search a place to stop" value={stop.place} onChange={place => updateStop(stop.key, place)} />
           </View>
         ))}
         <View style={styles.chips}>
-          <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}><Text style={styles.addText}>＋ Add stop</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}><Text style={styles.addText}>＋ Fuel stop</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}><Text style={styles.addText}>🛑 ＋ Stop</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}><Text style={styles.addText}>⛽ ＋ Fuel</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('food')}><Text style={styles.addText}>🍽️ ＋ Food</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('rest')}><Text style={styles.addText}>☕ ＋ Rest</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('sightseeing')}><Text style={styles.addText}>📸 ＋ Scenic</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={() => addStop('repair')}><Text style={styles.addText}>🔧 ＋ Repair</Text></TouchableOpacity>
         </View>
         {days.length > 0 ? <Text style={styles.helper}>{days.length} itinerary day(s) will be created automatically.</Text> : null}
       </View>

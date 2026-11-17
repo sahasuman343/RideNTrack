@@ -13,6 +13,10 @@ BEGIN
     'public.save_trip_route(uuid,jsonb,jsonb)'::regprocedure,
     'public.delete_trip(uuid)'::regprocedure,
     'public.leave_ride(uuid)'::regprocedure,
+    'public.save_trip_stage(uuid,jsonb)'::regprocedure,
+    'public.delete_trip_stage(uuid,uuid)'::regprocedure,
+    'public.update_stage_status(uuid,text)'::regprocedure,
+    'public.get_trip_stages(uuid)'::regprocedure,
     'public.add_trip_stay(uuid,jsonb)'::regprocedure,
     'public.create_trip_invitation(uuid,text,text,integer)'::regprocedure,
     'public.accept_trip_invitation(uuid)'::regprocedure,
@@ -402,5 +406,90 @@ BEGIN
   -- Cleanup
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   PERFORM public.delete_trip(test_ride_id);
+END $$;
+
+DO $$
+DECLARE
+  stage_trip_id UUID;
+  stage_1_id UUID;
+  stage_2_id UUID;
+  owner_id UUID := '11111111-1111-4111-8111-111111111111';
+  member_id UUID := '22222222-2222-4222-8222-222222222222';
+  stage_count INTEGER;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  stage_trip_id := public.create_trip_plan(
+    '{"name":"Stage test fixture","trip_type":"touring","visibility":"invite_only","origin":"Bengaluru","destination":"Gokarna","origin_coords":[77.59,12.97],"destination_coords":[74.31,14.54]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bengaluru","latitude":12.97,"longitude":77.59},{"sequence":1,"waypoint_type":"destination","name":"Gokarna","latitude":14.54,"longitude":74.31}]'::jsonb,
+    '[{"day_number":1,"title":"Day 1: Ghats"},{"day_number":2,"title":"Day 2: Coast"}]'::jsonb,
+    NULL
+  );
+  INSERT INTO public.ride_participants(ride_id, user_id, role, is_active)
+  VALUES (stage_trip_id, member_id, 'rider', true);
+
+  -- 1. Owner can create riding stages
+  stage_1_id := public.save_trip_stage(stage_trip_id, '{
+    "name": "Stage 1: Bengaluru to Hassan",
+    "start_name": "Bengaluru",
+    "destination_name": "Hassan",
+    "start_coords": [77.59, 12.97],
+    "destination_coords": [76.10, 13.00],
+    "day_number": 1,
+    "notes": "Smooth expressway leg"
+  }'::jsonb);
+
+  stage_2_id := public.save_trip_stage(stage_trip_id, '{
+    "name": "Stage 2: Hassan to Mangaluru",
+    "start_name": "Hassan",
+    "destination_name": "Mangaluru",
+    "start_coords": [76.10, 13.00],
+    "destination_coords": [74.85, 12.91],
+    "day_number": 1,
+    "notes": "Shiradi ghat section"
+  }'::jsonb);
+
+  IF stage_1_id IS NULL OR stage_2_id IS NULL THEN
+    RAISE EXCEPTION 'failed to create trip stages';
+  END IF;
+
+  SELECT count(*) INTO stage_count FROM public.get_trip_stages(stage_trip_id);
+  IF stage_count <> 2 THEN
+    RAISE EXCEPTION 'expected 2 stages, found %', stage_count;
+  END IF;
+
+  -- 2. Non-owner cannot create or delete stages
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  BEGIN
+    PERFORM public.save_trip_stage(stage_trip_id, '{"name":"Hacked","start_name":"A","destination_name":"B","start_coords":[77,12],"destination_coords":[78,13]}'::jsonb);
+    RAISE EXCEPTION 'member should not be permitted to create stage';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  BEGIN
+    PERFORM public.delete_trip_stage(stage_trip_id, stage_1_id);
+    RAISE EXCEPTION 'member should not be permitted to delete stage';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  -- 3. Participant CAN update stage status
+  PERFORM public.update_stage_status(stage_1_id, 'in_progress');
+  IF NOT EXISTS (SELECT 1 FROM public.trip_stages WHERE id=stage_1_id AND status='in_progress') THEN
+    RAISE EXCEPTION 'failed to update stage status';
+  END IF;
+
+  -- 4. Owner can delete a stage and remaining stages renumber contiguously
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip_stage(stage_trip_id, stage_1_id);
+
+  SELECT stage_number INTO stage_count FROM public.trip_stages WHERE id=stage_2_id;
+  IF stage_count <> 1 THEN
+    RAISE EXCEPTION 'expected stage 2 to renumber to 1 after stage 1 deletion, got %', stage_count;
+  END IF;
+
+  -- 5. Cascade cleanup: deleting trip removes all associated stages
+  PERFORM public.delete_trip(stage_trip_id);
+  IF EXISTS (SELECT 1 FROM public.trip_stages WHERE ride_id=stage_trip_id) THEN
+    RAISE EXCEPTION 'trip deletion did not cascade to trip_stages';
+  END IF;
 END $$;
 RESET ROLE;

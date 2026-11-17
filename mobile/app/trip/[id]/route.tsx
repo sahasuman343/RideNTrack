@@ -839,6 +839,12 @@ export default function RouteEditorScreen() {
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('sightseeing')}>
               <Text style={styles.addPillText}>📸 ＋ Scenic</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('repair')}>
+              <Text style={styles.addPillText}>🔧 ＋ Repair</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('accommodation')}>
+              <Text style={styles.addPillText}>🏨 ＋ Stay</Text>
+            </TouchableOpacity>
           </View>
         </View>
 

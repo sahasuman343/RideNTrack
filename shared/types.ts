@@ -34,7 +34,7 @@ export interface Ride {
   created_at: string;
 }
 
-export type TripWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination';
+export type TripWaypointType = 'origin' | 'meetup' | 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'destination' | 'repair' | 'accommodation';
 export interface TripWaypoint {
   id: string;
   ride_id: string;
@@ -49,6 +49,29 @@ export interface TripWaypoint {
   is_optional: boolean;
   planned_arrival?: string | null;
   planned_departure?: string | null;
+  trip_day_id?: string | null;
+  trip_stage_id?: string | null;
+}
+
+export type StageStatus = 'planned' | 'in_progress' | 'completed' | 'skipped';
+
+export interface TripStage {
+  id: string;
+  ride_id: string;
+  trip_day_id?: string | null;
+  day_number?: number | null;
+  stage_number: number;
+  name: string;
+  start_name: string;
+  destination_name: string;
+  start_coords: [number, number];
+  destination_coords: [number, number];
+  route_geometry?: { type: 'LineString'; coordinates: [number, number][] } | any;
+  estimated_distance_meters?: number | null;
+  estimated_duration_seconds?: number | null;
+  notes?: string | null;
+  status: StageStatus;
+  created_at: string;
 }
 
 export interface TripDay {
