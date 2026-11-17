@@ -265,4 +265,8 @@ export function buildGoogleMapsNavigationUrl(destination: {
 }
 
 export * from './touring';
+export * from './journal';
+export * from './premium';
+
+
 

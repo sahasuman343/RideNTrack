@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Alert, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calculateMotorcycleFuelPlan, generateTouringAdvisories, getWeatherConditionFromCode, type RouteWeatherPoint } from '@ridentrack/shared';
+import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calculateMotorcycleFuelPlan, generateTouringAdvisories, getWeatherConditionFromCode, type RouteWeatherPoint, type TripJournalEntry, type JournalPhoto, formatShareableRideCard } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
@@ -62,6 +62,16 @@ export default function TripWorkspaceScreen() {
   const [stageDestCoords, setStageDestCoords] = useState('');
   const [stageDayNumber, setStageDayNumber] = useState('1');
   const [stageNotes, setStageNotes] = useState('');
+
+  const [journalEntry, setJournalEntry] = useState<TripJournalEntry | null>(null);
+  const [journalModalVisible, setJournalModalVisible] = useState(false);
+  const [journalTitle, setJournalTitle] = useState('');
+  const [journalNotes, setJournalNotes] = useState('');
+  const [journalHighlights, setJournalHighlights] = useState('');
+  const [journalRating, setJournalRating] = useState('5');
+  const [journalPhotoUrl, setJournalPhotoUrl] = useState('');
+  const [journalPhotoCaption, setJournalPhotoCaption] = useState('');
+  const [journalPhotos, setJournalPhotos] = useState<JournalPhoto[]>([]);
 
   const [weatherPoints, setWeatherPoints] = useState<RouteWeatherPoint[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
@@ -167,12 +177,95 @@ export default function TripWorkspaceScreen() {
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
+      if (user?.id) {
+        const { data: entry } = await supabase
+          .from('trip_journal_entries')
+          .select('*')
+          .eq('ride_id', id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (generation === loadGeneration.current && entry) {
+          setJournalEntry(entry as TripJournalEntry);
+        }
+      }
     } catch (e: any) { if (generation === loadGeneration.current) setError(e?.message || 'Could not load this trip.'); }
     finally { if (generation === loadGeneration.current) setLoading(false); }
-  }, [id]);
+  }, [id, user?.id]);
 
   useFocusEffect(useCallback(() => { void load(); return () => { ++loadGeneration.current; }; }, [load]));
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);
+
+  function openJournalEditor() {
+    setJournalTitle(journalEntry?.title || trip?.name || 'Motorcycle Tour');
+    setJournalNotes(journalEntry?.notes || '');
+    setJournalHighlights(journalEntry?.highlights || '');
+    setJournalRating(journalEntry?.rating != null ? String(journalEntry.rating) : '5');
+    setJournalPhotos(Array.isArray(journalEntry?.photos) ? journalEntry.photos : []);
+    setJournalPhotoUrl('');
+    setJournalPhotoCaption('');
+    setJournalModalVisible(true);
+  }
+
+  function addPhotoToJournal() {
+    if (!journalPhotoUrl.trim()) {
+      Alert.alert('Photo URL required', 'Enter a valid image URL.');
+      return;
+    }
+    setJournalPhotos(prev => [...prev, {
+      url: journalPhotoUrl.trim(),
+      caption: journalPhotoCaption.trim() || undefined,
+      taken_at: new Date().toISOString(),
+    }]);
+    setJournalPhotoUrl('');
+    setJournalPhotoCaption('');
+  }
+
+  async function saveJournal() {
+    if (!journalTitle.trim()) {
+      Alert.alert('Title required', 'Please enter a title for your journal entry.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: saveError } = await supabase.rpc('save_trip_journal_entry', {
+        p_ride_id: id,
+        p_title: journalTitle.trim(),
+        p_notes: journalNotes.trim() || null,
+        p_highlights: journalHighlights.trim() || null,
+        p_rating: Number(journalRating) || 5,
+        p_photos: journalPhotos,
+      });
+      if (saveError) throw saveError;
+      setJournalModalVisible(false);
+      await load();
+      Alert.alert('Journal saved', 'Your touring recollections and photos have been preserved.');
+    } catch (e: any) {
+      Alert.alert('Could not save journal', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function shareRideCard() {
+    if (!trip) return;
+    const distKm = Math.round(((trip.estimated_distance_meters || 0) / 1000) * 10) / 10;
+    const cardText = formatShareableRideCard({
+      tripName: trip.name,
+      riderName: profile?.display_name || user?.email || 'Rider',
+      machine: profile?.motorcycle_make ? `${profile.motorcycle_make} ${profile.motorcycle_model || ''}` : undefined,
+      distanceKm: distKm,
+      origin: trip.origin,
+      destination: trip.destination,
+      stopsCount: waypoints.length,
+      rating: journalEntry?.rating ?? 5,
+      highlights: journalEntry?.highlights || (waypoints.length > 2 ? `${waypoints[1]?.name} and intermediate stops` : undefined),
+    });
+    try {
+      await Share.share({ message: cardText });
+    } catch {
+      Alert.alert('Share error', 'Could not open sharing options.');
+    }
+  }
 
   function openTripEditor() {
     if (!trip) return;
@@ -715,6 +808,57 @@ export default function TripWorkspaceScreen() {
         )}
       </View>
 
+      {/* Ride Journal & Travel Memories */}
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>📖 Ride Journal & Memories</Text>
+          <TouchableOpacity style={styles.smallButton} onPress={openJournalEditor}>
+            <Text style={styles.smallButtonText}>{journalEntry ? 'Edit journal' : '＋ Add entry'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {journalEntry ? (
+          <View style={{ marginTop: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.pointName}>{journalEntry.title}</Text>
+              <Text style={{ color: '#EAB308', fontSize: 13, fontWeight: '800' }}>
+                {'★'.repeat(journalEntry.rating || 5)}{'☆'.repeat(5 - (journalEntry.rating || 5))}
+              </Text>
+            </View>
+            {!!journalEntry.highlights && (
+              <Text style={[styles.mutedSmall, { color: theme.accent, fontWeight: '700', marginTop: 4 }]}>
+                ✨ {journalEntry.highlights}
+              </Text>
+            )}
+            {!!journalEntry.notes && (
+              <Text style={[styles.mutedSmall, { marginTop: 6, fontStyle: 'italic' }]}>
+                “{journalEntry.notes}”
+              </Text>
+            )}
+            {Array.isArray(journalEntry.photos) && journalEntry.photos.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
+                {journalEntry.photos.map((p, i) => (
+                  <View key={i} style={{ marginRight: 8, borderRadius: 8, overflow: 'hidden' }}>
+                    <Image source={{ uri: p.url }} style={{ width: 100, height: 80, borderRadius: 8, backgroundColor: theme.surfaceRaised }} />
+                    {!!p.caption && (
+                      <Text numberOfLines={1} style={[styles.mutedSmall, { width: 100, fontSize: 9, marginTop: 2 }]}>
+                        {p.caption}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        ) : (
+          <Text style={styles.mutedSmall}>Record your memories, route highlights, ratings and photos for this journey.</Text>
+        )}
+
+        <TouchableOpacity style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]} onPress={() => void shareRideCard()}>
+          <Text style={styles.secondaryText}>📱 Share Ride Card (WhatsApp / Instagram)</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
         {regroupPoints.map(point => <View key={point.id} style={styles.riderRow}>
@@ -971,6 +1115,52 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+      <Modal visible={journalModalVisible} transparent animationType="slide" onRequestClose={() => setJournalModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.section}>Trip Journal & Photos</Text>
+            <Text style={styles.mutedSmall}>Preserve your personal memories, road observations, and photo links for this tour.</Text>
+            <Text style={styles.label}>Journal title</Text>
+            <TextInput style={styles.input} value={journalTitle} onChangeText={setJournalTitle} placeholder="e.g. Monsoon Ghats Ride" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>Touring highlights</Text>
+            <TextInput style={styles.input} value={journalHighlights} onChangeText={setJournalHighlights} placeholder="e.g. Winding twisties, chai stall at mountain pass" placeholderTextColor={theme.subtle} />
+            <Text style={styles.label}>Trip rating (1 to 5 stars)</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginVertical: 6 }}>
+              {['1', '2', '3', '4', '5'].map(star => (
+                <TouchableOpacity
+                  key={star}
+                  style={[styles.smallButton, journalRating === star && styles.roleSelected]}
+                  onPress={() => setJournalRating(star)}
+                >
+                  <Text style={[styles.smallButtonText, { fontSize: 13 }]}>{star} ★</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Personal recollections & road notes</Text>
+            <TextInput
+              style={[styles.input, { height: 75, textAlignVertical: 'top' }]}
+              value={journalNotes}
+              onChangeText={setJournalNotes}
+              multiline
+              placeholder="Record road surface, memorable encounters, weather..."
+              placeholderTextColor={theme.subtle}
+            />
+            <Text style={[styles.label, { marginTop: 14 }]}>Attach photo (image URL)</Text>
+            <TextInput style={styles.input} value={journalPhotoUrl} onChangeText={setJournalPhotoUrl} autoCapitalize="none" keyboardType="url" placeholder="https://... photo link" placeholderTextColor={theme.subtle} />
+            <TextInput style={styles.input} value={journalPhotoCaption} onChangeText={setJournalPhotoCaption} placeholder="Caption (optional)" placeholderTextColor={theme.subtle} />
+            <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={addPhotoToJournal}>
+              <Text style={styles.secondaryText}>＋ Attach photo ({journalPhotos.length} attached)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveJournal()}>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save journal entry'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={() => setJournalModalVisible(false)}>
+              <Text style={styles.secondaryText}>Cancel</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       </Modal>

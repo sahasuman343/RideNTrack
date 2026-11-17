@@ -1,13 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Ride } from '@ridentrack/shared';
+import { Ride, type RiderAnalytics } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 
 export default function MyRidesScreen() {
   const [rides, setRides] = useState<Ride[]>([]);
+  const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
@@ -18,15 +19,21 @@ export default function MyRidesScreen() {
 
   async function fetchRides() {
     if (!user) return;
-    const { data } = await supabase
-      .from('ride_participants')
-      .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('joined_at', { ascending: false });
+    const [ridesRes, analyticsRes] = await Promise.all([
+      supabase
+        .from('ride_participants')
+        .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('joined_at', { ascending: false }),
+      supabase.rpc('get_rider_analytics'),
+    ]);
 
-    if (data) {
-      setRides(data.map((p: any) => p.rides).filter(Boolean));
+    if (ridesRes.data) {
+      setRides(ridesRes.data.map((p: any) => p.rides).filter(Boolean));
+    }
+    if (analyticsRes.data) {
+      setAnalytics(analyticsRes.data as RiderAnalytics);
     }
   }
 
@@ -60,6 +67,38 @@ export default function MyRidesScreen() {
           <Text style={styles.actionSecondaryText}>Join a ride ↗</Text>
         </TouchableOpacity>
       </View>
+
+      {analytics && (
+        <View style={styles.analyticsCard}>
+          <View style={styles.analyticsStats}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.total_distance_km} km</Text>
+              <Text style={styles.statCaption}>TOTAL DISTANCE</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.total_hours} hrs</Text>
+              <Text style={styles.statCaption}>RIDING HOURS</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.completed_trips}</Text>
+              <Text style={styles.statCaption}>TOURS DONE</Text>
+            </View>
+          </View>
+          {Array.isArray(analytics.milestones) && analytics.milestones.length > 0 && (
+            <View style={styles.milestonesRow}>
+              {analytics.milestones.map(m => (
+                <View key={m.id} style={styles.milestonePill}>
+                  <Text style={styles.milestoneIcon}>{m.icon}</Text>
+                  <Text style={styles.milestoneTitle}>{m.title}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {rides.length}</Text>
       {rides.length === 0 ? (
         <View style={styles.empty}>
@@ -118,4 +157,14 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 11, borderTopWidth: 1, borderTopColor: c.border },
   code: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   openLabel: { color: c.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  analyticsCard: { marginHorizontal: 22, marginBottom: 18, backgroundColor: c.surface, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 14 },
+  analyticsStats: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  statItem: { alignItems: 'center' },
+  statNumber: { color: c.text, fontSize: 18, fontWeight: '900' },
+  statCaption: { color: c.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 },
+  statDivider: { width: 1, height: 28, backgroundColor: c.border },
+  milestonesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border },
+  milestonePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surfaceRaised, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 4 },
+  milestoneIcon: { fontSize: 12 },
+  milestoneTitle: { color: c.text, fontSize: 11, fontWeight: '700' },
 });

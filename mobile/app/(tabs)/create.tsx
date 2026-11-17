@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { canCreateMoreTrips, canAddMoreWaypoints, PLAN_LIMITS, PAYMENT_CONFIG } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
@@ -243,6 +244,17 @@ export default function CreateRideScreen() {
   }, [startDate, endDate]);
 
   function addStop(kind: WaypointKind = 'stop') {
+    if (!canAddMoreWaypoints(stops.length, 'free')) {
+      Alert.alert(
+        '⭐️ Pro Tourer Stop Limit',
+        `Free tier allows up to ${PLAN_LIMITS.free.maxWaypointsPerTrip} stops per trip. Upgrade to Pro Tourer for up to ${PLAN_LIMITS.pro_tourer.maxWaypointsPerTrip} stops per expedition.`,
+        [
+          { text: 'Keep Current', style: 'cancel' },
+          { text: 'Learn More', onPress: () => Alert.alert('Pro Tourer Upgrade', 'Upgrade to Pro Tourer for ₹199/month for unlimited multi-day routes.') },
+        ]
+      );
+      return;
+    }
     if (stops.length + 2 + (meetup ? 1 : 0) >= 25) {
       Alert.alert('Route point limit', 'Mapbox driving directions support up to 25 points, including origin and destination.');
       return;
@@ -269,6 +281,27 @@ export default function CreateRideScreen() {
     }
     setLoading(true);
     try {
+      // Check free tier limits
+      const { count, error: countError } = await supabase
+        .from('rides')
+        .select('id', { count: 'exact', head: true })
+        .eq('admin_id', user.id)
+        .neq('status', 'completed');
+      if (!countError && typeof count === 'number' && !canCreateMoreTrips(count, 'free')) {
+        Alert.alert(
+          '⭐️ RideNTrack Pro Tourer Limit',
+          `Free tier includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for unlimited expeditions, topographical contours, and weather radar.`,
+          [
+            { text: 'Manage Trips', onPress: () => router.push('/(tabs)') },
+            {
+              text: 'Upgrade to Pro',
+              onPress: () => Alert.alert('Payment Gateway', 'Razorpay checkout will launch in production build. Test mode: Plan benefits unlocked!'),
+            },
+          ]
+        );
+        setLoading(false);
+        return;
+      }
       const ordered = [
         { place: origin, type: 'origin' },
         ...(meetup ? [{ place: meetup, type: 'meetup' }] : []),

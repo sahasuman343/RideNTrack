@@ -851,5 +851,71 @@ test('trip workspace renders touring intelligence, motorcycle fuel advisory, and
   assert.match(tripSource, /Touring Advisories & Safety/);
 });
 
+test('formatShareableRideCard produces formatted text for social sharing', () => {
+  const card = shared.formatShareableRideCard({
+    tripName: 'Western Ghats Monsoon Loop',
+    riderName: 'Vikram',
+    machine: 'Himalayan 450',
+    distanceKm: 340,
+    origin: 'Bengaluru',
+    destination: 'Chikmagalur',
+    stopsCount: 4,
+    rating: 5,
+    highlights: 'Misty hairpins & coffee plantation trail',
+  });
+  assert.match(card, /RIDEN TRACK JOURNEY CARD/);
+  assert.match(card, /Western Ghats Monsoon Loop ★★★★★/);
+  assert.match(card, /Rider: Vikram/);
+  assert.match(card, /Machine: Himalayan 450/);
+  assert.match(card, /340 km · 4 stops/);
+  assert.match(card, /Misty hairpins & coffee plantation trail/);
+});
+
+test('journal and analytics migration defines atomic journal RPC and rider statistics', () => {
+  const migrationSource = fs.readFileSync(path.resolve('supabase/migrations/017_ride_journal_photos_and_analytics.sql'), 'utf8');
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS public\.trip_journal_entries/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.save_trip_journal_entry/);
+  assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.get_rider_analytics/);
+  assert.match(migrationSource, /century_rider/);
+  assert.match(migrationSource, /first_expedition/);
+  assert.match(migrationSource, /veteran_tourer/);
+});
+
+test('plan limits and payment architecture config enforce free vs pro tourer boundaries gracefully', () => {
+  assert.equal(shared.PLAN_LIMITS.free.maxActiveTrips, 5);
+  assert.equal(shared.PLAN_LIMITS.pro_tourer.maxActiveTrips, 100);
+  assert.equal(shared.canCreateMoreTrips(4, 'free'), true);
+  assert.equal(shared.canCreateMoreTrips(5, 'free'), false);
+  assert.equal(shared.canCreateMoreTrips(5, 'pro_tourer'), true);
+
+  assert.equal(shared.canAddMoreWaypoints(14, 'free'), true);
+  assert.equal(shared.canAddMoreWaypoints(15, 'free'), false);
+  assert.equal(shared.canAddMoreWaypoints(15, 'pro_tourer'), true);
+
+  assert.equal(shared.PAYMENT_CONFIG.provider, 'razorpay');
+  assert.equal(shared.PAYMENT_CONFIG.currency, 'INR');
+  assert.equal(shared.PAYMENT_CONFIG.monthlyPlanPriceInr, 199);
+});
+
+test('my rides screen integrates rider analytics and milestones banner', () => {
+  const myRidesSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  assert.match(myRidesSource, /get_rider_analytics/);
+  assert.match(myRidesSource, /analyticsCard/);
+  assert.match(myRidesSource, /TOTAL DISTANCE/);
+  assert.match(myRidesSource, /RIDING HOURS/);
+  assert.match(myRidesSource, /TOURS DONE/);
+  assert.match(myRidesSource, /milestonePill/);
+});
+
+test('trip workspace renders journal entries, photos, and shareable ride card action', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /trip_journal_entries/);
+  assert.match(tripSource, /save_trip_journal_entry/);
+  assert.match(tripSource, /Ride Journal & Memories/);
+  assert.match(tripSource, /Share Ride Card \(WhatsApp \/ Instagram\)/);
+  assert.match(tripSource, /formatShareableRideCard/);
+});
+
+
 
 
