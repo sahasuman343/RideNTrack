@@ -25,7 +25,9 @@ BEGIN
     'public.update_group_safety_settings(uuid,integer,integer)'::regprocedure,
     'public.add_regroup_point(uuid,text,double precision,double precision,integer,timestamp with time zone,text)'::regprocedure,
     'public.confirm_regroup_arrival(uuid)'::regprocedure,
-    'public.get_regroup_points(uuid)'::regprocedure
+    'public.get_regroup_points(uuid)'::regprocedure,
+    'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
+    'public.get_rider_analytics(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -378,6 +380,7 @@ DECLARE
   test_ride_id UUID;
   member_id UUID := '22222222-2222-4222-8222-222222222222';
   owner_id UUID := '11111111-1111-4111-8111-111111111111';
+  v_code TEXT;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   test_ride_id := public.create_trip_plan(
@@ -386,10 +389,12 @@ BEGIN
     '[{"day_number":1,"title":"Day 1"}]'::jsonb,
     NULL
   );
-  INSERT INTO public.ride_participants(ride_id, user_id, role, is_active)
-  VALUES (test_ride_id, member_id, 'rider', true);
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code(v_code);
 
   -- Owner cannot leave own ride
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   BEGIN
     PERFORM public.leave_ride(test_ride_id);
     RAISE EXCEPTION 'owner should not be permitted to leave own ride';
@@ -415,6 +420,7 @@ DECLARE
   stage_2_id UUID;
   owner_id UUID := '11111111-1111-4111-8111-111111111111';
   member_id UUID := '22222222-2222-4222-8222-222222222222';
+  v_stage_code TEXT;
   stage_count INTEGER;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
@@ -424,8 +430,10 @@ BEGIN
     '[{"day_number":1,"title":"Day 1: Ghats"},{"day_number":2,"title":"Day 2: Coast"}]'::jsonb,
     NULL
   );
-  INSERT INTO public.ride_participants(ride_id, user_id, role, is_active)
-  VALUES (stage_trip_id, member_id, 'rider', true);
+  SELECT ride_code INTO v_stage_code FROM public.rides WHERE id = stage_trip_id;
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code(v_stage_code);
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
 
   -- 1. Owner can create riding stages
   stage_1_id := public.save_trip_stage(stage_trip_id, '{
@@ -491,5 +499,60 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.trip_stages WHERE ride_id=stage_trip_id) THEN
     RAISE EXCEPTION 'trip deletion did not cascade to trip_stages';
   END IF;
+END $$;
+
+DO $$
+DECLARE
+  journal_trip_id UUID;
+  journal_id UUID;
+  owner_id UUID := '11111111-1111-4111-8111-111111111111';
+  outsider_id UUID := '33333333-3333-4333-8333-333333333333';
+  analytics JSONB;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  journal_trip_id := public.create_trip_plan(
+    '{"name":"Journal test fixture","trip_type":"touring","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[{"day_number":1,"title":"Day 1"}]'::jsonb,
+    NULL
+  );
+
+  -- 1. Owner can save journal entry
+  journal_id := public.save_trip_journal_entry(
+    journal_trip_id,
+    'Epic Coastal Ride',
+    'Great weather, smooth roads',
+    'Sunset at the cliff',
+    5,
+    '[{"id":"photo1","url":"https://example.com/p1.jpg","caption":"Sunset"}]'::jsonb
+  );
+  IF journal_id IS NULL THEN
+    RAISE EXCEPTION 'failed to save trip journal entry';
+  END IF;
+
+  -- 2. Outsider cannot save journal entry on private trip
+  PERFORM set_config('request.jwt.claim.sub', outsider_id::text, true);
+  BEGIN
+    PERFORM public.save_trip_journal_entry(
+      journal_trip_id,
+      'Intruder entry',
+      'Should fail',
+      NULL,
+      1,
+      '[]'::jsonb
+    );
+    RAISE EXCEPTION 'outsider was permitted to save journal entry on private trip';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  -- 3. Analytics RPC works for authenticated user
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  analytics := public.get_rider_analytics(owner_id);
+  IF analytics IS NULL OR NOT (analytics ? 'total_distance_km') OR NOT (analytics ? 'milestones') THEN
+    RAISE EXCEPTION 'get_rider_analytics failed to return expected metrics';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(journal_trip_id);
 END $$;
 RESET ROLE;

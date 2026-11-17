@@ -204,7 +204,7 @@ CREATE OR REPLACE FUNCTION public.update_stage_status(
 )
 RETURNS VOID
 LANGUAGE plpgsql
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE

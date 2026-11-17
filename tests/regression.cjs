@@ -676,6 +676,7 @@ test('trip stages migration defines atomic RPCs and cascading foreign keys', () 
   assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.save_trip_stage/);
   assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.delete_trip_stage/);
   assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.update_stage_status/);
+  assert.match(migrationSource, /SECURITY DEFINER/);
   assert.match(migrationSource, /CREATE OR REPLACE FUNCTION public\.get_trip_stages/);
   assert.match(migrationSource, /stage_number = v_counter/); // Renumber remaining stages contiguously
 });
@@ -914,6 +915,20 @@ test('trip workspace renders journal entries, photos, and shareable ride card ac
   assert.match(tripSource, /Ride Journal & Memories/);
   assert.match(tripSource, /Share Ride Card \(WhatsApp \/ Instagram\)/);
   assert.match(tripSource, /formatShareableRideCard/);
+});
+
+test('db-regression script tests all RPC privileges and avoids unprivileged direct inserts into ride_participants', () => {
+  const dbRegressionSource = fs.readFileSync(path.resolve('tests/db-regression.sql'), 'utf8');
+  assert.match(dbRegressionSource, /save_trip_journal_entry/);
+  assert.match(dbRegressionSource, /get_rider_analytics/);
+  assert.match(dbRegressionSource, /update_stage_status/);
+  assert.match(dbRegressionSource, /join_ride_by_code/);
+  // Ensure no unprivileged direct inserts into ride_participants outside of the negative security test (which asserts failure)
+  const nonNegativeDirectInserts = dbRegressionSource.split('\n').filter(line =>
+    line.includes('INSERT INTO public.ride_participants') && !dbRegressionSource.includes('direct join allowed')
+  );
+  // Direct insert should only exist in the test asserting that direct insert is rejected
+  assert.equal(dbRegressionSource.match(/INSERT INTO public\.ride_participants/g)?.length, 1);
 });
 
 
