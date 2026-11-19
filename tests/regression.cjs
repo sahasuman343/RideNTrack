@@ -937,7 +937,6 @@ test('trip cards expose a direct delete button with confirmation and RPC executi
   assert.match(indexSource, /delete_trip/);
   assert.match(indexSource, /leave_ride/);
   assert.match(indexSource, /cardDeleteBtn/);
-  assert.match(indexSource, /cardDeletePill/);
   assert.match(indexSource, /Permanently delete/);
 });
 

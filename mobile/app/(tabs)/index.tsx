@@ -200,21 +200,7 @@ export default function MyRidesScreen() {
               <Text style={styles.route}>{item.origin} → {item.destination}</Text>
               <View style={styles.cardFooter}>
                 <Text style={styles.code}>RIDE CODE  {item.ride_code}</Text>
-                <View style={styles.cardFooterActions}>
-                  <TouchableOpacity
-                    style={styles.cardDeletePill}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${item.name}`}
-                    disabled={deletingRideId === item.id}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      handleDeleteTrip(item);
-                    }}
-                  >
-                    <Text style={styles.cardDeletePillText}>Delete</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.openLabel}>OPEN JOURNEY  ↗</Text>
-                </View>
+                <Text style={styles.openLabel}>OPEN JOURNEY  ↗</Text>
               </View>
             </TouchableOpacity>
           )}
@@ -250,9 +236,6 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   route: { color: c.muted, fontSize: 13, marginTop: 13, lineHeight: 20 },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 11, borderTopWidth: 1, borderTopColor: c.border },
-  cardFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardDeletePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, backgroundColor: 'rgba(239, 68, 68, 0.12)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
-  cardDeletePillText: { color: c.danger, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   code: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   openLabel: { color: c.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   analyticsCard: { marginHorizontal: 22, marginBottom: 18, backgroundColor: c.surface, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 14 },
