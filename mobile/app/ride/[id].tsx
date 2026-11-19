@@ -639,7 +639,7 @@ export default function LiveRideScreen() {
     )}
 
     {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
-    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom,16) }]}>
+    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
       <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
       {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
       {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
@@ -721,8 +721,85 @@ export default function LiveRideScreen() {
           <Text style={s.text}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
         </TouchableOpacity>}
       </View>}
-      <View style={s.actions}>{active ? <><TouchableOpacity style={s.secondary} onPress={() => setSharing(v => !v)}><Text style={s.text}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text></TouchableOpacity>{tracking !== 'background' && sharing && <TouchableOpacity style={s.secondary} onPress={() => void enableBackgroundGps()}><Text style={s.text}>{backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}</Text></TouchableOpacity>}<TouchableOpacity style={s.secondary} disabled={!position} onPress={() => void shareLiveLocation()} accessibilityLabel="Share live location with contact"><Text style={s.text}>Share</Text></TouchableOpacity><TouchableOpacity style={[s.primary,(!position || isStale(position.timestamp,now)) && s.disabled]} disabled={busy || !position || isStale(position.timestamp,now)} onPress={() => setModal(true)}><Text style={s.buttonText}>Alert</Text></TouchableOpacity></> : admin && ride.status === 'planned' ? <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}><Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text></TouchableOpacity> : <Text style={s.muted}>{ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}</Text>}
-      {admin && active && <TouchableOpacity accessibilityLabel="End ride for everyone" style={s.endButton} disabled={busy} onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [{ text: 'Keep riding',style: 'cancel' },{ text: 'End ride',style: 'destructive',onPress: () => void changeStatus('completed') }])}><Text style={s.endText}>End</Text></TouchableOpacity>}</View>
+      {active ? (
+        <View style={s.activeActionsContainer}>
+          <View style={s.actionsRow}>
+            <TouchableOpacity
+              style={s.actionButton}
+              onPress={() => setSharing(v => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
+            >
+              <Text style={s.actionButtonText} numberOfLines={1}>
+                {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.alertButton, (!position || isStale(position.timestamp, now)) && s.disabled]}
+              disabled={busy || !position || isStale(position.timestamp, now)}
+              onPress={() => setModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Broadcast alert to group"
+            >
+              <Text style={s.alertButtonText} numberOfLines={1}>🚨 Alert</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.actionButton}
+              disabled={!position}
+              onPress={() => void shareLiveLocation()}
+              accessibilityRole="button"
+              accessibilityLabel="Share live location with contact"
+            >
+              <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
+            </TouchableOpacity>
+          </View>
+
+          {((tracking !== 'background' && sharing) || (admin && active)) && (
+            <View style={s.subActionsRow}>
+              {tracking !== 'background' && sharing && (
+                <TouchableOpacity
+                  style={[s.subActionButton, (admin && active) ? { flex: 1 } : { width: '100%' }]}
+                  onPress={() => void enableBackgroundGps()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Enable background GPS tracking"
+                >
+                  <Text style={s.subActionText} numberOfLines={1}>
+                    📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {admin && active && (
+                <TouchableOpacity
+                  accessibilityLabel="End ride for everyone"
+                  style={[s.endRideButton, (tracking !== 'background' && sharing) ? { flex: 1 } : { width: '100%' }]}
+                  disabled={busy}
+                  onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
+                    { text: 'Keep riding', style: 'cancel' },
+                    { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
+                  ])}
+                >
+                  <Text style={s.endRideText}>🏁 End Ride</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+      ) : admin && ride.status === 'planned' ? (
+        <View style={s.actions}>
+          <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
+            <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={s.actions}>
+          <Text style={s.muted}>
+            {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
+          </Text>
+        </View>
+      )}
     </View>
     <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
     <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
@@ -737,7 +814,24 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:c.border},avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},avatarRiding:{backgroundColor:c.green},avatarStopped:{backgroundColor:'#EAB308'},avatarCompleted:{backgroundColor:c.accent},stale:{backgroundColor:c.subtle},grow:{flex:1},
   statusPill:{paddingHorizontal:6,paddingVertical:2,borderRadius:6},statusPillText:{fontSize:10,fontWeight:'700'},statusPillRiding:{backgroundColor:c.greenSoft},statusPillTextRiding:{color:c.green,fontSize:10,fontWeight:'700'},statusPillStopped:{backgroundColor:'#FEF9C3'},statusPillTextStopped:{color:'#854D0E',fontSize:10,fontWeight:'700'},statusPillDisconnected:{backgroundColor:c.surfaceRaised},statusPillTextDisconnected:{color:c.muted,fontSize:10,fontWeight:'700'},statusPillCompleted:{backgroundColor:c.accentSoft},statusPillTextCompleted:{color:c.accent,fontSize:10,fontWeight:'700'},
   navButton:{backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center',marginBottom:10},
-  actions:{flexDirection:'row',gap:8,alignItems:'center'},primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},buttonText:{color:c.text,fontSize:14,fontWeight:'700'},disabled:{opacity:0.5},endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},endText:{color:c.danger,fontSize:13},
+  actions:{flexDirection:'row',gap:8,alignItems:'center'},
+  activeActionsContainer:{gap:8,width:'100%'},
+  actionsRow:{flexDirection:'row',gap:8,alignItems:'center',width:'100%'},
+  actionButton:{flex:1,backgroundColor:c.surfaceRaised,borderRadius:14,minHeight:48,paddingHorizontal:6,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
+  actionButtonText:{color:c.text,fontSize:13,fontWeight:'700'},
+  alertButton:{flex:1,backgroundColor:c.accent,borderRadius:14,minHeight:48,paddingHorizontal:6,alignItems:'center',justifyContent:'center'},
+  alertButtonText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},
+  subActionsRow:{flexDirection:'row',gap:8,alignItems:'center',width:'100%',marginTop:2},
+  subActionButton:{backgroundColor:c.surfaceRaised,borderRadius:14,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
+  subActionText:{color:c.accent,fontSize:12,fontWeight:'700'},
+  endRideButton:{backgroundColor:'rgba(239, 68, 68, 0.1)',borderColor:'rgba(239, 68, 68, 0.3)',borderWidth:1,borderRadius:14,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center'},
+  endRideText:{color:c.danger,fontSize:12,fontWeight:'800'},
+  primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
+  secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
+  buttonText:{color:c.text,fontSize:14,fontWeight:'700'},
+  disabled:{opacity:0.5},
+  endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},
+  endText:{color:c.danger,fontSize:13},
   warning:{position:'absolute',left:16,right:16,backgroundColor:c.accentSoft,borderRadius:15,padding:12,gap:4},warningText:{color:c.text,fontSize:12,lineHeight:18},link:{color:c.accent,fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:c.accentSoft,marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:c.shadow + '88'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:c.surface,gap:12},alertOption:{padding:20,borderRadius:9,backgroundColor:c.surfaceRaised},emergency:{backgroundColor:c.accentSoft},fallback:{padding:36,paddingTop:225,gap:14},
   hudContainer:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:12,borderWidth:1,borderColor:c.border,paddingVertical:8,paddingHorizontal:12,flexDirection:'row',alignItems:'center',justifyContent:'space-around',elevation:4},
   hudItem:{alignItems:'center'},

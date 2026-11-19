@@ -966,6 +966,17 @@ test('trip planner allows quick creation with essentials, calendar date picker, 
   assert.match(calendarSource, /formatYMD/);
 });
 
+test('live ride bottom sheet aligns action buttons in responsive structured rows without overflow', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /activeActionsContainer/);
+  assert.match(rideSource, /actionsRow/);
+  assert.match(rideSource, /subActionsRow/);
+  assert.match(rideSource, /actionButton/);
+  assert.match(rideSource, /alertButton/);
+  assert.match(rideSource, /endRideButton/);
+  assert.match(rideSource, /Math\.max\(insets\.bottom \+ 12, 28\)/);
+});
+
 
 
 
