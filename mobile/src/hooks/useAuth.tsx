@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
+import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import type { Profile } from '@ridentrack/shared';
 import { registerAccount } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
@@ -13,6 +14,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
   updateProfile: (updates: {
     display_name?: string;
     phone?: string | null;
@@ -150,8 +152,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }
 
+  async function deleteAccount() {
+    const userId = activeUserId.current || session?.user?.id;
+    if (!userId) throw new Error('You must be signed in to delete your account.');
+    await stopBackgroundLocationUpdates();
+    const { error } = await supabase.rpc('delete_user_account');
+    if (error) {
+      // Fallback: try edge function if available
+      const edgeRes = await supabase.functions.invoke('delete-account', { body: {} });
+      if (edgeRes.error && error) throw new Error(error.message || edgeRes.error.message || 'Account deletion failed.');
+    }
+    await clearQueuedItemsForUser(userId).catch(() => {});
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    activeUserId.current = null;
+    setSession(null);
+    setProfile(null);
+  }
+
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, deleteAccount, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

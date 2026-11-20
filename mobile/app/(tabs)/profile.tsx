@@ -4,7 +4,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, useRideThemeSettings, RidePalette } from '../../src/theme';
 
 export default function ProfileScreen() {
-  const { profile, signOut, updateProfile } = useAuth();
+  const { profile, signOut, deleteAccount, updateProfile } = useAuth();
   const theme = useRideTheme();
   const { mode, setMode } = useRideThemeSettings();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -142,6 +142,34 @@ export default function ProfileScreen() {
         <Text style={styles.logoutText}>Sign out</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.deleteAccountButton}
+        accessibilityRole="button"
+        accessibilityLabel="Delete Account"
+        onPress={() => {
+          Alert.alert(
+            'Delete Account?',
+            'This permanently deletes your rider profile, motorcycle specs, created rides, and personal logs. This action cannot be undone.',
+            [
+              { text: 'Keep Account', style: 'cancel' },
+              {
+                text: 'Delete Forever',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await deleteAccount();
+                  } catch (e: any) {
+                    Alert.alert('Account deletion failed', e?.message || 'Please try again.');
+                  }
+                },
+              },
+            ]
+          );
+        }}
+      >
+        <Text style={styles.deleteAccountText}>Delete Account</Text>
+      </TouchableOpacity>
+
       <Modal visible={editing} transparent animationType="slide" onRequestClose={() => setEditing(false)}>
         <View style={styles.overlay}><ScrollView style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
           <Text style={styles.modalTitle}>Edit rider & motorcycle profile</Text>
@@ -216,8 +244,10 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   settingHint: { color: c.muted, fontSize: 12, marginTop: 3 },
   systemButton: { alignSelf: 'flex-start', marginTop: 10, paddingVertical: 8 },
   systemText: { color: c.accent, fontSize: 13, fontWeight: '700' },
-  logoutButton: { marginTop: 24, backgroundColor: c.danger, borderRadius: 13, padding: 16, width: '100%', alignItems: 'center' },
-  logoutText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  logoutButton: { marginTop: 24, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, borderRadius: 13, padding: 16, width: '100%', alignItems: 'center' },
+  logoutText: { color: c.text, fontSize: 15, fontWeight: '700' },
+  deleteAccountButton: { marginTop: 12, backgroundColor: 'transparent', borderRadius: 13, padding: 14, width: '100%', alignItems: 'center' },
+  deleteAccountText: { color: c.danger, fontSize: 13, fontWeight: '700' },
   overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' },
   modal: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 36 },
   modalTitle: { color: c.text, fontSize: 21, fontWeight: '800', marginBottom: 14 },

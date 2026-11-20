@@ -344,6 +344,7 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
   const provider = loader({
     react,
     '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
+    '../lib/offlineQueue': { clearQueuedItemsForUser: async () => {} },
     '../lib/supabase': { supabase: {
       auth: {
         getSession: () => new Promise(resolve => { resolveStartup = resolve; }),
@@ -975,6 +976,24 @@ test('live ride bottom sheet aligns action buttons in responsive structured rows
   assert.match(rideSource, /endRideButton/);
   assert.match(rideSource, /Math\.max\(insets\.bottom \+ 12, 28\)/);
 });
+
+test('profile screen supports self-service account deletion with confirmation', () => {
+  const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
+  assert.match(profileSource, /deleteAccount/);
+  assert.match(profileSource, /Delete Account\?/);
+  assert.match(profileSource, /Delete Forever/);
+  assert.match(profileSource, /deleteAccountButton/);
+
+  const authSource = fs.readFileSync(path.resolve('mobile/src/hooks/useAuth.tsx'), 'utf8');
+  assert.match(authSource, /delete_user_account/);
+  assert.match(authSource, /clearQueuedItemsForUser/);
+
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/018_account_deletion_and_cascades.sql'), 'utf8');
+  assert.match(migration, /rides_admin_id_fkey/);
+  assert.match(migration, /ON DELETE CASCADE/);
+  assert.match(migration, /delete_user_account/);
+});
+
 
 
 

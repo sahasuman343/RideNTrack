@@ -27,7 +27,8 @@ BEGIN
     'public.confirm_regroup_arrival(uuid)'::regprocedure,
     'public.get_regroup_points(uuid)'::regprocedure,
     'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
-    'public.get_rider_analytics(uuid)'::regprocedure
+    'public.get_rider_analytics(uuid)'::regprocedure,
+    'public.delete_user_account()'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -555,4 +556,42 @@ BEGIN
   -- Cleanup
   PERFORM public.delete_trip(journal_trip_id);
 END $$;
+
+-- RT-003: Cascading account deletion via delete_user_account()
+DO $$
+DECLARE
+  test_user_id uuid := '44444444-4444-4444-8444-444444444444';
+  test_ride_id uuid;
+BEGIN
+  -- Bootstrap disposable user
+  INSERT INTO auth.users VALUES (test_user_id, 'to_delete@example.test', '{"username":"deleteme","display_name":"DeleteMe"}');
+  PERFORM set_config('request.jwt.claim.sub', test_user_id::text, true);
+
+  -- Create a trip owned by this user
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Delete Test Trip","trip_type":"solo","visibility":"private","origin":"Start","destination":"End","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Start","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"End","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id AND admin_id = test_user_id) THEN
+    RAISE EXCEPTION 'failed to create ride for account deletion test';
+  END IF;
+
+  -- Call delete_user_account()
+  PERFORM public.delete_user_account();
+
+  -- Verify cascades
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = test_user_id) THEN
+    RAISE EXCEPTION 'profile remains after delete_user_account';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id) THEN
+    RAISE EXCEPTION 'owned ride remains after delete_user_account';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.ride_participants WHERE user_id = test_user_id) THEN
+    RAISE EXCEPTION 'ride participant remains after delete_user_account';
+  END IF;
+END $$;
+
 RESET ROLE;

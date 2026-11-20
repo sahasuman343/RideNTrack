@@ -68,6 +68,9 @@ export async function clearQueuedItems(userId: string, ids: string[]) {
   const validIds = ids.filter(Boolean);
   if (validIds.length) await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ? AND id IN (' + validIds.map(() => '?').join(',') + ')', userId, ...validIds);
 }
+export async function clearQueuedItemsForUser(userId: string) {
+  await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ?', userId);
+}
 export async function getQueueCounts(userId: string) {
   const rows = await (await getDatabase()).getAllAsync<{ kind: string; count: number }>('SELECT kind, count(*) AS count FROM queue WHERE user_id = ? GROUP BY kind', userId);
   return { locations: rows.find(r => r.kind === 'location')?.count || 0, alerts: rows.find(r => r.kind === 'alert')?.count || 0 };
