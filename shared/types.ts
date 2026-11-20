@@ -27,7 +27,7 @@ export interface Ride {
   origin_coords: [number, number]; // [lng, lat]
   destination_coords: [number, number];
   route_geometry?: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: number[][] }; properties: Record<string, unknown> }; // GeoJSON LineString
-  status: 'planned' | 'active' | 'completed';
+  status: 'planned' | 'active' | 'completed' | 'archived';
   description?: string | null;
   trip_type?: 'solo' | 'group' | 'weekend' | 'touring' | 'expedition';
   visibility?: 'private' | 'invite_only' | 'public';

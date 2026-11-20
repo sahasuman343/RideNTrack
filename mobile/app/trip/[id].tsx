@@ -5,6 +5,7 @@ import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calcula
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
+import { saveCachedTrip, getCachedTrip } from '../../src/lib/tripCache';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
@@ -177,6 +178,15 @@ export default function TripWorkspaceScreen() {
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
+
+      void saveCachedTrip(id, {
+        trip: tripResult.data as any,
+        waypoints: (waypointResult.data || []) as any,
+        stages: (stageResult.data || []) as any,
+        days: (dayResult.data || []) as any,
+        stays: (stayResult.data || []) as any,
+      });
+
       if (user?.id) {
         const { data: entry } = await supabase
           .from('trip_journal_entries')
@@ -188,7 +198,21 @@ export default function TripWorkspaceScreen() {
           setJournalEntry(entry as TripJournalEntry);
         }
       }
-    } catch (e: any) { if (generation === loadGeneration.current) setError(e?.message || 'Could not load this trip.'); }
+    } catch (e: any) {
+      if (generation === loadGeneration.current) {
+        const cached = await getCachedTrip(id);
+        if (cached?.trip) {
+          setTrip(cached.trip as any);
+          setWaypoints(cached.waypoints as any);
+          setDays(cached.days as any);
+          setStays(cached.stays as any);
+          setStages(cached.stages as any);
+          setError('Offline Mode: Showing cached trip itinerary.');
+        } else {
+          setError(e?.message || 'Could not load this trip.');
+        }
+      }
+    }
     finally { if (generation === loadGeneration.current) setLoading(false); }
   }, [id, user?.id]);
 
@@ -311,6 +335,52 @@ export default function TripWorkspaceScreen() {
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not delete this trip.');
+      setSaving(false);
+    }
+  }
+
+  function duplicateTrip() {
+    if (!trip) return;
+    Alert.alert(
+      'Duplicate Trip?',
+      'Clone “' + trip.name + '” with all its stops, days, and stages into a new planned trip?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Duplicate',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { data, error: dupError } = await supabase.rpc('duplicate_trip', { p_ride_id: trip.id });
+              if (dupError) throw dupError;
+              Alert.alert('Trip Cloned', 'Your cloned trip is ready.', [
+                { text: 'Open Copy', onPress: () => router.push(`/trip/${data}`) },
+                { text: 'Stay Here', style: 'cancel' },
+              ]);
+            } catch (e: any) {
+              Alert.alert('Could not duplicate', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  async function toggleArchiveTrip() {
+    if (!trip || !isAdmin) return;
+    const isArchived = trip.status === 'archived';
+    setSaving(true);
+    try {
+      const rpcName = isArchived ? 'unarchive_trip' : 'archive_trip';
+      const { error: archError } = await supabase.rpc(rpcName, { p_ride_id: trip.id });
+      if (archError) throw archError;
+      setTrip(prev => prev ? { ...prev, status: isArchived ? 'planned' : 'archived' } : null);
+      Alert.alert(isArchived ? 'Trip Restored' : 'Trip Archived', isArchived ? 'Trip is restored to active planning.' : 'Trip has been archived.');
+    } catch (e: any) {
+      Alert.alert('Action failed', e?.message || 'Please try again.');
+    } finally {
       setSaving(false);
     }
   }
@@ -716,10 +786,16 @@ export default function TripWorkspaceScreen() {
         <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void shareItinerary()}>
           <Text style={styles.secondaryText}>📤 Share touring itinerary</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={duplicateTrip} disabled={saving}>
+          <Text style={styles.secondaryText}>📋 Duplicate trip</Text>
+        </TouchableOpacity>
       </View>
       {isAdmin && <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={openTripEditor}><Text style={styles.secondaryText}>Trip details</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={() => void toggleArchiveTrip()} disabled={saving}>
+          <Text style={styles.secondaryText}>{trip.status === 'archived' ? '📂 Unarchive' : '📦 Archive'}</Text>
+        </TouchableOpacity>
       </View>}
       {isAdmin && <TouchableOpacity style={styles.dangerButton} disabled={saving} onPress={confirmDeleteTrip}>
         <Text style={styles.dangerText}>{saving ? 'Please wait…' : 'Delete trip permanently'}</Text>

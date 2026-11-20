@@ -28,7 +28,10 @@ BEGIN
     'public.get_regroup_points(uuid)'::regprocedure,
     'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
     'public.get_rider_analytics(uuid)'::regprocedure,
-    'public.delete_user_account()'::regprocedure
+    'public.delete_user_account()'::regprocedure,
+    'public.archive_trip(uuid)'::regprocedure,
+    'public.unarchive_trip(uuid)'::regprocedure,
+    'public.duplicate_trip(uuid,text,date)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -555,6 +558,83 @@ BEGIN
 
   -- Cleanup
   PERFORM public.delete_trip(journal_trip_id);
+END $$;
+
+-- Phase 1 Milestone: Trip Archiving and Deep Duplication
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  outsider_id uuid := '33333333-3333-4333-8333-333333333333';
+  orig_trip_id uuid;
+  cloned_trip_id uuid;
+  cloned_stage_count integer;
+  cloned_wp_count integer;
+  trip_status text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  -- Create a trip with waypoints and stages
+  orig_trip_id := public.create_trip_plan(
+    '{"name":"Grand Western Ghats Tour","trip_type":"touring","visibility":"invite_only","start_date":"2026-12-01","end_date":"2026-12-05","origin":"Bengaluru","destination":"Goa","origin_coords":[77.5946,12.9716],"destination_coords":[73.8567,15.2993]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bengaluru","latitude":12.9716,"longitude":77.5946,"day_number":1},{"sequence":1,"waypoint_type":"stop","name":"Shimoga","latitude":13.9299,"longitude":75.5681,"day_number":1},{"sequence":2,"waypoint_type":"destination","name":"Goa","latitude":15.2993,"longitude":73.8567,"day_number":2}]'::jsonb,
+    '[{"day_number":1,"trip_date":"2026-12-01","title":"Day 1 - Ghats Climb"},{"day_number":2,"trip_date":"2026-12-02","title":"Day 2 - Coastal Descent"}]'::jsonb,
+    '{"name":"Shimoga Lodge","stay_type":"hotel","price_amount":1500,"day_number":1}'::jsonb
+  );
+
+  -- Add a stage
+  PERFORM public.save_trip_stage(orig_trip_id, '{
+    "stage_number": 1,
+    "name": "Stage 1",
+    "start_name": "Bengaluru",
+    "destination_name": "Shimoga",
+    "start_coords": [77.5946, 12.9716],
+    "destination_coords": [75.5681, 13.9299],
+    "day_number": 1
+  }'::jsonb);
+
+  -- 1. Test Archiving
+  PERFORM public.archive_trip(orig_trip_id);
+  SELECT status INTO trip_status FROM public.rides WHERE id = orig_trip_id;
+  IF trip_status != 'archived' THEN
+    RAISE EXCEPTION 'archive_trip failed to set status to archived (got %)', trip_status;
+  END IF;
+
+  -- 2. Test Unarchiving
+  PERFORM public.unarchive_trip(orig_trip_id);
+  SELECT status INTO trip_status FROM public.rides WHERE id = orig_trip_id;
+  IF trip_status != 'planned' THEN
+    RAISE EXCEPTION 'unarchive_trip failed to set status to planned (got %)', trip_status;
+  END IF;
+
+  -- 3. Test Deep Duplication
+  cloned_trip_id := public.duplicate_trip(orig_trip_id, 'Grand Western Ghats 2027', '2027-01-10');
+  IF cloned_trip_id IS NULL OR cloned_trip_id = orig_trip_id THEN
+    RAISE EXCEPTION 'duplicate_trip failed to return new distinct ride id';
+  END IF;
+
+  -- Verify cloned waypoints and stages
+  SELECT count(*) INTO cloned_wp_count FROM public.trip_waypoints WHERE ride_id = cloned_trip_id;
+  IF cloned_wp_count != 3 THEN
+    RAISE EXCEPTION 'duplicate_trip expected 3 waypoints, found %', cloned_wp_count;
+  END IF;
+
+  SELECT count(*) INTO cloned_stage_count FROM public.trip_stages WHERE ride_id = cloned_trip_id;
+  IF cloned_stage_count != 1 THEN
+    RAISE EXCEPTION 'duplicate_trip expected 1 stage, found %', cloned_stage_count;
+  END IF;
+
+  -- 4. Outsider cannot archive private trip
+  PERFORM set_config('request.jwt.claim.sub', outsider_id::text, true);
+  BEGIN
+    PERFORM public.archive_trip(orig_trip_id);
+    RAISE EXCEPTION 'outsider was able to archive owner trip';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip(orig_trip_id);
+  PERFORM public.delete_trip(cloned_trip_id);
 END $$;
 
 -- RT-003: Cascading account deletion via delete_user_account()

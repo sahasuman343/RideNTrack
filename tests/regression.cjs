@@ -994,6 +994,46 @@ test('profile screen supports self-service account deletion with confirmation', 
   assert.match(migration, /delete_user_account/);
 });
 
+test('trip archiving and duplication migration defines atomic RPCs and status enum expansion', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/019_trip_archiving_and_duplication.sql'), 'utf8');
+  assert.match(migration, /rides_status_check/);
+  assert.match(migration, /'archived'/);
+  assert.match(migration, /FUNCTION public\.archive_trip/);
+  assert.match(migration, /FUNCTION public\.unarchive_trip/);
+  assert.match(migration, /FUNCTION public\.duplicate_trip/);
+  assert.match(migration, /jsonb_set/);
+  assert.match(migration, /cloned/i);
+});
+
+test('my rides screen integrates segmented status filters and duplicate trip action', () => {
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  assert.match(indexSource, /filterTab/);
+  assert.match(indexSource, /Active & Planned/);
+  assert.match(indexSource, /Completed/);
+  assert.match(indexSource, /Archived/);
+  assert.match(indexSource, /handleDuplicateTrip/);
+  assert.match(indexSource, /duplicate_trip/);
+  assert.match(indexSource, /cardActionBtn/);
+  assert.match(indexSource, /getStatusColor/);
+  assert.match(indexSource, /#607D8B/);
+});
+
+test('trip workspace exposes trip duplication, archive toggle, and offline trip cache', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /duplicateTrip/);
+  assert.match(tripSource, /toggleArchiveTrip/);
+  assert.match(tripSource, /saveCachedTrip/);
+  assert.match(tripSource, /getCachedTrip/);
+  assert.match(tripSource, /Duplicate trip/);
+  assert.match(tripSource, /Archive/);
+
+  const cacheSource = fs.readFileSync(path.resolve('mobile/src/lib/tripCache.ts'), 'utf8');
+  assert.match(cacheSource, /trip_cache/);
+  assert.match(cacheSource, /saveCachedTrip/);
+  assert.match(cacheSource, /getCachedTrip/);
+});
+
+
 
 
 

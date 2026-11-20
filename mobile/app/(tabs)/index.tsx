@@ -11,6 +11,8 @@ export default function MyRidesScreen() {
   const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
+  const [duplicatingRideId, setDuplicatingRideId] = useState<string | null>(null);
+  const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'archived'>('active');
   const { user } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
@@ -99,14 +101,55 @@ export default function MyRidesScreen() {
     }
   }
 
+  function handleDuplicateTrip(item: Ride) {
+    Alert.alert(
+      'Duplicate Trip?',
+      `Create a new planned copy of "${item.name}" with its complete route, waypoints, and itinerary?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Duplicate',
+          onPress: async () => {
+            setDuplicatingRideId(item.id);
+            try {
+              const { data, error } = await supabase.rpc('duplicate_trip', {
+                p_ride_id: item.id,
+              });
+              if (error) throw error;
+              await fetchRides();
+              Alert.alert('Trip Cloned', 'Your new trip is ready.', [
+                { text: 'Open Trip', onPress: () => router.push(`/trip/${data}`) },
+                { text: 'Later', style: 'cancel' },
+              ]);
+            } catch (err: any) {
+              Alert.alert('Could not duplicate trip', err?.message || 'Please try again.');
+            } finally {
+              setDuplicatingRideId(null);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   function getStatusColor(status: string) {
     switch (status) {
       case 'active': return '#4CAF50';
       case 'planned': return '#FF9800';
       case 'completed': return '#9E9E9E';
+      case 'archived': return '#607D8B';
       default: return '#666';
     }
   }
+
+  const displayedRides = useMemo(() => {
+    return rides.filter(r => {
+      if (filterTab === 'active') return r.status === 'planned' || r.status === 'active';
+      if (filterTab === 'completed') return r.status === 'completed';
+      if (filterTab === 'archived') return r.status === 'archived';
+      return true;
+    });
+  }, [rides, filterTab]);
 
   return (
     <View style={styles.container}>
@@ -158,22 +201,54 @@ export default function MyRidesScreen() {
         </View>
       )}
 
-      <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {rides.length}</Text>
-      {rides.length === 0 ? (
+      <View style={styles.filterRow}>
+        <TouchableOpacity
+          style={[styles.filterTab, filterTab === 'active' && styles.filterTabActive]}
+          onPress={() => setFilterTab('active')}
+        >
+          <Text style={[styles.filterTabText, filterTab === 'active' && styles.filterTabTextActive]}>Active & Planned</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterTab, filterTab === 'completed' && styles.filterTabActive]}
+          onPress={() => setFilterTab('completed')}
+        >
+          <Text style={[styles.filterTabText, filterTab === 'completed' && styles.filterTabTextActive]}>Completed</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterTab, filterTab === 'archived' && styles.filterTabActive]}
+          onPress={() => setFilterTab('archived')}
+        >
+          <Text style={[styles.filterTabText, filterTab === 'archived' && styles.filterTabTextActive]}>Archived</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {displayedRides.length}</Text>
+      {displayedRides.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyMark}>01 / 00</Text><Text style={styles.emptyText}>The road is waiting.</Text>
-          <Text style={styles.emptySubtext}>Your trips and group rides will find a home here.</Text>
+          <Text style={styles.emptyMark}>01 / 00</Text>
+          <Text style={styles.emptyText}>{filterTab === 'archived' ? 'No archived trips.' : 'The road is waiting.'}</Text>
+          <Text style={styles.emptySubtext}>
+            {filterTab === 'archived'
+              ? 'Trips you archive to clean up your log will appear here.'
+              : 'Your trips and group rides will find a home here.'}
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={rides}
+          data={displayedRides}
           keyExtractor={(item) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
           contentContainerStyle={{ padding: 16 }}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.card}
-              onPress={() => router.push(`/ride/${item.id}`)}
+              onPress={() => {
+                if (item.status === 'archived' || item.status === 'planned') {
+                  router.push(`/trip/${item.id}`);
+                } else {
+                  router.push(`/ride/${item.id}`);
+                }
+              }}
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.rideName}>{item.name}</Text>
@@ -181,6 +256,23 @@ export default function MyRidesScreen() {
                   <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
                     <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
                   </View>
+                  <TouchableOpacity
+                    style={styles.cardActionBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Duplicate trip ${item.name}`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    disabled={duplicatingRideId === item.id}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleDuplicateTrip(item);
+                    }}
+                  >
+                    {duplicatingRideId === item.id ? (
+                      <ActivityIndicator size="small" color={theme.accent} />
+                    ) : (
+                      <Text style={styles.cardActionIcon}>📋</Text>
+                    )}
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.cardDeleteBtn}
                     accessibilityRole="button"
@@ -203,7 +295,9 @@ export default function MyRidesScreen() {
               <Text style={styles.route}>{item.origin} → {item.destination}</Text>
               <View style={styles.cardFooter}>
                 <Text style={styles.code}>RIDE CODE  {item.ride_code}</Text>
-                <Text style={styles.openLabel}>OPEN JOURNEY  ↗</Text>
+                <Text style={styles.openLabel}>
+                  {item.status === 'archived' ? 'VIEW ARCHIVE ↗' : 'OPEN JOURNEY  ↗'}
+                </Text>
               </View>
             </TouchableOpacity>
           )}
@@ -222,6 +316,11 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   pageTitle: { color: c.text, fontSize: 32, fontWeight: '900', letterSpacing: -1.2, marginTop: 12 },
   intro: { color: c.muted, fontSize: 13, lineHeight: 20, marginTop: 5, maxWidth: 290 },
   quickActions: { flexDirection: 'row', gap: 10, paddingHorizontal: 22, paddingBottom: 24 },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 22, paddingBottom: 16 },
+  filterTab: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  filterTabActive: { backgroundColor: c.accent, borderColor: c.accent },
+  filterTabText: { color: c.muted, fontSize: 11, fontWeight: '700' },
+  filterTabTextActive: { color: '#FFFFFF', fontWeight: '800' },
   actionPrimary: { flex: 1, backgroundColor: c.accent, paddingVertical: 15, paddingHorizontal: 16, borderRadius: 8 },
   actionPrimaryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   actionSecondary: { paddingVertical: 15, paddingHorizontal: 16, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface },
@@ -234,6 +333,8 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   card: { backgroundColor: c.surface, borderRadius: 8, padding: 17, marginBottom: 10, borderWidth: 1, borderColor: c.border },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardActionBtn: { padding: 4, borderRadius: 6, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border },
+  cardActionIcon: { fontSize: 12 },
   cardDeleteBtn: { padding: 4, borderRadius: 6, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border },
   cardDeleteIcon: { fontSize: 12 },
   rideName: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
