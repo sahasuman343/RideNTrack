@@ -723,13 +723,15 @@ BEGIN
 END $$;
 
 -- RT-003: Cascading account deletion via delete_user_account()
+RESET ROLE;
+INSERT INTO auth.users VALUES ('44444444-4444-4444-8444-444444444444', 'to_delete@example.test', '{"username":"deleteme","display_name":"DeleteMe"}');
+SET ROLE authenticated;
+
 DO $$
 DECLARE
   test_user_id uuid := '44444444-4444-4444-8444-444444444444';
   test_ride_id uuid;
 BEGIN
-  -- Bootstrap disposable user
-  INSERT INTO auth.users VALUES (test_user_id, 'to_delete@example.test', '{"username":"deleteme","display_name":"DeleteMe"}');
   PERFORM set_config('request.jwt.claim.sub', test_user_id::text, true);
 
   -- Create a trip owned by this user
