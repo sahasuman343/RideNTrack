@@ -11,11 +11,13 @@ ALTER TABLE public.ride_participants
 
 -- 2. Expand role check constraint on trip_invitations
 ALTER TABLE public.trip_invitations
+  DROP CONSTRAINT IF EXISTS trip_invitations_assigned_role_check;
+ALTER TABLE public.trip_invitations
   DROP CONSTRAINT IF EXISTS trip_invitations_role_check;
 
 ALTER TABLE public.trip_invitations
-  ADD CONSTRAINT trip_invitations_role_check
-  CHECK (role IN ('captain', 'co-captain', 'marshal', 'sweeper', 'member', 'leader', 'sweep', 'rider'));
+  ADD CONSTRAINT trip_invitations_assigned_role_check
+  CHECK (assigned_role IN ('captain', 'co-captain', 'marshal', 'sweeper', 'member', 'leader', 'sweep', 'rider'));
 
 -- 3. Expand status check constraint on trip_invitations to include 'rejected'
 ALTER TABLE public.trip_invitations
