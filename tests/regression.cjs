@@ -1065,6 +1065,164 @@ test('trip workspace integrates pre-ride preparation checklist and captain role 
   assert.match(tripSource, /ROLE_LABELS/);
 });
 
+test('pack formation calculates linear distance along route, gaps, and separation', () => {
+  const routePolyline = [
+    [77.5946, 12.9716], // Start (0m)
+    [77.6000, 12.9800], // Middle (~1.1km)
+    [77.6200, 13.0000], // Ahead (~3.8km)
+  ];
+
+  const riders = [
+    { user_id: 'rider-lead', display_name: 'Lead Rider', lat: 13.0000, lng: 77.6200 },
+    { user_id: 'rider-mid', display_name: 'Mid Rider', lat: 12.9800, lng: 77.6000 },
+    { user_id: 'rider-tail', display_name: 'Tail Rider', lat: 12.9716, lng: 77.5946 },
+  ];
+
+  const formation = shared.calculatePackFormation(riders, routePolyline, 1500);
+  assert.equal(formation.length, 3);
+
+  // Leader
+  assert.equal(formation[0].userId, 'rider-lead');
+  assert.equal(formation[0].isLeader, true);
+  assert.equal(formation[0].isTail, false);
+  assert.equal(formation[0].order, 1);
+  assert.equal(formation[0].gapToAheadMeters, 0);
+  assert.equal(formation[0].gapToLeaderMeters, 0);
+
+  // Mid Rider
+  assert.equal(formation[1].userId, 'rider-mid');
+  assert.equal(formation[1].isLeader, false);
+  assert.equal(formation[1].isTail, false);
+  assert.equal(formation[1].order, 2);
+  assert.ok(formation[1].gapToAheadMeters > 0);
+  assert.ok(formation[1].gapToLeaderMeters > 0);
+
+  // Tail Rider
+  assert.equal(formation[2].userId, 'rider-tail');
+  assert.equal(formation[2].isLeader, false);
+  assert.equal(formation[2].isTail, true);
+  assert.equal(formation[2].order, 3);
+  assert.ok(formation[2].gapToAheadMeters > 0);
+
+  // Edge cases
+  assert.deepEqual(shared.calculatePackFormation([], routePolyline), []);
+  assert.deepEqual(shared.calculatePackFormation(riders, []), []);
+  assert.deepEqual(shared.calculatePackFormation(null, routePolyline), []);
+});
+
+test('GPX exporter produces valid GPX 1.1 XML with escaping, waypoints, route, and track', () => {
+  const gpx = shared.exportTripToGpx({
+    tripName: 'Western Ghats & Coorg Tour <2026>',
+    description: 'Scenic monsoon ride & mountain passes',
+    waypoints: [
+      { name: 'Bangalore Start', latitude: 12.9716, longitude: 77.5946, waypoint_type: 'origin' },
+      { name: 'Chai Stop & Snacks', latitude: 12.9800, longitude: 77.6000, waypoint_type: 'rest', notes: 'Hot tea & snacks' },
+    ],
+    routeCoordinates: [
+      [77.5946, 12.9716],
+      [77.6000, 12.9800],
+    ],
+    trailCoordinates: [
+      [77.5946, 12.9716],
+      [77.5950, 12.9720],
+      [77.6000, 12.9800],
+    ],
+    recordedAt: '2026-10-01T08:00:00Z',
+  });
+
+  assert.ok(gpx.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.ok(gpx.includes('<gpx version="1.1" creator="RideNTrack Touring Companion"'));
+  assert.ok(gpx.includes('&lt;2026&gt;'), 'Special XML chars escaped');
+  assert.ok(gpx.includes('&amp; Coorg Tour'), 'Ampersand escaped');
+  assert.ok(gpx.includes('<wpt lat="12.971600" lon="77.594600">'));
+  assert.ok(gpx.includes('<name>Bangalore Start</name>'));
+  assert.ok(gpx.includes('<rte>'));
+  assert.ok(gpx.includes('<rtept lat="12.971600" lon="77.594600"/>'));
+  assert.ok(gpx.includes('<trk>'));
+  assert.ok(gpx.includes('<trkseg>'));
+  assert.ok(gpx.includes('<trkpt lat="12.971600" lon="77.594600"/>'));
+  assert.ok(gpx.endsWith('</gpx>'));
+});
+
+test('group expense settlement algorithm resolves net balances into minimal transactions', () => {
+  const balances = [
+    { user_id: 'alice', display_name: 'Alice', paid: 3000, share: 1000 }, // net: +2000
+    { user_id: 'bob', display_name: 'Bob', paid: 0, share: 1000 },         // net: -1000
+    { user_id: 'charlie', display_name: 'Charlie', paid: 0, share: 1000 }, // net: -1000
+  ];
+
+  const settlements = shared.calculateExpenseSettlement(balances);
+  assert.equal(settlements.length, 2);
+
+  const bobSettlement = settlements.find(s => s.fromUserId === 'bob');
+  assert.ok(bobSettlement);
+  assert.equal(bobSettlement.toUserId, 'alice');
+  assert.equal(bobSettlement.amount, 1000);
+
+  const charlieSettlement = settlements.find(s => s.fromUserId === 'charlie');
+  assert.ok(charlieSettlement);
+  assert.equal(charlieSettlement.toUserId, 'alice');
+  assert.equal(charlieSettlement.amount, 1000);
+
+  // Edge cases
+  assert.deepEqual(shared.calculateExpenseSettlement([]), []);
+  assert.deepEqual(shared.calculateExpenseSettlement([{ user_id: 'solo', display_name: 'Solo', paid: 100, share: 100 }]), []);
+});
+
+test('live ride screen renders pack formation strip and captain announcement modal', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /calculatePackFormation/);
+  assert.match(rideSource, /packFormation/);
+  assert.match(rideSource, /FORMATION & SPACING/);
+  assert.match(rideSource, /formationBadge/);
+  assert.match(rideSource, /announcementModal/);
+  assert.match(rideSource, /Captain Announcement/);
+  assert.match(rideSource, /broadcastAnnouncement/);
+  assert.match(rideSource, /Fuel stop at next pump/);
+  assert.match(rideSource, /Wet roads \/ rain ahead/);
+});
+
+test('trip workspace integrates GPX export, group expenses, and settlements', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /exportGpxFile/);
+  assert.match(tripSource, /exportTripToGpx/);
+  assert.match(tripSource, /Export GPX route/);
+  assert.match(tripSource, /Trip Expenses & Splitting/);
+  assert.match(tripSource, /expenseSummary/);
+  assert.match(tripSource, /settlements/);
+  assert.match(tripSource, /calculateExpenseSettlement/);
+  assert.match(tripSource, /SETTLEMENT RESOLUTION/);
+  assert.match(tripSource, /handleAddExpense/);
+  assert.match(tripSource, /handleDeleteExpense/);
+  assert.match(tripSource, /newExpenseSplitUsers/);
+  assert.match(tripSource, /EXPENSE_CATEGORY_META/);
+});
+
+test('my rides screen integrates community touring discovery and route cloning', () => {
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  assert.match(indexSource, /'community'/);
+  assert.match(indexSource, /communityTrips/);
+  assert.match(indexSource, /get_public_trips/);
+  assert.match(indexSource, /Community/);
+  assert.match(indexSource, /PUBLIC TOURING ROUTES/);
+  assert.match(indexSource, /Clone route/);
+  assert.match(indexSource, /handleDuplicateTrip/);
+});
+
+test('group coordination and expenses migration defines schema, RPCs, and public route access', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/021_group_coordination_and_expenses.sql'), 'utf8');
+  assert.match(migration, /'announcement'/);
+  assert.match(migration, /visibility = 'public'/);
+  assert.match(migration, /public\.trip_expenses/);
+  assert.match(migration, /public\.trip_expense_splits/);
+  assert.match(migration, /add_trip_expense/);
+  assert.match(migration, /delete_trip_expense/);
+  assert.match(migration, /get_trip_expenses/);
+  assert.match(migration, /get_trip_expense_summary/);
+  assert.match(migration, /get_public_trips/);
+});
+
+
 
 
 

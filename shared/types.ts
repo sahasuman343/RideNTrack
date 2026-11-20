@@ -181,7 +181,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement';
   message?: string;
   lat: number;
   lng: number;
@@ -210,6 +210,7 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   route_deviation: '🧭 Route Deviation',
   rider_behind: '🏍️ Rider Behind',
   regroup: '📢 Regroup Now',
+  announcement: '📢 Captain Announcement',
 };
 
 export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
@@ -299,6 +300,8 @@ export function buildGoogleMapsNavigationUrl(destination: {
 export * from './touring';
 export * from './journal';
 export * from './premium';
+export * from './gpx';
+export * from './expenses';
 
 
 

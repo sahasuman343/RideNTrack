@@ -192,3 +192,139 @@ export function distanceToRouteMeters(point: { lat: number; lng: number } | null
   }
   return nearest;
 }
+
+export interface PackRiderInput {
+  user_id: string;
+  display_name?: string;
+  lat: number;
+  lng: number;
+  speed?: number | null;
+  timestamp?: string;
+}
+
+export interface PackRiderProgress {
+  userId: string;
+  displayName: string;
+  lat: number;
+  lng: number;
+  routeDistanceMeters: number;
+  gapToAheadMeters: number;
+  gapToLeaderMeters: number;
+  distanceToRouteMeters: number;
+  isLeader: boolean;
+  isTail: boolean;
+  isSeparated: boolean;
+  order: number;
+}
+
+export function calculateDistanceAlongPolyline(
+  point: { lat: number; lng: number } | null | undefined,
+  coordinates: number[][] | null | undefined
+): { distanceAlongRouteMeters: number; distanceToRouteMeters: number } {
+  if (!point || !Array.isArray(coordinates) || coordinates.length < 2) {
+    return { distanceAlongRouteMeters: 0, distanceToRouteMeters: Number.POSITIVE_INFINITY };
+  }
+  if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) {
+    return { distanceAlongRouteMeters: 0, distanceToRouteMeters: Number.POSITIVE_INFINITY };
+  }
+
+  const cosLat = Math.cos((point.lat * Math.PI) / 180);
+  const scaleX = 111320 * cosLat;
+  const scaleY = 110540;
+
+  let nearestDist = Number.POSITIVE_INFINITY;
+  let bestDistanceAlong = 0;
+  let cumulativeDistance = 0;
+
+  const first = coordinates[0];
+  if (!Array.isArray(first) || !Number.isFinite(first[0]) || !Number.isFinite(first[1])) {
+    return { distanceAlongRouteMeters: 0, distanceToRouteMeters: Number.POSITIVE_INFINITY };
+  }
+
+  let ax = (first[0] - point.lng) * scaleX;
+  let ay = (first[1] - point.lat) * scaleY;
+
+  for (let i = 1; i < coordinates.length; i++) {
+    const next = coordinates[i];
+    if (!Array.isArray(next) || !Number.isFinite(next[0]) || !Number.isFinite(next[1])) continue;
+
+    const bx = (next[0] - point.lng) * scaleX;
+    const by = (next[1] - point.lat) * scaleY;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const segmentLen = Math.hypot(dx, dy);
+
+    const denom = dx * dx + dy * dy;
+    const t = denom === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom));
+    const dist = Math.hypot(ax + t * dx, ay + t * dy);
+
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      bestDistanceAlong = cumulativeDistance + t * segmentLen;
+    }
+
+    cumulativeDistance += segmentLen;
+    ax = bx;
+    ay = by;
+  }
+
+  return {
+    distanceAlongRouteMeters: Math.round(bestDistanceAlong),
+    distanceToRouteMeters: Math.round(nearestDist),
+  };
+}
+
+export function calculatePackFormation(
+  riders: PackRiderInput[] | null | undefined,
+  coordinates: number[][] | null | undefined,
+  separationThresholdMeters = 1000
+): PackRiderProgress[] {
+  if (!Array.isArray(riders) || riders.length === 0 || !Array.isArray(coordinates) || coordinates.length < 2) {
+    return [];
+  }
+
+  const validRiders = riders.filter(
+    r => r && typeof r.lat === 'number' && typeof r.lng === 'number' && Number.isFinite(r.lat) && Number.isFinite(r.lng)
+  );
+  if (validRiders.length === 0) return [];
+
+  const progresses = validRiders.map(r => {
+    const res = calculateDistanceAlongPolyline(r, coordinates);
+    return {
+      userId: r.user_id,
+      displayName: r.display_name || 'Rider',
+      lat: r.lat,
+      lng: r.lng,
+      routeDistanceMeters: res.distanceAlongRouteMeters,
+      distanceToRouteMeters: res.distanceToRouteMeters,
+    };
+  });
+
+  progresses.sort((a, b) => b.routeDistanceMeters - a.routeDistanceMeters);
+
+  const leaderDistance = progresses[0].routeDistanceMeters;
+
+  return progresses.map((p, idx) => {
+    const isLeader = idx === 0;
+    const isTail = idx === progresses.length - 1 && progresses.length > 1;
+    const ahead = isLeader ? null : progresses[idx - 1];
+    const gapToAheadMeters = ahead ? Math.max(0, ahead.routeDistanceMeters - p.routeDistanceMeters) : 0;
+    const gapToLeaderMeters = Math.max(0, leaderDistance - p.routeDistanceMeters);
+    const isSeparated = !isLeader && gapToAheadMeters > separationThresholdMeters;
+
+    return {
+      userId: p.userId,
+      displayName: p.displayName,
+      lat: p.lat,
+      lng: p.lng,
+      routeDistanceMeters: p.routeDistanceMeters,
+      gapToAheadMeters,
+      gapToLeaderMeters,
+      distanceToRouteMeters: p.distanceToRouteMeters,
+      isLeader,
+      isTail,
+      isSeparated,
+      order: idx + 1,
+    };
+  });
+}

@@ -8,11 +8,12 @@ import { useRideTheme, RidePalette } from '../../src/theme';
 
 export default function MyRidesScreen() {
   const [rides, setRides] = useState<Ride[]>([]);
+  const [communityTrips, setCommunityTrips] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
   const [duplicatingRideId, setDuplicatingRideId] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'archived'>('active');
+  const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'archived' | 'community'>('active');
   const { user } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
@@ -22,7 +23,7 @@ export default function MyRidesScreen() {
 
   async function fetchRides() {
     if (!user) return;
-    const [ridesRes, analyticsRes] = await Promise.all([
+    const [ridesRes, analyticsRes, communityRes] = await Promise.all([
       supabase
         .from('ride_participants')
         .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
@@ -30,6 +31,7 @@ export default function MyRidesScreen() {
         .eq('is_active', true)
         .order('joined_at', { ascending: false }),
       supabase.rpc('get_rider_analytics'),
+      supabase.rpc('get_public_trips', { p_limit: 20, p_offset: 0 }),
     ]);
 
     if (ridesRes.data) {
@@ -37,6 +39,9 @@ export default function MyRidesScreen() {
     }
     if (analyticsRes.data) {
       setAnalytics(analyticsRes.data as RiderAnalytics);
+    }
+    if (communityRes.data) {
+      setCommunityTrips(communityRes.data as any[]);
     }
   }
 
@@ -220,10 +225,70 @@ export default function MyRidesScreen() {
         >
           <Text style={[styles.filterTabText, filterTab === 'archived' && styles.filterTabTextActive]}>Archived</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterTab, filterTab === 'community' && styles.filterTabActive]}
+          onPress={() => setFilterTab('community')}
+        >
+          <Text style={[styles.filterTabText, filterTab === 'community' && styles.filterTabTextActive]}>🌐 Community</Text>
+        </TouchableOpacity>
       </View>
 
-      <Text style={styles.sectionLabel}>YOUR JOURNEYS  ·  {displayedRides.length}</Text>
-      {displayedRides.length === 0 ? (
+      <Text style={styles.sectionLabel}>
+        {filterTab === 'community'
+          ? `PUBLIC TOURING ROUTES  ·  ${communityTrips.length}`
+          : `YOUR JOURNEYS  ·  ${displayedRides.length}`}
+      </Text>
+
+      {filterTab === 'community' ? (
+        communityTrips.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyMark}>00 / 00</Text>
+            <Text style={styles.emptyText}>No community routes yet.</Text>
+            <Text style={styles.emptySubtext}>Public itineraries published by touring captains will appear here.</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={communityTrips}
+            keyExtractor={(item) => item.id}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
+            contentContainerStyle={{ padding: 16 }}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/trip/${item.id}`)}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.rideName}>{item.name}</Text>
+                  <TouchableOpacity
+                    style={styles.cardActionBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Clone route ${item.name}`}
+                    disabled={duplicatingRideId === item.id}
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleDuplicateTrip(item);
+                    }}
+                  >
+                    {duplicatingRideId === item.id ? (
+                      <ActivityIndicator size="small" color={theme.accent} />
+                    ) : (
+                      <Text style={styles.cardActionIcon}>📋</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                {!!item.description && <Text style={[styles.emptySubtext, { marginTop: 4, textAlign: 'left' }]}>{item.description}</Text>}
+                <Text style={styles.route}>{item.origin} → {item.destination}</Text>
+                <View style={styles.cardFooter}>
+                  <Text style={styles.code}>
+                    {item.waypoint_count} STOPS · {item.estimated_distance_meters ? `${Math.round(item.estimated_distance_meters / 1000)} KM` : 'ROUTE'}
+                  </Text>
+                  <Text style={styles.openLabel}>BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'} ↗</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        )
+      ) : displayedRides.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyMark}>01 / 00</Text>
           <Text style={styles.emptyText}>{filterTab === 'archived' ? 'No archived trips.' : 'The road is waiting.'}</Text>

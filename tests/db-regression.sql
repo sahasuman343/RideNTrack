@@ -37,7 +37,11 @@ BEGIN
     'public.toggle_trip_checklist_item(uuid,boolean)'::regprocedure,
     'public.transfer_trip_leadership(uuid,uuid)'::regprocedure,
     'public.remove_trip_participant(uuid,uuid)'::regprocedure,
-    'public.reject_trip_invitation(uuid)'::regprocedure
+    'public.reject_trip_invitation(uuid)'::regprocedure,
+    'public.add_trip_expense(uuid,text,numeric,text,uuid[],text)'::regprocedure,
+    'public.delete_trip_expense(uuid)'::regprocedure,
+    'public.get_trip_expenses(uuid)'::regprocedure,
+    'public.get_trip_expense_summary(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -46,6 +50,12 @@ BEGIN
       RAISE EXCEPTION 'authenticated RPC access missing: %',rpc;
     END IF;
   END LOOP;
+  IF NOT has_function_privilege('anon','public.get_public_trips(integer,integer)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'anon access missing for public.get_public_trips';
+  END IF;
+  IF NOT has_function_privilege('authenticated','public.get_public_trips(integer,integer)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'authenticated access missing for public.get_public_trips';
+  END IF;
   FOREACH rpc IN ARRAY ARRAY[
     'public.auto_join_admin()'::regprocedure,
     'public.handle_new_user()'::regprocedure
@@ -744,6 +754,112 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.ride_participants WHERE user_id = test_user_id) THEN
     RAISE EXCEPTION 'ride participant remains after delete_user_account';
   END IF;
+END $$;
+
+-- Phase 4 & Phase 7: Announcements, Group Expenses, and Public Discovery
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  member_id uuid := '22222222-2222-4222-8222-222222222222';
+  outsider_id uuid := '33333333-3333-4333-8333-333333333333';
+  test_ride_id uuid;
+  test_expense_id uuid;
+  expenses jsonb;
+  summary jsonb;
+  public_trips jsonb;
+BEGIN
+  -- 1. Setup ride with owner and member
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Expenses & Public Tour","trip_type":"group","visibility":"public","origin":"Bengaluru","destination":"Chikmagalur","origin_coords":[77.59,12.97],"destination_coords":[75.78,13.31]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bengaluru","latitude":12.97,"longitude":77.59},{"sequence":1,"waypoint_type":"destination","name":"Chikmagalur","latitude":13.31,"longitude":75.78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  -- Member joins
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code((SELECT ride_code FROM public.rides WHERE id = test_ride_id));
+
+  -- 2. Announcement Alert Check
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  INSERT INTO public.alerts (id, ride_id, user_id, type, message, lat, lng)
+  VALUES (gen_random_uuid(), test_ride_id, owner_id, 'announcement', 'Fuel stop in 5km', 12.97, 77.59);
+
+  -- 3. Add Group Expense
+  test_expense_id := public.add_trip_expense(
+    test_ride_id,
+    'Highway Dhaba Lunch',
+    600.00,
+    'food',
+    ARRAY[owner_id, member_id],
+    'Split 50-50'
+  );
+
+  IF test_expense_id IS NULL THEN
+    RAISE EXCEPTION 'add_trip_expense failed to return expense id';
+  END IF;
+
+  -- Verify splits created
+  IF (SELECT count(*) FROM public.trip_expense_splits WHERE expense_id = test_expense_id) != 2 THEN
+    RAISE EXCEPTION 'trip_expense_splits expected 2 rows';
+  END IF;
+
+  -- Verify get_trip_expenses
+  expenses := public.get_trip_expenses(test_ride_id);
+  IF jsonb_array_length(expenses) != 1 THEN
+    RAISE EXCEPTION 'get_trip_expenses expected 1 expense, got %', jsonb_array_length(expenses);
+  END IF;
+
+  -- Verify get_trip_expense_summary from owner perspective
+  summary := public.get_trip_expense_summary(test_ride_id);
+  IF (summary->>'total_spend')::numeric != 600.00 THEN
+    RAISE EXCEPTION 'total_spend expected 600.00, got %', summary->>'total_spend';
+  END IF;
+  IF (summary->>'my_paid')::numeric != 600.00 THEN
+    RAISE EXCEPTION 'my_paid for owner expected 600.00, got %', summary->>'my_paid';
+  END IF;
+  IF (summary->>'my_share')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'my_share for owner expected 300.00, got %', summary->>'my_share';
+  END IF;
+  IF (summary->>'net_balance')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'net_balance for owner expected 300.00, got %', summary->>'net_balance';
+  END IF;
+
+  -- Verify member perspective
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  summary := public.get_trip_expense_summary(test_ride_id);
+  IF (summary->>'my_paid')::numeric != 0.00 THEN
+    RAISE EXCEPTION 'my_paid for member expected 0.00, got %', summary->>'my_paid';
+  END IF;
+  IF (summary->>'my_share')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'my_share for member expected 300.00, got %', summary->>'my_share';
+  END IF;
+  IF (summary->>'net_balance')::numeric != -300.00 THEN
+    RAISE EXCEPTION 'net_balance for member expected -300.00, got %', summary->>'net_balance';
+  END IF;
+
+  -- 4. Delete Expense
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip_expense(test_expense_id);
+  IF EXISTS (SELECT 1 FROM public.trip_expenses WHERE id = test_expense_id) THEN
+    RAISE EXCEPTION 'delete_trip_expense failed to delete expense';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.trip_expense_splits WHERE expense_id = test_expense_id) THEN
+    RAISE EXCEPTION 'delete_trip_expense failed to cascade delete splits';
+  END IF;
+
+  -- 5. Public Trips Discovery (outsider caller)
+  PERFORM set_config('request.jwt.claim.sub', outsider_id::text, true);
+  public_trips := public.get_public_trips(10, 0);
+  IF jsonb_array_length(public_trips) < 1 THEN
+    RAISE EXCEPTION 'get_public_trips expected at least 1 public trip, got %', jsonb_array_length(public_trips);
+  END IF;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip(test_ride_id);
 END $$;
 
 RESET ROLE;

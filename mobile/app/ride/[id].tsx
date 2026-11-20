@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image, ScrollView, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl, getRiderLiveStatus, type RiderLiveStatus } from '@ridentrack/shared';
+import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl, getRiderLiveStatus, type RiderLiveStatus, calculatePackFormation, type PackRiderProgress } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -71,11 +71,18 @@ export default function LiveRideScreen() {
   const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean }>>([]);
   const [arrivingRegroupPoint, setArrivingRegroupPoint] = useState<{ id: string; name: string } | null>(null);
   const [sosModal, setSosModal] = useState(false);
+  const [announcementModal, setAnnouncementModal] = useState(false);
+  const [customAnnouncement, setCustomAnnouncement] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
+  const packFormation = useMemo(() => {
+    const routeCoords = route?.geometry?.coordinates;
+    if (!Array.isArray(routeCoords) || routeCoords.length < 2) return [];
+    return calculatePackFormation(points, routeCoords, ride?.rider_behind_threshold_meters || 1000);
+  }, [points, route?.geometry?.coordinates, ride?.rider_behind_threshold_meters]);
   // Keep map input tied to actual GPS samples. Per-frame JS marker animation
   // repeatedly rebuilds GeoJSON and is costly on entry-level Android devices.
   const animated = points;
@@ -375,14 +382,22 @@ export default function LiveRideScreen() {
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not update ride.'); }
     finally { setBusy(false); }
   }
-  async function sendAlert(type: AlertType) {
+  async function sendAlert(type: AlertType, customMessage?: string) {
     if (!position || !userId || isStale(position.timestamp)) { setMessage('Wait for a fresh GPS fix before sending an alert.'); return; }
     setBusy(true);
     try {
-      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
+      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
       setModal(false); await sync.flushQueue(); await refresh();
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not save alert.'); }
     finally { setBusy(false); }
+  }
+
+  async function broadcastAnnouncement(msg: string) {
+    if (!msg || !msg.trim()) return;
+    setAnnouncementModal(false);
+    setCustomAnnouncement('');
+    await sendAlert('announcement', msg.trim());
+    setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
   }
 
   async function confirmArrival(regroupPointId: string) {
@@ -678,7 +693,32 @@ export default function LiveRideScreen() {
           </View>
         </View>
       </TouchableOpacity>
-      {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
+      {newest && <TouchableOpacity style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}{newest.message ? `: "${newest.message}"` : ''} · tap to dismiss</Text></TouchableOpacity>}
+      {packFormation.length > 1 && (
+        <View style={s.formationContainer}>
+          <View style={s.formationHeader}>
+            <Text style={s.formationTitle}>FORMATION & SPACING</Text>
+            {packFormation.some(p => p.isSeparated) && (
+              <Text style={s.separationBadge}>⚠️ Gap Alert</Text>
+            )}
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.formationStrip}>
+            {packFormation.map(rider => (
+              <View key={rider.userId} style={s.formationItem}>
+                <View style={[s.formationBadge, rider.isLeader ? s.leaderBadge : rider.isTail ? s.tailBadge : s.memberBadge]}>
+                  <Text style={s.formationBadgeText}>
+                    {rider.isLeader ? '👑 LEAD' : rider.isTail ? '🧹 SWEEP' : `#${rider.order}`}
+                  </Text>
+                </View>
+                <Text numberOfLines={1} style={s.formationName}>{rider.displayName}</Text>
+                <Text style={[s.formationGap, rider.isSeparated ? s.separatedGap : null]}>
+                  {rider.isLeader ? 'Lead' : `+${rider.gapToAheadMeters >= 1000 ? (rider.gapToAheadMeters / 1000).toFixed(1) + 'km' : rider.gapToAheadMeters + 'm'}`}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
       {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
       {expanded && <FlatList
         data={points}
@@ -838,11 +878,98 @@ export default function LiveRideScreen() {
         </View>
       )}
     </View>
-    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}>
+          <Text style={s.heading}>Let your group know</Text>
+          <Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>
+          {admin && (
+            <TouchableOpacity
+              style={[s.alertOption, { backgroundColor: theme.accentSoft, borderColor: theme.accent, borderWidth: 1 }]}
+              disabled={busy}
+              onPress={() => { setModal(false); setAnnouncementModal(true); }}
+            >
+              <Text style={[s.text, { color: theme.accent }]}>📢 Captain Announcement...</Text>
+            </TouchableOpacity>
+          )}
+          {(Object.keys(ALERT_LABELS) as AlertType[]).filter(t => t !== 'announcement').map(type => (
+            <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}>
+              <Text style={s.text}>{ALERT_LABELS[type]}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={announcementModal} transparent animationType="slide" onRequestClose={() => setAnnouncementModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <Text style={[s.heading, { color: theme.accent }]}>📢 Captain Announcement</Text>
+          <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
+          <View style={{ gap: 8, marginVertical: 4 }}>
+            {[
+              '⛽ Fuel stop at next pump (~5km)',
+              '☕ Chai & stretch break ahead',
+              '🌧️ Wet roads / rain ahead — reduce speed',
+              '⚠️ Road hazard / debris observed',
+              '📢 Regroup at next junction',
+              '🛑 Pull over safely now',
+            ].map((preset, idx) => (
+              <TouchableOpacity key={idx} style={s.presetOption} disabled={busy} onPress={() => void broadcastAnnouncement(preset)}>
+                <Text style={s.presetText}>{preset}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <TextInput
+              style={s.announcementInput}
+              placeholder="Or type custom announcement..."
+              placeholderTextColor={theme.muted}
+              value={customAnnouncement}
+              onChangeText={setCustomAnnouncement}
+              maxLength={120}
+            />
+            <TouchableOpacity
+              style={[s.sendAnnouncementBtn, !customAnnouncement.trim() && s.disabled]}
+              disabled={busy || !customAnnouncement.trim()}
+              onPress={() => void broadcastAnnouncement(customAnnouncement)}
+            >
+              <Text style={s.sendAnnouncementText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={s.secondary} onPress={() => setAnnouncementModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
     <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
   </View>;
 }
 const makeStyles = (c: RidePalette) => StyleSheet.create({
+  announcementBanner:{backgroundColor:'#FFF7ED',borderColor:'#F97316',borderWidth:1},
+  announcementBannerText:{color:'#C2410C',fontWeight:'800'},
+  formationContainer:{marginBottom:12,backgroundColor:c.surfaceRaised,borderRadius:12,padding:10,borderWidth:1,borderColor:c.border},
+  formationHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8},
+  formationTitle:{color:c.muted,fontSize:10,fontWeight:'800',letterSpacing:0.5},
+  separationBadge:{color:c.danger,fontSize:10,fontWeight:'800'},
+  formationStrip:{flexDirection:'row',gap:8,alignItems:'center'},
+  formationItem:{alignItems:'center',minWidth:68,backgroundColor:c.surface,borderRadius:8,padding:6,borderWidth:1,borderColor:c.border},
+  formationBadge:{paddingHorizontal:6,paddingVertical:2,borderRadius:4,marginBottom:4},
+  leaderBadge:{backgroundColor:c.accentSoft},
+  tailBadge:{backgroundColor:'#FEF3C7'},
+  memberBadge:{backgroundColor:c.surfaceRaised},
+  formationBadgeText:{color:c.text,fontSize:9,fontWeight:'800'},
+  formationName:{color:c.text,fontSize:11,fontWeight:'700',maxWidth:70},
+  formationGap:{color:c.muted,fontSize:10,fontWeight:'600',marginTop:2},
+  separatedGap:{color:c.danger,fontWeight:'800'},
+  presetOption:{padding:12,borderRadius:8,backgroundColor:c.surfaceRaised,borderWidth:1,borderColor:c.border},
+  presetText:{color:c.text,fontSize:13,fontWeight:'600'},
+  announcementInput:{flex:1,backgroundColor:c.surfaceRaised,borderRadius:10,borderWidth:1,borderColor:c.border,paddingHorizontal:12,paddingVertical:10,color:c.text,fontSize:13},
+  sendAnnouncementBtn:{backgroundColor:c.accent,paddingHorizontal:16,justifyContent:'center',borderRadius:10},
+  sendAnnouncementText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},
   screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
   text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'800',letterSpacing:-0.3},
   top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},

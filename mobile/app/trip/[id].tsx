@@ -17,6 +17,13 @@ import {
   type TripChecklistItem,
   type RideParticipantRole,
   type TripChecklistCategory,
+  exportTripToGpx,
+  calculateExpenseSettlement,
+  EXPENSE_CATEGORY_META,
+  type TripExpense,
+  type TripExpenseCategory,
+  type TripExpenseSummary,
+  type SettlementTransaction,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -96,6 +103,19 @@ export default function TripWorkspaceScreen() {
   const [weatherPoints, setWeatherPoints] = useState<RouteWeatherPoint[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
+  const [expenses, setExpenses] = useState<TripExpense[]>([]);
+  const [expenseSummary, setExpenseSummary] = useState<TripExpenseSummary | null>(null);
+  const [expenseModal, setExpenseModal] = useState(false);
+  const [newExpenseTitle, setNewExpenseTitle] = useState('');
+  const [newExpenseAmount, setNewExpenseAmount] = useState('');
+  const [newExpenseCategory, setNewExpenseCategory] = useState<TripExpenseCategory>('fuel');
+  const [newExpenseSplitUsers, setNewExpenseSplitUsers] = useState<string[]>([]);
+  const [newExpenseNotes, setNewExpenseNotes] = useState('');
+
+  const settlements = useMemo(() => {
+    return calculateExpenseSettlement(expenseSummary?.participant_balances || []);
+  }, [expenseSummary?.participant_balances]);
+
   useEffect(() => {
     if (!trip) return;
     let cancelled = false;
@@ -172,7 +192,7 @@ export default function TripWorkspaceScreen() {
     if (!id) return;
     setLoading(true); setError('');
     try {
-      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult, checklistResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult, checklistResult, expensesResult, expenseSummaryResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
@@ -181,6 +201,8 @@ export default function TripWorkspaceScreen() {
         supabase.rpc('get_regroup_points', { p_ride_id: id }),
         supabase.rpc('get_trip_stages', { p_ride_id: id }),
         supabase.rpc('get_trip_checklists', { p_ride_id: id }),
+        supabase.rpc('get_trip_expenses', { p_ride_id: id }),
+        supabase.rpc('get_trip_expense_summary', { p_ride_id: id }),
       ]);
       if (generation !== loadGeneration.current) return;
       if (tripResult.error) throw tripResult.error;
@@ -196,6 +218,8 @@ export default function TripWorkspaceScreen() {
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
+      if (expensesResult?.data) setExpenses(expensesResult.data as TripExpense[]);
+      if (expenseSummaryResult?.data) setExpenseSummary(expenseSummaryResult.data as TripExpenseSummary);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
 
@@ -411,6 +435,96 @@ export default function TripWorkspaceScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function exportGpxFile() {
+    if (!trip) return;
+    try {
+      const gpxContent = exportTripToGpx({
+        tripName: trip.name,
+        description: trip.description,
+        waypoints: waypoints.map(w => ({
+          name: w.name,
+          latitude: w.latitude,
+          longitude: w.longitude,
+          waypoint_type: w.waypoint_type,
+          notes: w.notes,
+        })),
+        routeCoordinates: (trip as any).route_geometry?.geometry?.coordinates,
+      });
+
+      await Share.share({
+        message: gpxContent,
+        title: `${trip.name}.gpx`,
+      });
+    } catch (err: any) {
+      Alert.alert('Could not export GPX', err?.message || 'Please try again.');
+    }
+  }
+
+  async function handleAddExpense() {
+    if (!newExpenseTitle.trim()) {
+      Alert.alert('Required', 'Please enter an expense title.');
+      return;
+    }
+    const parsedAmount = parseFloat(newExpenseAmount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Required', 'Please enter a valid expense amount.');
+      return;
+    }
+    if (newExpenseSplitUsers.length === 0) {
+      Alert.alert('Required', 'Please select at least one rider to share this expense.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { error } = await supabase.rpc('add_trip_expense', {
+        p_ride_id: id,
+        p_title: newExpenseTitle.trim(),
+        p_amount: parsedAmount,
+        p_category: newExpenseCategory,
+        p_split_user_ids: newExpenseSplitUsers,
+        p_notes: newExpenseNotes.trim() || null,
+      });
+      if (error) throw error;
+      setExpenseModal(false);
+      setNewExpenseTitle('');
+      setNewExpenseAmount('');
+      setNewExpenseNotes('');
+      await load();
+      Alert.alert('Expense Added', 'Group expense recorded and split calculated.');
+    } catch (err: any) {
+      Alert.alert('Could not save expense', err?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleDeleteExpense(expenseId: string, title: string) {
+    Alert.alert(
+      'Delete Expense?',
+      `Remove "${title}" from trip expenses?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error } = await supabase.rpc('delete_trip_expense', { p_expense_id: expenseId });
+              if (error) throw error;
+              await load();
+            } catch (err: any) {
+              Alert.alert('Could not delete expense', err?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function confirmLeaveRide() {
@@ -921,6 +1035,18 @@ export default function TripWorkspaceScreen() {
           <Text style={styles.secondaryText}>📋 Duplicate trip</Text>
         </TouchableOpacity>
       </View>
+      <View style={styles.actions}>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void exportGpxFile()}>
+          <Text style={styles.secondaryText}>🗺️ Export GPX route</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => {
+          const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
+          setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
+          setExpenseModal(true);
+        }}>
+          <Text style={styles.secondaryText}>💰 Add trip expense</Text>
+        </TouchableOpacity>
+      </View>
       {isAdmin && <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={openTripEditor}><Text style={styles.secondaryText}>Trip details</Text></TouchableOpacity>
@@ -1064,6 +1190,96 @@ export default function TripWorkspaceScreen() {
         <TouchableOpacity style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]} onPress={() => void shareRideCard()}>
           <Text style={styles.secondaryText}>📱 Share Ride Card (WhatsApp / Instagram)</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Trip Expenses & Bill Splitting */}
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>💰 Trip Expenses & Splitting</Text>
+          <TouchableOpacity style={styles.smallButton} onPress={() => {
+            const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
+            setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
+            setExpenseModal(true);
+          }}>
+            <Text style={styles.smallButtonText}>＋ Add expense</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Spend Overview */}
+        <View style={styles.expenseSummaryRow}>
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={styles.expenseSummaryValue}>₹{expenseSummary?.total_spend || 0}</Text>
+            <Text style={styles.expenseSummaryLabel}>TOTAL SPEND</Text>
+          </View>
+          <View style={styles.expenseSummaryDivider} />
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={styles.expenseSummaryValue}>₹{expenseSummary?.my_share || 0}</Text>
+            <Text style={styles.expenseSummaryLabel}>YOUR SHARE</Text>
+          </View>
+          <View style={styles.expenseSummaryDivider} />
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={[
+              styles.expenseSummaryValue,
+              (expenseSummary?.net_balance || 0) > 0 ? { color: '#16A34A' } : (expenseSummary?.net_balance || 0) < 0 ? { color: '#EA580C' } : null
+            ]}>
+              {(expenseSummary?.net_balance || 0) > 0 ? `+₹${expenseSummary?.net_balance}` : (expenseSummary?.net_balance || 0) < 0 ? `-₹${Math.abs(expenseSummary?.net_balance || 0)}` : '₹0'}
+            </Text>
+            <Text style={styles.expenseSummaryLabel}>
+              {(expenseSummary?.net_balance || 0) > 0 ? 'YOU ARE OWED' : (expenseSummary?.net_balance || 0) < 0 ? 'YOU OWE' : 'SETTLED'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Settlement Breakdown ("Who Owes Whom") */}
+        {settlements.length > 0 && (
+          <View style={styles.settlementContainer}>
+            <Text style={styles.settlementTitle}>SETTLEMENT RESOLUTION</Text>
+            {settlements.map((s, idx) => (
+              <View key={idx} style={styles.settlementRow}>
+                <Text style={styles.settlementFrom}>{s.fromName}</Text>
+                <Text style={styles.settlementArrow}>pays</Text>
+                <Text style={styles.settlementTo}>{s.toName}</Text>
+                <Text style={styles.settlementAmount}>₹{s.amount}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Expenses List */}
+        {expenses.length === 0 ? (
+          <Text style={styles.mutedSmall}>No expenses logged yet. Record fuel, food, and stays to split fairly.</Text>
+        ) : (
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {expenses.map(exp => (
+              <View key={exp.id} style={styles.expenseItem}>
+                <Text style={{ fontSize: 20 }}>{EXPENSE_CATEGORY_META[exp.category]?.icon || '💳'}</Text>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.expenseItemTitle}>{exp.title}</Text>
+                    <Text style={styles.expenseItemAmount}>₹{exp.amount}</Text>
+                  </View>
+                  <Text style={styles.mutedSmall}>
+                    Paid by {exp.payer_name} · Split among {exp.splits.length} {exp.splits.length === 1 ? 'rider' : 'riders'} (₹{exp.splits[0]?.amount || 0}/ea)
+                  </Text>
+                  {!!exp.notes && (
+                    <Text style={[styles.mutedSmall, { fontStyle: 'italic', marginTop: 2 }]}>
+                      {exp.notes}
+                    </Text>
+                  )}
+                </View>
+                {(exp.payer_id === user?.id || isAdmin) && (
+                  <TouchableOpacity
+                    style={styles.deleteExpenseBtn}
+                    onPress={() => handleDeleteExpense(exp.id, exp.title)}
+                    accessibilityLabel="Delete expense"
+                  >
+                    <Text style={styles.deleteExpenseIcon}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       <View style={styles.card}>
@@ -1494,6 +1710,87 @@ export default function TripWorkspaceScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Add Expense Modal */}
+      <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.section}>💰 Add Trip Expense</Text>
+            <Text style={styles.mutedSmall}>Log group spending and split equally among selected riders.</Text>
+
+            <Text style={styles.label}>Expense Title *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Petrol in Sakleshpur, Dinner at Dhaba"
+              placeholderTextColor={theme.subtle}
+              value={newExpenseTitle}
+              onChangeText={setNewExpenseTitle}
+            />
+
+            <Text style={styles.label}>Amount (₹) *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="0.00"
+              placeholderTextColor={theme.subtle}
+              keyboardType="decimal-pad"
+              value={newExpenseAmount}
+              onChangeText={setNewExpenseAmount}
+            />
+
+            <Text style={styles.label}>Category</Text>
+            <View style={styles.categoryRow}>
+              {(Object.keys(EXPENSE_CATEGORY_META) as TripExpenseCategory[]).map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.categoryPill, newExpenseCategory === cat && styles.categoryPillActive]}
+                  onPress={() => setNewExpenseCategory(cat)}
+                >
+                  <Text style={[styles.categoryPillText, newExpenseCategory === cat && styles.categoryPillTextActive]}>
+                    {EXPENSE_CATEGORY_META[cat].icon} {EXPENSE_CATEGORY_META[cat].label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Split Among Riders ({newExpenseSplitUsers.length} selected)</Text>
+            <View style={{ gap: 4, marginVertical: 4 }}>
+              {roster.filter(r => r.is_active).map(r => {
+                const isSelected = newExpenseSplitUsers.includes(r.user_id);
+                return (
+                  <TouchableOpacity
+                    key={r.user_id}
+                    style={styles.splitUserRow}
+                    onPress={() => {
+                      setNewExpenseSplitUsers(prev =>
+                        isSelected ? prev.filter(uid => uid !== r.user_id) : [...prev, r.user_id]
+                      );
+                    }}
+                  >
+                    <Text style={{ fontSize: 16 }}>{isSelected ? '☑' : '☐'}</Text>
+                    <Text style={styles.splitUserName}>{r.display_name} {r.user_id === user?.id ? '(you)' : ''}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Any details (e.g. paid via UPI)"
+              placeholderTextColor={theme.subtle}
+              value={newExpenseNotes}
+              onChangeText={setNewExpenseNotes}
+            />
+
+            <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={handleAddExpense}>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save Expense'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => setExpenseModal(false)}>
+              <Text style={styles.secondaryText}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
       {!!error && <Text style={styles.error}>{error}</Text>}
       <Text style={styles.footer}>Trip planning is separate from the actual GPS session. Starting the tracker records what happened, while this workspace keeps the planned journey.</Text>
     </ScrollView>
@@ -1572,4 +1869,28 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   checkmark: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   checklistTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
   checklistTitleDone: { textDecorationLine: 'line-through', color: c.muted },
+  expenseSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12 },
+  expenseSummaryBlock: { alignItems: 'center', flex: 1 },
+  expenseSummaryValue: { color: c.text, fontSize: 16, fontWeight: '900' },
+  expenseSummaryLabel: { color: c.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 },
+  expenseSummaryDivider: { width: 1, height: 26, backgroundColor: c.border },
+  settlementContainer: { backgroundColor: c.accentSoft, borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: c.accent },
+  settlementTitle: { color: c.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 6 },
+  settlementRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 2 },
+  settlementFrom: { color: c.text, fontSize: 12, fontWeight: '700' },
+  settlementArrow: { color: c.muted, fontSize: 11 },
+  settlementTo: { color: c.text, fontSize: 12, fontWeight: '700' },
+  settlementAmount: { color: c.accent, fontSize: 12, fontWeight: '900', marginLeft: 'auto' },
+  expenseItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: c.surfaceRaised, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: c.border },
+  expenseItemTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
+  expenseItemAmount: { color: c.accent, fontSize: 13, fontWeight: '900' },
+  deleteExpenseBtn: { padding: 4 },
+  deleteExpenseIcon: { color: c.muted, fontSize: 12, fontWeight: '700' },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 },
+  categoryPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.background, borderWidth: 1, borderColor: c.border },
+  categoryPillActive: { backgroundColor: c.accentSoft, borderColor: c.accent },
+  categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
+  categoryPillTextActive: { color: c.accent, fontWeight: '800' },
+  splitUserRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border },
+  splitUserName: { color: c.text, fontSize: 12, fontWeight: '600' },
 });
