@@ -43,10 +43,10 @@ ALTER TABLE public.trip_regroup_points
   ADD CONSTRAINT trip_regroup_points_created_by_fkey
   FOREIGN KEY (created_by) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
-ALTER TABLE public.trip_regroup_confirmations
-  DROP CONSTRAINT IF EXISTS trip_regroup_confirmations_user_id_fkey;
-ALTER TABLE public.trip_regroup_confirmations
-  ADD CONSTRAINT trip_regroup_confirmations_user_id_fkey
+ALTER TABLE public.trip_regroup_arrivals
+  DROP CONSTRAINT IF EXISTS trip_regroup_arrivals_user_id_fkey;
+ALTER TABLE public.trip_regroup_arrivals
+  ADD CONSTRAINT trip_regroup_arrivals_user_id_fkey
   FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 -- RPC for self-service account deletion
