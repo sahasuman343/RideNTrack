@@ -111,7 +111,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
     const data = await registerAccount(supabase, { email, password, username, displayName });
-    return Boolean(data.session);
+    if (data?.session) {
+      setSession(data.session);
+      if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);
+      activeUserId.current = data.user?.id ?? null;
+      if (data.user) fetchProfile(data.user.id);
+    }
+    return Boolean(data?.session);
   }
 
   async function signIn(email: string, password: string) {

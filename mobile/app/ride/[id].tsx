@@ -26,6 +26,8 @@ export default function LiveRideScreen() {
   const { user, profile } = useAuth();
   const userId = user?.id;
   const name = profile?.display_name || 'Rider';
+  const nameRef = useRef(name);
+  nameRef.current = name;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
@@ -154,13 +156,13 @@ export default function LiveRideScreen() {
     }
     let cancelled = false;
     setTracking('waiting'); setGpsError(null);
-    void startBackgroundLocationUpdates({ rideId: id, userId, displayName: name, publish,
+    void startBackgroundLocationUpdates({ rideId: id, userId, displayName: nameRef.current, publish,
       onLocationUpdate: p => { if (!cancelled) setPosition(p); },
       onError: e => { if (!cancelled) setGpsError(e); },
     }).then(result => { if (!cancelled) setTracking(result.isBackgroundEnabled ? 'background' : 'foreground'); })
       .catch(e => { if (!cancelled) { setTracking('error'); setGpsError(e.message); } });
     return () => { cancelled = true; void stopBackgroundLocationUpdates().catch(() => {}); };
-  }, [id,userId,name,active,sharing,publish,gpsRetry]);
+  }, [id,userId,active,sharing,publish,gpsRetry]);
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
       if (typeof position.lng === 'number' && typeof position.lat === 'number' && Number.isFinite(position.lng) && Number.isFinite(position.lat)) {
@@ -588,8 +590,8 @@ export default function LiveRideScreen() {
       <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
         <Text style={s.sosTopButtonText}>SOS</Text>
       </TouchableOpacity>
-      {admin && (
-        <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
+      {(admin || ride?.status === 'completed') && (
+        <TouchableOpacity accessibilityLabel="Trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
           <Text style={s.topBarIcon}>✎</Text>
         </TouchableOpacity>
       )}

@@ -191,6 +191,43 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
   await assert.rejects(service.syncQueue(),/Some alerts remain queued/);
   assert.deepEqual(deleted,['l']);
 });
+test('unauthorized or stale breadcrumbs are isolated and cleared without blocking the queue', async () => {
+  let locations = [
+    { id: 'stale-1', user_id: 'u', ride_id: 'old-ride' },
+    { id: 'valid-2', user_id: 'u', ride_id: 'active-ride' },
+  ];
+  let deleted = [];
+  const service = loader({
+    '../lib/supabase': {
+      supabase: {
+        auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) },
+        from: () => ({ upsert: async () => ({ error: null }) }),
+        rpc: async (_name, args) => {
+          if (args.updates.length > 1) {
+            return { data: null, error: { message: 'Invalid or unauthorized location batch' } };
+          }
+          const item = args.updates[0];
+          if (item.ride_id === 'old-ride') {
+            return { data: null, error: { message: 'Invalid or unauthorized location batch' } };
+          }
+          return { data: 1, error: null };
+        },
+      },
+    },
+    '../lib/offlineQueue': {
+      getQueueCounts: async () => ({ locations: locations.length, alerts: 0 }),
+      getQueuedAlerts: async () => [],
+      getQueuedLocations: async () => locations,
+      clearQueuedItems: async (_user, ids) => {
+        deleted.push(...ids);
+        locations = locations.filter(l => !ids.includes(l.id));
+      },
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await service.syncQueue();
+  assert.deepEqual(deleted, ['stale-1', 'valid-2']);
+  assert.equal(locations.length, 0);
+});
 test('an in-flight GPS save cannot publish through the next ride callback', async () => {
   let listener, releaseSave, notifySave;
   const saving = new Promise(resolve => { notifySave = resolve; });
@@ -1220,6 +1257,20 @@ test('group coordination and expenses migration defines schema, RPCs, and public
   assert.match(migration, /get_trip_expenses/);
   assert.match(migration, /get_trip_expense_summary/);
   assert.match(migration, /get_public_trips/);
+});
+
+test('phase 0 stabilization and hardening migration addresses RLS leaks and role permissiveness', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/022_phase0_stabilization_and_hardening.sql'), 'utf8');
+  assert.match(migration, /DROP POLICY IF EXISTS "Users can leave rides" ON public\.ride_participants/);
+  assert.match(migration, /rp\.role IN \('captain', 'leader'\)/);
+  assert.match(migration, /visibility = 'public'/);
+  assert.match(migration, /Trip days visible to ride members/);
+  assert.match(migration, /Trip stays visible to ride members/);
+  assert.match(migration, /Trip stages visible to ride members/);
+  assert.match(migration, /handle_new_user\(\)/);
+  assert.match(migration, /SET search_path = ''/);
+  assert.match(migration, /trip_expenses_payer_id_fkey/);
+  assert.match(migration, /trip_expense_splits_user_id_fkey/);
 });
 
 

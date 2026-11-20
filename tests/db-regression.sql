@@ -711,6 +711,19 @@ BEGIN
     RAISE EXCEPTION 'new leader participant role is not captain';
   END IF;
 
+  -- 6b. New captain can add regroup points (verifies captain role in add_regroup_point)
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.add_regroup_point(test_ride_id, 'Captain regroup', 12.5, 77.5, 1, NULL, 'Added by captain');
+  IF NOT EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id = test_ride_id AND name = 'Captain regroup') THEN
+    RAISE EXCEPTION 'captain role was unable to add regroup point';
+  END IF;
+
+  -- 6c. Direct hard delete on ride_participants must be blocked by RLS
+  DELETE FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id;
+  IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) THEN
+    RAISE EXCEPTION 'direct hard deletion of ride participant was permitted';
+  END IF;
+
   -- 7. New captain removes former leader
   PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
   PERFORM public.remove_trip_participant(test_ride_id, owner_id);

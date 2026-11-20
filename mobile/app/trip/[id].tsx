@@ -29,6 +29,7 @@ import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip } from '../../src/lib/tripCache';
+import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
@@ -382,6 +383,7 @@ export default function TripWorkspaceScreen() {
     if (!trip || !isAdmin) return;
     setSaving(true); setError('');
     try {
+      await stopBackgroundLocationUpdates().catch(() => {});
       const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: id });
       if (deleteError) throw deleteError;
       router.replace('/(tabs)');
@@ -543,6 +545,7 @@ export default function TripWorkspaceScreen() {
     if (!trip || isAdmin) return;
     setSaving(true); setError('');
     try {
+      await stopBackgroundLocationUpdates().catch(() => {});
       const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
       if (leaveError) throw leaveError;
       router.replace('/(tabs)');

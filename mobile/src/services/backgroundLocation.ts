@@ -30,7 +30,9 @@ async function record(locations: Location.LocationObject[]) {
   if (!saved) return;
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const session = sessionRes?.data?.session;
-  if (!session || session.user.id !== saved.userId || version !== generation) return;
+  // If a session exists, ensure it matches the active rider. Do not drop offline
+  // breadcrumbs solely because token refresh failed without connectivity.
+  if ((session && session.user.id !== saved.userId) || version !== generation) return;
   for (const location of locations) {
     if (version !== generation || !location || !location.coords) return;
     const { latitude: lat, longitude: lng, speed, heading, accuracy } = location.coords;

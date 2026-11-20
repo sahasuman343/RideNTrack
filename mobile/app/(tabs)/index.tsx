@@ -5,6 +5,7 @@ import { Ride, type RiderAnalytics } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
+import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 
 export default function MyRidesScreen() {
   const [rides, setRides] = useState<Ride[]>([]);
@@ -65,6 +66,7 @@ export default function MyRidesScreen() {
             onPress: async () => {
               setDeletingRideId(item.id);
               try {
+                await stopBackgroundLocationUpdates().catch(() => {});
                 const { error } = await supabase.rpc('delete_trip', { p_ride_id: item.id });
                 if (error) throw error;
                 setRides(prev => prev.filter(r => r.id !== item.id));
@@ -90,6 +92,7 @@ export default function MyRidesScreen() {
             onPress: async () => {
               setDeletingRideId(item.id);
               try {
+                await stopBackgroundLocationUpdates().catch(() => {});
                 const { error } = await supabase.rpc('leave_ride', { p_ride_id: item.id });
                 if (error) throw error;
                 setRides(prev => prev.filter(r => r.id !== item.id));
@@ -308,7 +311,7 @@ export default function MyRidesScreen() {
             <TouchableOpacity
               style={styles.card}
               onPress={() => {
-                if (item.status === 'archived' || item.status === 'planned') {
+                if (item.status === 'archived' || item.status === 'planned' || item.status === 'completed') {
                   router.push(`/trip/${item.id}`);
                 } else {
                   router.push(`/ride/${item.id}`);
