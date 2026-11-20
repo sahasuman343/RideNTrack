@@ -1,51 +1,34 @@
 name: Build Android preview APK
 
 on:
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Verify ride reliability"]
+    types: [completed]
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: ridentrack-apk-${{ github.ref }}
+  group: ridentrack-apk-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
-  validate:
-    name: Validate selected branch
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out selected branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-      - name: TypeScript checks
-        run: npm run typecheck
-      - name: Regression tests
-        run: npm test
-      - name: Web lint
-        run: npm run lint
-
   build:
     name: Approved EAS APK build
-    needs: validate
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment:
       name: apk-approval
     steps:
-      - name: Check out the exact selected commit
+      - name: Check out the exact validated commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -89,20 +72,23 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RideNTrack-android-apk-${{ github.sha }}
+          name: RideNTrack-android-apk-${{ github.event.workflow_run.head_sha }}
           path: RideNTrack-preview.apk
           if-no-files-found: error
           retention-days: 14
       - name: Publish build details
         if: always()
+        env:
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           {
             echo "## RideNTrack Android preview build"
             echo
-            echo "- **Branch:** \`${GITHUB_REF_NAME}\`"
-            echo "- **Commit:** \`${GITHUB_SHA}\`"
-            echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
-            echo "- **Profile:** \`preview\` (APK)"
+            echo "- **Branch:** `$SOURCE_BRANCH`"
+            echo "- **Validated commit:** `$SOURCE_SHA`"
+            echo "- **EAS build ID:** `${EAS_BUILD_ID:-not available}`"
+            echo "- **Profile:** `preview` (APK)"
             echo
             echo "Download the APK from this workflow run's **Artifacts** section."
           } >> "$GITHUB_STEP_SUMMARY"
