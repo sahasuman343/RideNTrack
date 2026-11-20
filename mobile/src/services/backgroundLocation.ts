@@ -17,6 +17,9 @@ interface Params extends Context {
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
 let generation = 0, lastSync = 0;
+const GPS_INTERVAL_MS = 5000;
+const GPS_DISTANCE_METERS = 15;
+const QUEUE_SYNC_INTERVAL_MS = 30000;
 let operations: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
@@ -68,7 +71,7 @@ async function record(locations: Location.LocationObject[]) {
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});
   }
-  if (Date.now() - lastSync > 10000) {
+  if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
     void (async () => {
       await syncQueue();
@@ -84,56 +87,123 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
     catch (e) { context?.onError?.(e instanceof Error ? e.message : 'Could not save GPS update.'); }
   });
 }
-export function startBackgroundLocationUpdates(params: Params): Promise<{ isBackgroundEnabled: boolean }> {
+export interface BackgroundLocationResult {
+  isBackgroundEnabled: boolean;
+  permissionGranted?: boolean;
+}
+
+/**
+ * Start foreground GPS immediately. Do not open Android's background-location
+ * Settings flow from a screen effect: on Android 11+ that flow leaves and
+ * resumes the app, and starting a native foreground service in the same
+ * permission callback is fragile on some OEM builds.
+ */
+export function startBackgroundLocationUpdates(params: Params): Promise<BackgroundLocationResult> {
   const version = ++generation;
   return serialize(async () => {
     if (version !== generation) return { isBackgroundEnabled: false };
-    if ((await Location.requestForegroundPermissionsAsync()).status !== 'granted')
+    const foreground = await Location.requestForegroundPermissionsAsync();
+    if (foreground.status !== 'granted') {
       throw new Error('Enable location permission in Settings to share your position.');
-    let background = false;
-    if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient) {
-      try {
-        const isAvailable = typeof Location.isBackgroundLocationAvailableAsync === 'function'
-          ? await Location.isBackgroundLocationAvailableAsync()
-          : false;
-        if (isAvailable && typeof Location.getBackgroundPermissionsAsync === 'function'
-          && typeof Location.requestBackgroundPermissionsAsync === 'function') {
-          let bgStatus = await Location.getBackgroundPermissionsAsync();
-          // Request the additional permission only after foreground access has
-          // been granted. Without it, Android/iOS can only track while the app
-          // remains in the foreground.
-          if (bgStatus?.status !== 'granted') {
-            bgStatus = await Location.requestBackgroundPermissionsAsync();
-          }
-          background = bgStatus?.status === 'granted';
-        }
-      } catch {
-        background = false;
-      }
     }
-    if (version !== generation) return { isBackgroundEnabled: false };
     context = params;
-    await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({ rideId: params.rideId, userId: params.userId, displayName: params.displayName }));
-    fallback?.remove(); fallback = null;
-    if (background) {
-      try {
-        if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK))
-          await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-            accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10,
-            pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true,
-            foregroundService: { notificationTitle: 'RideNTrack · Sharing location',
-              notificationBody: 'Your group can see your position.', notificationColor: '#FF6B00' },
-          });
-        return { isBackgroundEnabled: true };
-      } catch { /* Foreground tracking remains useful if a native background start fails. */ }
-    }
+    await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
+      rideId: params.rideId, userId: params.userId, displayName: params.displayName,
+    }));
+    fallback?.remove();
+    fallback = null;
+
+    // Keep ride tracking useful while background permission is optional.
+    // Background permission is requested only from an explicit user action.
     try {
-      fallback = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 10 },
-        location => { void record([location]).catch(e => params.onError?.(e.message)); });
+      fallback = await Location.watchPositionAsync({
+        accuracy: Location.Accuracy.High,
+        timeInterval: GPS_INTERVAL_MS,
+        distanceInterval: GPS_DISTANCE_METERS,
+      }, location => {
+        void record([location]).catch(e => params.onError?.(e instanceof Error ? e.message : 'GPS update failed.'));
+      });
     } catch (e) {
       params.onError?.(e instanceof Error ? e.message : 'Unable to start foreground location tracker.');
     }
     return { isBackgroundEnabled: false };
+  });
+}
+
+/**
+ * Two-step background enablement:
+ * 1. First tap requests ACCESS_BACKGROUND_LOCATION. On Android 11+ Expo opens
+ *    system Settings; after the user returns, this call only reports the grant.
+ * 2. A second explicit tap starts the location foreground service while the
+ *    app is visibly foregrounded. This avoids starting native service work
+ *    during the permission Settings return transition.
+ */
+export function enableBackgroundLocationUpdates(params: Params): Promise<BackgroundLocationResult> {
+  const version = generation;
+  return serialize(async () => {
+    if (version !== generation) return { isBackgroundEnabled: false };
+    if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+      params.onError?.('Background GPS requires an installed Android development or preview build.');
+      return { isBackgroundEnabled: false, permissionGranted: false };
+    }
+    const foreground = await Location.getForegroundPermissionsAsync();
+    if (foreground.status !== 'granted') {
+      params.onError?.('Allow location while using the app before enabling background GPS.');
+      return { isBackgroundEnabled: false, permissionGranted: false };
+    }
+
+    let background = await Location.getBackgroundPermissionsAsync();
+    if (background.status !== 'granted') {
+      background = await Location.requestBackgroundPermissionsAsync();
+      // Do not start the native service in the same callback that returns
+      // from Android Settings. Ask the user to tap again after the app resumes.
+      return { isBackgroundEnabled: false, permissionGranted: background.status === 'granted' };
+    }
+
+    try {
+      const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      if (!alreadyStarted) {
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+          accuracy: Location.Accuracy.High,
+          timeInterval: GPS_INTERVAL_MS,
+          distanceInterval: GPS_DISTANCE_METERS,
+          pausesUpdatesAutomatically: false,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'RideNTrack · Sharing location',
+            notificationBody: 'Your group can see your position.',
+            notificationColor: '#FF6B00',
+          },
+        });
+      }
+      if (version !== generation) return { isBackgroundEnabled: false };
+      fallback?.remove();
+      fallback = null;
+      context = params;
+      await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
+        rideId: params.rideId, userId: params.userId, displayName: params.displayName,
+      }));
+      return { isBackgroundEnabled: true, permissionGranted: true };
+    } catch (e) {
+      if (version !== generation) return { isBackgroundEnabled: false };
+      // Keep foreground GPS alive if Android rejects the foreground service.
+      const message = e instanceof Error ? e.message : 'Android could not start background GPS.';
+      params.onError?.(message);
+      if (!fallback) {
+        try {
+          fallback = await Location.watchPositionAsync({
+            accuracy: Location.Accuracy.High,
+            timeInterval: GPS_INTERVAL_MS,
+            distanceInterval: GPS_DISTANCE_METERS,
+          }, location => {
+            void record([location]).catch(error => params.onError?.(error instanceof Error ? error.message : 'GPS update failed.'));
+          });
+        } catch (watchError) {
+          params.onError?.(watchError instanceof Error ? watchError.message : 'Foreground GPS fallback failed.');
+        }
+      }
+      return { isBackgroundEnabled: false, permissionGranted: true };
+    }
   });
 }
 export function stopBackgroundLocationUpdates(): Promise<void> {
