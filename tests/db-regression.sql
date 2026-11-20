@@ -659,6 +659,7 @@ DECLARE
   owner_id uuid := '11111111-1111-4111-8111-111111111111';
   member_id uuid := '22222222-2222-4222-8222-222222222222';
   test_ride_id uuid;
+  v_test_ride_code text;
   checklists jsonb;
   item_id uuid;
   first_item_completed boolean;
@@ -673,9 +674,11 @@ BEGIN
     NULL
   );
 
+  SELECT ride_code INTO v_test_ride_code FROM public.rides WHERE id = test_ride_id;
+
   -- 2. Member joins ride
   PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
-  PERFORM public.join_ride_by_code((SELECT ride_code FROM public.rides WHERE id = test_ride_id));
+  PERFORM public.join_ride_by_code(v_test_ride_code);
 
   -- 3. Owner assigns Marshal role
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
