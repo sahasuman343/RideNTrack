@@ -390,19 +390,19 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.add_trip_expense(UUID, TEXT, NUMERIC, TEXT, UUID[], TEXT) FROM public, anon;
+REVOKE ALL ON FUNCTION public.add_trip_expense(UUID, TEXT, NUMERIC, TEXT, UUID[], TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.add_trip_expense(UUID, TEXT, NUMERIC, TEXT, UUID[], TEXT) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.delete_trip_expense(UUID) FROM public, anon;
+REVOKE ALL ON FUNCTION public.delete_trip_expense(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.delete_trip_expense(UUID) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.get_trip_expenses(UUID) FROM public, anon;
+REVOKE ALL ON FUNCTION public.get_trip_expenses(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_trip_expenses(UUID) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.get_trip_expense_summary(UUID) FROM public, anon;
+REVOKE ALL ON FUNCTION public.get_trip_expense_summary(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_trip_expense_summary(UUID) TO authenticated;
 
-REVOKE ALL ON FUNCTION public.get_public_trips(INT, INT) FROM public;
+REVOKE ALL ON FUNCTION public.get_public_trips(INT, INT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_public_trips(INT, INT) TO authenticated, anon;
 
 COMMIT;

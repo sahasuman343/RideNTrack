@@ -764,6 +764,7 @@ DECLARE
   outsider_id uuid := '33333333-3333-4333-8333-333333333333';
   test_ride_id uuid;
   test_expense_id uuid;
+  v_test_ride_code text;
   expenses jsonb;
   summary jsonb;
   public_trips jsonb;
@@ -778,9 +779,11 @@ BEGIN
     NULL
   );
 
+  SELECT ride_code INTO v_test_ride_code FROM public.rides WHERE id = test_ride_id;
+
   -- Member joins
   PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
-  PERFORM public.join_ride_by_code((SELECT ride_code FROM public.rides WHERE id = test_ride_id));
+  PERFORM public.join_ride_by_code(v_test_ride_code);
 
   -- 2. Announcement Alert Check
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
