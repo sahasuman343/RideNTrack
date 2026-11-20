@@ -554,9 +554,9 @@ export default function LiveRideScreen() {
         }} />
       </Mapbox.ShapeSource>
     </Mapbox.MapView> : <View style={s.fallback}><Text style={s.heading}>Your ride, together.</Text><Text style={s.muted}>The native map needs a development build and a Mapbox token. Your rider list and foreground GPS remain available.</Text></View>}
-    <View style={[s.top,{ top: insets.top + 10 }]}>
+    <View style={[s.top, { top: insets.top + 10 }]}>
       <TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}>
-        <Text style={s.text}>‹</Text>
+        <Text style={s.backIcon}>‹</Text>
       </TouchableOpacity>
       <View style={s.title}>
         <Text numberOfLines={1} style={s.heading}>{ride.name}</Text>
@@ -567,11 +567,11 @@ export default function LiveRideScreen() {
       </TouchableOpacity>
       {admin && (
         <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
-          <Text style={s.text}>✎</Text>
+          <Text style={s.topBarIcon}>✎</Text>
         </TouchableOpacity>
       )}
       <TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}>
-        <Text style={s.text}>↗</Text>
+        <Text style={s.topBarIcon}>↗</Text>
       </TouchableOpacity>
     </View>
 
@@ -606,10 +606,10 @@ export default function LiveRideScreen() {
 
     <View style={[s.controls, { top: insets.top + (active ? 134 : 74) }]}>
       <TouchableOpacity accessibilityLabel="Follow my location" style={[s.control, follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}>
-        <Text style={s.text}>◎ Me</Text>
+        <Text style={[s.controlText, follow && s.selectedText]}>◎ Me</Text>
       </TouchableOpacity>
       <TouchableOpacity style={s.control} onPress={fitGroup}>
-        <Text style={s.text}>⊞ Group</Text>
+        <Text style={s.controlText}>⊞ Group</Text>
       </TouchableOpacity>
     </View>
 
@@ -639,8 +639,37 @@ export default function LiveRideScreen() {
     )}
 
     {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
-    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet,{ paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
-      <TouchableOpacity accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'} onPress={() => setExpanded(v => !v)} style={s.sheetHeader}><View style={s.handle} /><View style={s.row}><View><Text style={s.eyebrow}>{status}</Text><Text style={s.heading}>{points.length} riders on map {expanded ? '⌄' : '⌃'}</Text></View><Text style={s.code}>{ride.ride_code}</Text></View></TouchableOpacity>
+    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet, { paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'}
+        onPress={() => setExpanded(v => !v)}
+        style={s.sheetHeader}
+      >
+        <View style={s.handle} />
+        <View style={s.row}>
+          <View style={s.sheetTitleGroup}>
+            <View style={s.statusBadge}>
+              <View style={[s.liveDot, { backgroundColor: sync.isOnline && active ? '#22C55E' : theme.muted }]} />
+              <Text style={s.eyebrow}>{status}</Text>
+            </View>
+            <Text style={s.heading}>
+              {points.length} {points.length === 1 ? 'rider' : 'riders'} on map
+            </Text>
+          </View>
+          <View style={s.headerRight}>
+            <View style={s.codeBadge}>
+              <Text style={s.codeLabel}>CODE</Text>
+              <Text style={s.code}>{ride.ride_code}</Text>
+            </View>
+            <View style={[s.expandButton, expanded && s.expandButtonActive]}>
+              <Text style={[s.expandButtonIcon, expanded && s.expandButtonIconActive]}>
+                {expanded ? '▼' : '▲'}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
       {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
       {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
       {expanded && <FlatList
@@ -711,7 +740,7 @@ export default function LiveRideScreen() {
       />}
       {active && nextWaypoint && <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
         <TouchableOpacity style={[s.navButton, { flex: 1, marginBottom: 0 }]} onPress={() => void navigateToNextWaypoint()}>
-          <Text style={s.buttonText}>Navigate to {nextWaypoint.name} ↗</Text>
+          <Text style={s.navButtonText}>Navigate to {nextWaypoint.name} ↗</Text>
         </TouchableOpacity>
         {upcomingWaypoints.length > 1 && <TouchableOpacity
           style={[s.control, { minHeight: 48, justifyContent: 'center', paddingHorizontal: 12 }]}
@@ -807,24 +836,66 @@ export default function LiveRideScreen() {
 }
 const makeStyles = (c: RidePalette) => StyleSheet.create({
   screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
-  text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'700'},top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},title:{flex:1,padding:13,borderRadius:10,backgroundColor:c.surface},square:{width:44,height:48,borderRadius:9,backgroundColor:c.surface,alignItems:'center',justifyContent:'center'},
-  sosTopButton:{width:46,height:48,borderRadius:9,backgroundColor:c.danger,alignItems:'center',justifyContent:'center'},sosTopButtonText:{color:'#fff',fontSize:13,fontWeight:'900'},
-  controls:{position:'absolute',right:14,flexDirection:'row',gap:8},control:{backgroundColor:c.surface,paddingHorizontal:16,minHeight:44,justifyContent:'center',borderRadius:12,borderWidth:1,borderColor:c.border},selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
-  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8},sheetHeader:{paddingTop:10,paddingBottom:16},handle:{width:38,height:4,backgroundColor:c.border,borderRadius:3,alignSelf:'center',marginBottom:14},row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},eyebrow:{color:c.green,fontSize:11,fontWeight:'600',marginBottom:5},code:{backgroundColor:c.surfaceRaised,padding:9,borderRadius:10,letterSpacing:2,fontSize:11,color:c.muted},
-  riders:{maxHeight:185,marginBottom:12},rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:12,borderBottomWidth:1,borderColor:c.border},avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},avatarRiding:{backgroundColor:c.green},avatarStopped:{backgroundColor:'#EAB308'},avatarCompleted:{backgroundColor:c.accent},stale:{backgroundColor:c.subtle},grow:{flex:1},
-  statusPill:{paddingHorizontal:6,paddingVertical:2,borderRadius:6},statusPillText:{fontSize:10,fontWeight:'700'},statusPillRiding:{backgroundColor:c.greenSoft},statusPillTextRiding:{color:c.green,fontSize:10,fontWeight:'700'},statusPillStopped:{backgroundColor:'#FEF9C3'},statusPillTextStopped:{color:'#854D0E',fontSize:10,fontWeight:'700'},statusPillDisconnected:{backgroundColor:c.surfaceRaised},statusPillTextDisconnected:{color:c.muted,fontSize:10,fontWeight:'700'},statusPillCompleted:{backgroundColor:c.accentSoft},statusPillTextCompleted:{color:c.accent,fontSize:10,fontWeight:'700'},
-  navButton:{backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center',marginBottom:10},
+  text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'800',letterSpacing:-0.3},
+  top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},
+  title:{flex:1,paddingHorizontal:14,paddingVertical:10,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  square:{width:44,height:48,borderRadius:14,backgroundColor:c.surface,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  backIcon:{color:c.text,fontSize:24,fontWeight:'700',lineHeight:26,marginTop:-2},
+  topBarIcon:{color:c.text,fontSize:16,fontWeight:'700'},
+  sosTopButton:{width:46,height:48,borderRadius:14,backgroundColor:c.danger,alignItems:'center',justifyContent:'center',elevation:3,shadowColor:c.danger,shadowOpacity:0.3,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  sosTopButtonText:{color:'#fff',fontSize:13,fontWeight:'900',letterSpacing:0.5},
+  controls:{position:'absolute',right:14,flexDirection:'row',gap:8},
+  control:{backgroundColor:c.surface,paddingHorizontal:14,minHeight:40,justifyContent:'center',alignItems:'center',borderRadius:20,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
+  controlText:{color:c.text,fontSize:13,fontWeight:'700'},
+  selectedText:{color:c.accent,fontWeight:'800'},
+  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8,borderWidth:1,borderColor:c.border},
+  sheetHeader:{paddingTop:10,paddingBottom:16},
+  handle:{width:44,height:4,backgroundColor:c.border,borderRadius:2,alignSelf:'center',marginBottom:12},
+  row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},
+  sheetTitleGroup:{flex:1},
+  statusBadge:{flexDirection:'row',alignItems:'center',gap:6,marginBottom:4},
+  liveDot:{width:7,height:7,borderRadius:3.5},
+  eyebrow:{color:'#16A34A',fontSize:11,fontWeight:'700',letterSpacing:0.3},
+  headerRight:{flexDirection:'row',alignItems:'center',gap:8},
+  codeBadge:{flexDirection:'row',alignItems:'center',gap:5,backgroundColor:c.surfaceRaised,paddingHorizontal:10,paddingVertical:6,borderRadius:10,borderWidth:1,borderColor:c.border},
+  codeLabel:{color:c.muted,fontSize:9,fontWeight:'800',letterSpacing:0.5},
+  code:{color:c.text,fontSize:11,fontWeight:'900',letterSpacing:1},
+  expandButton:{width:32,height:32,borderRadius:16,backgroundColor:c.surfaceRaised,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
+  expandButtonActive:{backgroundColor:c.accentSoft,borderColor:c.accent},
+  expandButtonIcon:{color:c.muted,fontSize:10,fontWeight:'800'},
+  expandButtonIconActive:{color:c.accent},
+  riders:{maxHeight:185,marginBottom:12},
+  rider:{flexDirection:'row',gap:10,alignItems:'center',paddingVertical:10,borderBottomWidth:1,borderColor:c.border},
+  avatar:{width:36,height:36,borderRadius:18,backgroundColor:c.green,alignItems:'center',justifyContent:'center'},
+  avatarRiding:{backgroundColor:c.green},
+  avatarStopped:{backgroundColor:'#EAB308'},
+  avatarCompleted:{backgroundColor:c.accent},
+  stale:{backgroundColor:c.subtle},
+  grow:{flex:1},
+  statusPill:{paddingHorizontal:6,paddingVertical:2,borderRadius:6},
+  statusPillText:{fontSize:10,fontWeight:'700'},
+  statusPillRiding:{backgroundColor:c.greenSoft},
+  statusPillTextRiding:{color:c.green,fontSize:10,fontWeight:'700'},
+  statusPillStopped:{backgroundColor:'#FEF9C3'},
+  statusPillTextStopped:{color:'#854D0E',fontSize:10,fontWeight:'700'},
+  statusPillDisconnected:{backgroundColor:c.surfaceRaised},
+  statusPillTextDisconnected:{color:c.muted,fontSize:10,fontWeight:'700'},
+  statusPillCompleted:{backgroundColor:c.accentSoft},
+  statusPillTextCompleted:{color:c.accent,fontSize:10,fontWeight:'700'},
+  navButton:{backgroundColor:c.accent,borderRadius:14,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center',marginBottom:10,elevation:3,shadowColor:c.accent,shadowOpacity:0.25,shadowRadius:5,shadowOffset:{width:0,height:2}},
+  navButtonText:{color:'#FFFFFF',fontSize:14,fontWeight:'800',letterSpacing:0.2},
   actions:{flexDirection:'row',gap:8,alignItems:'center'},
   activeActionsContainer:{gap:8,width:'100%'},
   actionsRow:{flexDirection:'row',gap:8,alignItems:'center',width:'100%'},
-  actionButton:{flex:1,backgroundColor:c.surfaceRaised,borderRadius:14,minHeight:48,paddingHorizontal:6,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
+  actionButton:{flex:1,backgroundColor:c.surfaceRaised,borderRadius:12,minHeight:46,paddingHorizontal:6,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
   actionButtonText:{color:c.text,fontSize:13,fontWeight:'700'},
-  alertButton:{flex:1,backgroundColor:c.accent,borderRadius:14,minHeight:48,paddingHorizontal:6,alignItems:'center',justifyContent:'center'},
+  alertButton:{flex:1,backgroundColor:c.accent,borderRadius:12,minHeight:46,paddingHorizontal:6,alignItems:'center',justifyContent:'center'},
   alertButtonText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},
   subActionsRow:{flexDirection:'row',gap:8,alignItems:'center',width:'100%',marginTop:2},
-  subActionButton:{backgroundColor:c.surfaceRaised,borderRadius:14,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
+  subActionButton:{backgroundColor:c.surfaceRaised,borderRadius:12,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border},
   subActionText:{color:c.accent,fontSize:12,fontWeight:'700'},
-  endRideButton:{backgroundColor:'rgba(239, 68, 68, 0.1)',borderColor:'rgba(239, 68, 68, 0.3)',borderWidth:1,borderRadius:14,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center'},
+  endRideButton:{backgroundColor:'rgba(239, 68, 68, 0.1)',borderColor:'rgba(239, 68, 68, 0.3)',borderWidth:1,borderRadius:12,minHeight:44,paddingHorizontal:12,alignItems:'center',justifyContent:'center'},
   endRideText:{color:c.danger,fontSize:12,fontWeight:'800'},
   primary:{flex:1,backgroundColor:c.accent,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
   secondary:{backgroundColor:c.surfaceRaised,borderRadius:15,minHeight:48,paddingHorizontal:16,alignItems:'center',justifyContent:'center'},
@@ -833,9 +904,9 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   endButton:{minWidth:44,minHeight:48,alignItems:'center',justifyContent:'center'},
   endText:{color:c.danger,fontSize:13},
   warning:{position:'absolute',left:16,right:16,backgroundColor:c.accentSoft,borderRadius:15,padding:12,gap:4},warningText:{color:c.text,fontSize:12,lineHeight:18},link:{color:c.accent,fontWeight:'700',paddingVertical:8},sync:{paddingBottom:12},alertBanner:{padding:12,borderRadius:12,backgroundColor:c.accentSoft,marginBottom:10},overlay:{flex:1,justifyContent:'flex-end',backgroundColor:c.shadow + '88'},modal:{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,backgroundColor:c.surface,gap:12},alertOption:{padding:20,borderRadius:9,backgroundColor:c.surfaceRaised},emergency:{backgroundColor:c.accentSoft},fallback:{padding:36,paddingTop:225,gap:14},
-  hudContainer:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:12,borderWidth:1,borderColor:c.border,paddingVertical:8,paddingHorizontal:12,flexDirection:'row',alignItems:'center',justifyContent:'space-around',elevation:4},
+  hudContainer:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:14,borderWidth:1,borderColor:c.border,paddingVertical:10,paddingHorizontal:16,flexDirection:'row',alignItems:'center',justifyContent:'space-around',elevation:4,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:6,shadowOffset:{width:0,height:2}},
   hudItem:{alignItems:'center'},
-  hudValue:{color:c.text,fontSize:15,fontWeight:'900'},
+  hudValue:{color:c.text,fontSize:16,fontWeight:'900'},
   hudLabel:{color:c.muted,fontSize:8,fontWeight:'800',letterSpacing:0.8,marginTop:2},
   hudDivider:{width:1,height:24,backgroundColor:c.border},
   deviationWarning:{position:'absolute',left:14,right:14,backgroundColor:c.accentSoft,borderColor:c.accent,borderWidth:1,borderRadius:10,padding:10,alignItems:'center'},
