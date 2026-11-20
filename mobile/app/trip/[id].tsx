@@ -1,7 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calculateMotorcycleFuelPlan, generateTouringAdvisories, getWeatherConditionFromCode, type RouteWeatherPoint, type TripJournalEntry, type JournalPhoto, formatShareableRideCard } from '@ridentrack/shared';
+import {
+  buildGoogleMapsNavigationUrl,
+  type TripStage,
+  type StageStatus,
+  calculateMotorcycleFuelPlan,
+  generateTouringAdvisories,
+  getWeatherConditionFromCode,
+  type RouteWeatherPoint,
+  type TripJournalEntry,
+  type JournalPhoto,
+  formatShareableRideCard,
+  ROLE_LABELS,
+  CHECKLIST_CATEGORY_LABELS,
+  type TripChecklistItem,
+  type RideParticipantRole,
+  type TripChecklistCategory,
+} from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
@@ -17,7 +33,7 @@ type Trip = {
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; provider_place_id?: string | null; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
 type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
-type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
+type Rider = { user_id: string; display_name: string; role: RideParticipantRole; is_active: boolean; last_seen: string | null };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; price_currency: string; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
@@ -34,7 +50,10 @@ export default function TripWorkspaceScreen() {
   const [roster, setRoster] = useState<Rider[]>([]);
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'rider' | 'sweep'>('rider');
+  const [inviteRole, setInviteRole] = useState<RideParticipantRole>('member');
+  const [checklists, setChecklists] = useState<TripChecklistItem[]>([]);
+  const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
+  const [riderRoleModalVisible, setRiderRoleModalVisible] = useState(false);
   const [regroupPoints, setRegroupPoints] = useState<Regroup[]>([]);
   const [deviationLimit, setDeviationLimit] = useState('500');
   const [behindLimit, setBehindLimit] = useState('1000');
@@ -153,7 +172,7 @@ export default function TripWorkspaceScreen() {
     if (!id) return;
     setLoading(true); setError('');
     try {
-      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult, checklistResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
@@ -161,6 +180,7 @@ export default function TripWorkspaceScreen() {
         supabase.rpc('get_trip_roster', { p_ride_id: id }),
         supabase.rpc('get_regroup_points', { p_ride_id: id }),
         supabase.rpc('get_trip_stages', { p_ride_id: id }),
+        supabase.rpc('get_trip_checklists', { p_ride_id: id }),
       ]);
       if (generation !== loadGeneration.current) return;
       if (tripResult.error) throw tripResult.error;
@@ -178,6 +198,14 @@ export default function TripWorkspaceScreen() {
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
+
+      let clData = (checklistResult.data || []) as TripChecklistItem[];
+      if (clData.length === 0 && tripResult.data?.admin_id === user?.id) {
+        await supabase.rpc('seed_default_trip_checklists', { p_ride_id: id });
+        const { data: refetched } = await supabase.rpc('get_trip_checklists', { p_ride_id: id });
+        if (refetched) clData = refetched as TripChecklistItem[];
+      }
+      setChecklists(clData);
 
       void saveCachedTrip(id, {
         trip: tripResult.data as any,
@@ -408,6 +436,109 @@ export default function TripWorkspaceScreen() {
       setError(e?.message || 'Could not leave this ride.');
       setSaving(false);
     }
+  }
+
+  async function toggleChecklist(item: TripChecklistItem) {
+    const nextCompleted = !item.my_completed;
+    setChecklists(prev => prev.map(c => c.id === item.id
+      ? { ...c, my_completed: nextCompleted, completed_count: nextCompleted ? c.completed_count + 1 : Math.max(0, c.completed_count - 1) }
+      : c
+    ));
+    try {
+      const { error } = await supabase.rpc('toggle_trip_checklist_item', {
+        p_checklist_id: item.id,
+        p_completed: nextCompleted,
+      });
+      if (error) throw error;
+    } catch (e: any) {
+      setChecklists(prev => prev.map(c => c.id === item.id ? item : c));
+      Alert.alert('Checklist update failed', e?.message || 'Please try again.');
+    }
+  }
+
+  async function updateRiderRole(targetRole: RideParticipantRole) {
+    if (!selectedRider || !isAdmin) return;
+    setSaving(true);
+    try {
+      const { error: roleError } = await supabase.rpc('set_trip_participant_role', {
+        p_ride_id: id,
+        p_user_id: selectedRider.user_id,
+        p_role: targetRole,
+      });
+      if (roleError) throw roleError;
+      setRoster(prev => prev.map(r => r.user_id === selectedRider.user_id ? { ...r, role: targetRole } : r));
+      setRiderRoleModalVisible(false);
+      setSelectedRider(null);
+    } catch (e: any) {
+      Alert.alert('Role update failed', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function transferLeadership(rider: Rider) {
+    if (!isAdmin) return;
+    Alert.alert(
+      'Transfer Captaincy?',
+      `Make "${rider.display_name}" the Captain of this trip? You will become Co-Captain.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Transfer',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error: xferError } = await supabase.rpc('transfer_trip_leadership', {
+                p_ride_id: id,
+                p_new_admin_id: rider.user_id,
+              });
+              if (xferError) throw xferError;
+              setRiderRoleModalVisible(false);
+              setSelectedRider(null);
+              await load();
+              Alert.alert('Captain Transferred', `${rider.display_name} is now the trip captain.`);
+            } catch (e: any) {
+              Alert.alert('Transfer failed', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  async function removeParticipant(rider: Rider) {
+    if (!isAdmin) return;
+    Alert.alert(
+      'Remove Rider?',
+      `Remove "${rider.display_name}" from this group ride?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error: remError } = await supabase.rpc('remove_trip_participant', {
+                p_ride_id: id,
+                p_user_id: rider.user_id,
+              });
+              if (remError) throw remError;
+              setRoster(prev => prev.filter(r => r.user_id !== rider.user_id));
+              setRiderRoleModalVisible(false);
+              setSelectedRider(null);
+            } catch (e: any) {
+              Alert.alert('Could not remove rider', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function openCreateStage(dayNum?: number) {
@@ -967,27 +1098,90 @@ export default function TripWorkspaceScreen() {
         {roster.map(rider => {
           const age = rider.last_seen ? now - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
           const status = !rider.last_seen ? 'OFFLINE' : age > 120000 ? 'OFFLINE' : age > 30000 ? 'STALE' : 'LIVE';
-          return <View key={rider.user_id} style={styles.riderRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
-              <Text style={styles.mutedSmall}>{rider.role.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
+          const roleInfo = ROLE_LABELS[rider.role] || { title: rider.role, icon: '🏍️' };
+          return (
+            <View key={rider.user_id} style={styles.riderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 13 }}>{roleInfo.icon}</Text>
+                  <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
+                </View>
+                <Text style={styles.mutedSmall}>{roleInfo.title.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
+              </View>
+              {isAdmin && rider.user_id !== user?.id && (
+                <TouchableOpacity
+                  style={styles.smallButton}
+                  disabled={saving}
+                  onPress={() => {
+                    setSelectedRider(rider);
+                    setRiderRoleModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.smallButtonText}>Manage ⚙</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            {isAdmin && rider.user_id !== user?.id && <TouchableOpacity style={styles.smallButton} disabled={saving}
-              onPress={() => void changeRole(rider, rider.role === 'sweep' ? 'rider' : 'sweep')}>
-              <Text style={styles.smallButtonText}>{rider.role === 'sweep' ? 'Make rider' : 'Assign sweep'}</Text>
-            </TouchableOpacity>}
-          </View>;
+          );
         })}
         {isAdmin && <>
           <Text style={styles.label}>Invite by email (optional)</Text>
           <TextInput style={styles.input} value={inviteEmail} onChangeText={setInviteEmail} keyboardType="email-address" autoCapitalize="none" placeholder="rider@example.com" placeholderTextColor="#77809a" />
+          <Text style={[styles.mutedSmall, { marginTop: 8, marginBottom: 4 }]}>Assign invitation role</Text>
           <View style={styles.editorRow}>
-            <TouchableOpacity style={[styles.smallButton, inviteRole === 'rider' && styles.roleSelected]} onPress={() => setInviteRole('rider')}><Text style={styles.smallButtonText}>Rider</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.smallButton, inviteRole === 'sweep' && styles.roleSelected]} onPress={() => setInviteRole('sweep')}><Text style={styles.smallButtonText}>Sweep</Text></TouchableOpacity>
+            {(['member', 'sweeper', 'marshal', 'co-captain'] as const).map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.smallButton, inviteRole === r && styles.roleSelected]}
+                onPress={() => setInviteRole(r)}
+              >
+                <Text style={styles.smallButtonText}>{ROLE_LABELS[r].icon} {ROLE_LABELS[r].title}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
           <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void inviteRider()}><Text style={styles.primaryText}>{saving ? 'Please wait…' : 'Create & share 72-hour invitation'}</Text></TouchableOpacity>
         </>}
-        <Text style={styles.mutedSmall}>GPS status is based on the latest saved location: live ≤30 seconds, stale 30–120 seconds, offline/no recent update after 2 minutes. A missing GPS update is not proof that a rider has left the group.</Text>
+        <Text style={styles.mutedSmall}>GPS status: Live ≤30s, Stale 30–120s, Disconnected after 2 min. Captains and Sweepers coordinate the front and rear of the pack.</Text>
+      </View>
+
+      {/* Pre-Ride Preparation Checklist */}
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>Pre-Ride Preparation Checklist</Text>
+          <View style={[styles.statusBadge, { backgroundColor: checklists.filter(c => c.my_completed).length === checklists.length && checklists.length > 0 ? '#4CAF50' : '#FF9800' }]}>
+            <Text style={styles.statusText}>
+              {checklists.filter(c => c.my_completed).length}/{checklists.length} READY
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.mutedSmall}>Personal motorcycle and riding safety verification before hitting the highway.</Text>
+
+        {checklists.length === 0 ? (
+          <Text style={[styles.mutedSmall, { marginVertical: 10 }]}>No checklist items defined for this ride.</Text>
+        ) : (
+          checklists.map(item => {
+            const cat = CHECKLIST_CATEGORY_LABELS[item.category] || { title: item.category, icon: '🔧' };
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.checklistItem, item.my_completed && styles.checklistItemDone]}
+                onPress={() => void toggleChecklist(item)}
+              >
+                <View style={[styles.checkbox, item.my_completed && styles.checkboxChecked]}>
+                  {item.my_completed && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>
+                    {cat.icon} {item.title}
+                  </Text>
+                  {!!item.description && <Text style={styles.mutedSmall}>{item.description}</Text>}
+                  <Text style={[styles.mutedSmall, { fontSize: 10, marginTop: 2, color: theme.accent }]}>
+                    {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
       </View>
 
       <View style={styles.card}>
@@ -1240,6 +1434,66 @@ export default function TripWorkspaceScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Role Management Modal */}
+      <Modal visible={riderRoleModalVisible} transparent animationType="slide" onRequestClose={() => setRiderRoleModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModal}>
+            <Text style={styles.section}>Manage Rider Role</Text>
+            {selectedRider && (
+              <>
+                <Text style={styles.pointName}>{selectedRider.display_name}</Text>
+                <Text style={[styles.mutedSmall, { marginBottom: 14 }]}>
+                  Current Role: {ROLE_LABELS[selectedRider.role]?.icon || '🏍️'} {ROLE_LABELS[selectedRider.role]?.title || selectedRider.role}
+                </Text>
+
+                <Text style={styles.label}>Assign Role</Text>
+                <View style={{ gap: 8, marginVertical: 8 }}>
+                  {(['co-captain', 'marshal', 'sweeper', 'member'] as const).map(r => (
+                    <TouchableOpacity
+                      key={r}
+                      style={[styles.smallButton, { paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }, selectedRider.role === r && styles.roleSelected]}
+                      disabled={saving}
+                      onPress={() => void updateRiderRole(r)}
+                    >
+                      <Text style={{ fontSize: 16 }}>{ROLE_LABELS[r].icon}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.smallButtonText, { fontWeight: '800' }]}>{ROLE_LABELS[r].title}</Text>
+                        <Text style={[styles.mutedSmall, { fontSize: 10 }]}>
+                          {r === 'co-captain' && 'Route navigator & second-in-command'}
+                          {r === 'marshal' && 'Traffic blocker & intersection safety officer'}
+                          {r === 'sweeper' && 'Tail rider & roadside mechanical backup'}
+                          {r === 'member' && 'Pack rider traveling in formation'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]}
+                  disabled={saving}
+                  onPress={() => void transferLeadership(selectedRider)}
+                >
+                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>👑 Transfer Captain Role</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.dangerButton, { marginTop: 8 }]}
+                  disabled={saving}
+                  onPress={() => void removeParticipant(selectedRider)}
+                >
+                  <Text style={styles.dangerText}>Remove from Group Ride</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={() => setRiderRoleModalVisible(false)}>
+                  <Text style={styles.secondaryText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
       {!!error && <Text style={styles.error}>{error}</Text>}
       <Text style={styles.footer}>Trip planning is separate from the actual GPS session. Starting the tracker records what happened, while this workspace keeps the planned journey.</Text>
     </ScrollView>
@@ -1309,4 +1563,13 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
   advisoryCaution: { backgroundColor: '#FEF9C3', borderColor: '#CA8A04' },
   advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
+  statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  checklistItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
+  checklistItemDone: { opacity: 0.85 },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: c.muted, alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked: { backgroundColor: c.accent, borderColor: c.accent },
+  checkmark: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  checklistTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
+  checklistTitleDone: { textDecorationLine: 'line-through', color: c.muted },
 });

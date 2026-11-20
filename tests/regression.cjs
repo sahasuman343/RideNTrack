@@ -1033,6 +1033,39 @@ test('trip workspace exposes trip duplication, archive toggle, and offline trip 
   assert.match(cacheSource, /getCachedTrip/);
 });
 
+test('5-tier group ride roles and pre-ride preparation checklist migration and shared contracts', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/020_group_roles_and_pre_ride_checklist.sql'), 'utf8');
+  assert.match(migration, /'captain'/);
+  assert.match(migration, /'co-captain'/);
+  assert.match(migration, /'marshal'/);
+  assert.match(migration, /'sweeper'/);
+  assert.match(migration, /'member'/);
+  assert.match(migration, /trip_checklists/);
+  assert.match(migration, /trip_checklist_completions/);
+  assert.match(migration, /seed_default_trip_checklists/);
+  assert.match(migration, /toggle_trip_checklist_item/);
+  assert.match(migration, /transfer_trip_leadership/);
+  assert.match(migration, /remove_trip_participant/);
+
+  const sharedSource = fs.readFileSync(path.resolve('shared/types.ts'), 'utf8');
+  assert.match(sharedSource, /ROLE_LABELS/);
+  assert.match(sharedSource, /CHECKLIST_CATEGORY_LABELS/);
+  assert.match(sharedSource, /TripChecklistItem/);
+});
+
+test('trip workspace integrates pre-ride preparation checklist and captain role management', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /Pre-Ride Preparation Checklist/);
+  assert.match(tripSource, /toggleChecklist/);
+  assert.match(tripSource, /updateRiderRole/);
+  assert.match(tripSource, /transferLeadership/);
+  assert.match(tripSource, /removeParticipant/);
+  assert.match(tripSource, /riderRoleModalVisible/);
+  assert.match(tripSource, /Manage ⚙/);
+  assert.match(tripSource, /ROLE_LABELS/);
+});
+
+
 
 
 

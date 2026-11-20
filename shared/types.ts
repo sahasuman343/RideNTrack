@@ -108,8 +108,40 @@ export interface TripStay {
   notes?: string | null;
 }
 
-export type RideParticipantRole = 'leader' | 'sweep' | 'rider';
+export type RideParticipantRole = 'captain' | 'co-captain' | 'marshal' | 'sweeper' | 'member' | 'leader' | 'sweep' | 'rider';
 export type RiderConnectionStatus = 'live' | 'stale' | 'offline';
+
+export const ROLE_LABELS: Record<RideParticipantRole, { title: string; icon: string }> = {
+  captain: { title: 'Captain', icon: '👑' },
+  'co-captain': { title: 'Co-Captain', icon: '🧭' },
+  marshal: { title: 'Marshal', icon: '🛡️' },
+  sweeper: { title: 'Sweeper', icon: '🧹' },
+  member: { title: 'Member', icon: '🏍️' },
+  leader: { title: 'Captain', icon: '👑' },
+  sweep: { title: 'Sweeper', icon: '🧹' },
+  rider: { title: 'Member', icon: '🏍️' },
+};
+
+export type TripChecklistCategory = 'bike_inspection' | 'riding_gear' | 'documents' | 'emergency_kit' | 'fuel_tires';
+
+export const CHECKLIST_CATEGORY_LABELS: Record<TripChecklistCategory, { title: string; icon: string }> = {
+  fuel_tires: { title: 'Fuel & Tires', icon: '⛽' },
+  bike_inspection: { title: 'Motorcycle Inspection', icon: '🔧' },
+  riding_gear: { title: 'Riding Gear & Safety', icon: '🪖' },
+  documents: { title: 'Essential Documents', icon: '📄' },
+  emergency_kit: { title: 'Emergency & Spares', icon: '🩹' },
+};
+
+export interface TripChecklistItem {
+  id: string;
+  category: TripChecklistCategory;
+  title: string;
+  description?: string | null;
+  is_mandatory: boolean;
+  sequence: number;
+  my_completed: boolean;
+  completed_count: number;
+}
 
 export interface RideParticipant {
   id: string;

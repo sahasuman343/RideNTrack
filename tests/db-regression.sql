@@ -31,7 +31,13 @@ BEGIN
     'public.delete_user_account()'::regprocedure,
     'public.archive_trip(uuid)'::regprocedure,
     'public.unarchive_trip(uuid)'::regprocedure,
-    'public.duplicate_trip(uuid,text,date)'::regprocedure
+    'public.duplicate_trip(uuid,text,date)'::regprocedure,
+    'public.seed_default_trip_checklists(uuid)'::regprocedure,
+    'public.get_trip_checklists(uuid)'::regprocedure,
+    'public.toggle_trip_checklist_item(uuid,boolean)'::regprocedure,
+    'public.transfer_trip_leadership(uuid,uuid)'::regprocedure,
+    'public.remove_trip_participant(uuid,uuid)'::regprocedure,
+    'public.reject_trip_invitation(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -635,6 +641,72 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   PERFORM public.delete_trip(orig_trip_id);
   PERFORM public.delete_trip(cloned_trip_id);
+END $$;
+
+-- Phase 2 Milestone: 5-Tier Roles, Leadership Transfer, and Pre-Ride Checklist
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  member_id uuid := '22222222-2222-4222-8222-222222222222';
+  test_ride_id uuid;
+  checklists jsonb;
+  item_id uuid;
+  first_item_completed boolean;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  -- 1. Create a trip
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Roles and Checklist Test","trip_type":"group","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  -- 2. Member joins ride
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code((SELECT ride_code FROM public.rides WHERE id = test_ride_id));
+
+  -- 3. Owner assigns Marshal role
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.set_trip_participant_role(test_ride_id, member_id, 'marshal');
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) != 'marshal' THEN
+    RAISE EXCEPTION 'set_trip_participant_role failed to set marshal role';
+  END IF;
+
+  -- 4. Seed and query pre-ride checklists
+  PERFORM public.seed_default_trip_checklists(test_ride_id);
+  checklists := public.get_trip_checklists(test_ride_id);
+  IF jsonb_array_length(checklists) < 5 THEN
+    RAISE EXCEPTION 'seed_default_trip_checklists expected at least 5 items, got %', jsonb_array_length(checklists);
+  END IF;
+
+  item_id := (checklists->0->>'id')::uuid;
+
+  -- 5. Toggle checklist item
+  first_item_completed := public.toggle_trip_checklist_item(item_id, true);
+  IF first_item_completed != true THEN
+    RAISE EXCEPTION 'toggle_trip_checklist_item failed to mark complete';
+  END IF;
+
+  -- 6. Transfer leadership
+  PERFORM public.transfer_trip_leadership(test_ride_id, member_id);
+  IF (SELECT admin_id FROM public.rides WHERE id = test_ride_id) != member_id THEN
+    RAISE EXCEPTION 'transfer_trip_leadership failed to update admin_id';
+  END IF;
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) != 'captain' THEN
+    RAISE EXCEPTION 'new leader participant role is not captain';
+  END IF;
+
+  -- 7. New captain removes former leader
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.remove_trip_participant(test_ride_id, owner_id);
+  IF (SELECT is_active FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = owner_id) != false THEN
+    RAISE EXCEPTION 'remove_trip_participant failed to deactivate participant';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(test_ride_id);
 END $$;
 
 -- RT-003: Cascading account deletion via delete_user_account()
