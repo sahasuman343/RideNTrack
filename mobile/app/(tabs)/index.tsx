@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ride, type RiderAnalytics } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
@@ -111,7 +111,10 @@ export default function MyRidesScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.masthead}>
-        <Text style={styles.kicker}>R I D E N T R A C K</Text>
+        <View style={styles.mastheadBrand}>
+          <Image source={require('../../assets/RnT_logo.png')} style={styles.mastheadLogo} resizeMode="contain" />
+          <Text style={styles.kicker}>R I D E N T R A C K</Text>
+        </View>
         <Text style={styles.pageTitle}>Your riding log.</Text>
         <Text style={styles.intro}>Every road has a story. Pick up where you left off.</Text>
       </View>
@@ -213,6 +216,8 @@ export default function MyRidesScreen() {
 const makeStyles = (c: RidePalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
   masthead: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 18 },
+  mastheadBrand: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  mastheadLogo: { width: 28, height: 28, borderRadius: 7 },
   kicker: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 3 },
   pageTitle: { color: c.text, fontSize: 32, fontWeight: '900', letterSpacing: -1.2, marginTop: 12 },
   intro: { color: c.muted, fontSize: 13, lineHeight: 20, marginTop: 5, maxWidth: 290 },

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
@@ -32,6 +32,11 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.header}>
+        <Image
+          source={require('../../assets/RnT_logo.png')}
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
         <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack</Text>
         <Text style={styles.subtitle}>Indian Riders Community</Text>
       </View>
@@ -76,6 +81,12 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 48,
+  },
+  logoImage: {
+    width: 88,
+    height: 88,
+    borderRadius: 20,
+    marginBottom: 16,
   },
   kicker: { color: c.green, fontSize: 9, fontWeight: '900', letterSpacing: 2.2, marginBottom: 10 },
   logo: {

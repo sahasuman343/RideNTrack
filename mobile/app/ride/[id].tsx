@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
@@ -484,7 +484,15 @@ export default function LiveRideScreen() {
       router.replace('/(tabs)');
     }
   };
-  if (!ride) return <View style={s.loading}><Text style={s.brand}>RIDEN TRACK</Text>{error ? <Text style={s.text}>{error}</Text> : <ActivityIndicator color="#d66029" />}<TouchableOpacity onPress={() => void refresh()}><Text style={s.link}>Retry connection</Text></TouchableOpacity><TouchableOpacity onPress={handleBack}><Text style={s.link}>Back to rides</Text></TouchableOpacity></View>;
+  if (!ride) return (
+    <View style={s.loading}>
+      <Image source={require('../../assets/RnT_logo.png')} style={{ width: 64, height: 64, borderRadius: 16 }} resizeMode="contain" />
+      <Text style={s.brand}>RIDEN TRACK</Text>
+      {error ? <Text style={s.text}>{error}</Text> : <ActivityIndicator color="#d66029" />}
+      <TouchableOpacity onPress={() => void refresh()}><Text style={s.link}>Retry connection</Text></TouchableOpacity>
+      <TouchableOpacity onPress={handleBack}><Text style={s.link}>Back to rides</Text></TouchableOpacity>
+    </View>
+  );
   return <View style={s.screen}>
     {Mapbox && MAPBOX_TOKEN ? <Mapbox.MapView style={StyleSheet.absoluteFill} styleURL={theme ? (theme.text === "#F2F0E8" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/outdoors-v12") : "mapbox://styles/mapbox/outdoors-v12"}
       onDidFinishLoadingMap={() => { setMapReady(true); setMapError(false); }} onMapLoadingError={() => setMapError(true)}
