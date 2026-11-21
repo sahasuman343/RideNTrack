@@ -986,6 +986,10 @@ INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
   ('00000000-0000-0000-0000-000000000091', 'lead91@example.test', '{"username":"lead_captain_91","display_name":"Lead Captain 91"}'),
   ('00000000-0000-0000-0000-000000000092', 'tail92@example.test', '{"username":"tail_sweep_92","display_name":"Tail Sweep 92"}')
 ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, username, display_name) VALUES
+  ('00000000-0000-0000-0000-000000000091', 'lead_captain_91', 'Lead Captain 91'),
+  ('00000000-0000-0000-0000-000000000092', 'tail_sweep_92', 'Tail Sweep 92')
+ON CONFLICT (id) DO NOTHING;
 SET ROLE authenticated;
 
 DO $$
@@ -1000,13 +1004,6 @@ DECLARE
   v_ack_count INT;
   v_dir_count INT;
 BEGIN
-  -- Setup riders
-  INSERT INTO public.profiles (id, username, display_name)
-  VALUES
-    (rider_lead, 'lead_captain_91', 'Lead Captain 91'),
-    (rider_tail, 'tail_sweep_92', 'Tail Sweep 92')
-  ON CONFLICT (id) DO NOTHING;
-
   -- 1. Create Trip & Regroup Point
   PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
   test_ride_id := public.create_trip_plan(
@@ -1097,6 +1094,11 @@ INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
   ('00000000-0000-0000-0000-000000000102', 'member102@example.test', '{"username":"member_user_102","display_name":"Member 102"}'),
   ('00000000-0000-0000-0000-000000000103', 'outsider103@example.test', '{"username":"outsider_user_103","display_name":"Outsider 103"}')
 ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, username, display_name) VALUES
+  ('00000000-0000-0000-0000-000000000101', 'admin_user_101', 'Admin 101'),
+  ('00000000-0000-0000-0000-000000000102', 'member_user_102', 'Member 102'),
+  ('00000000-0000-0000-0000-000000000103', 'outsider_user_103', 'Outsider 103')
+ON CONFLICT (id) DO NOTHING;
 SET ROLE authenticated;
 
 DO $$
@@ -1114,13 +1116,6 @@ DECLARE
   v_dup_trip_id UUID;
   v_sanitized_stay public.trip_stays%ROWTYPE;
 BEGIN
-  -- Setup test users
-  INSERT INTO public.profiles (id, username, display_name) VALUES
-    (v_admin, 'admin_user_101', 'Admin 101'),
-    (v_member, 'member_user_102', 'Member 102'),
-    (v_outsider, 'outsider_user_103', 'Outsider 103')
-  ON CONFLICT (id) DO NOTHING;
-
   -- 1. Create Trip & Member
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   v_trip_id := public.create_trip_plan(
