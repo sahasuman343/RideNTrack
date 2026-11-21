@@ -223,9 +223,16 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
     }
   });
 }
-export function stopBackgroundLocationUpdates(): Promise<void> {
+export function stopBackgroundLocationUpdates(targetRideId?: string): Promise<void> {
+  if (targetRideId && context?.rideId && context.rideId !== targetRideId) {
+    return Promise.resolve();
+  }
   ++generation; context = null;
   return serialize(async () => {
+    if (targetRideId) {
+      const saved = JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+      if (saved?.rideId && saved.rideId !== targetRideId) return;
+    }
     fallback?.remove(); fallback = null;
     await AsyncStorage.removeItem(CONTEXT_KEY);
     if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient

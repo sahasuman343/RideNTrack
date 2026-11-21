@@ -983,6 +983,13 @@ BEGIN
 END $$;
 
 -- RT-009: Phase 4 & Phase 5 - Regroup point closure, announcement acknowledgement, emergency escalation, and breakdown assistance directory
+RESET ROLE;
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+  ('00000000-0000-0000-0000-000000000091', 'lead91@example.test', '{"username":"lead_captain_91","display_name":"Lead Captain 91"}'),
+  ('00000000-0000-0000-0000-000000000092', 'tail92@example.test', '{"username":"tail_sweep_92","display_name":"Tail Sweep 92"}')
+ON CONFLICT (id) DO NOTHING;
+SET ROLE authenticated;
+
 DO $$
 DECLARE
   rider_lead UUID := '00000000-0000-0000-0000-000000000091';
@@ -1088,6 +1095,14 @@ BEGIN
 END $$;
 
 -- RT-010: CodeRabbit Security and Data Integrity Regression Checks (PR #7)
+RESET ROLE;
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+  ('00000000-0000-0000-0000-000000000101', 'admin101@example.test', '{"username":"admin_user_101","display_name":"Admin 101"}'),
+  ('00000000-0000-0000-0000-000000000102', 'member102@example.test', '{"username":"member_user_102","display_name":"Member 102"}'),
+  ('00000000-0000-0000-0000-000000000103', 'outsider103@example.test', '{"username":"outsider_user_103","display_name":"Outsider 103"}')
+ON CONFLICT (id) DO NOTHING;
+SET ROLE authenticated;
+
 DO $$
 DECLARE
   v_admin UUID := '00000000-0000-0000-0000-000000000101';

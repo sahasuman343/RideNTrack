@@ -515,12 +515,13 @@ export default function LiveRideScreen() {
 
   async function acknowledgeAnnouncement(alertId: string) {
     if (!alertId) return;
-    setAcknowledgedAlertIds(prev => prev.includes(alertId) ? prev : [...prev, alertId]);
     try {
-      await supabase.rpc('acknowledge_alert', { p_alert_id: alertId });
+      const { error: ackErr } = await supabase.rpc('acknowledge_alert', { p_alert_id: alertId });
+      if (ackErr) throw ackErr;
+      setAcknowledgedAlertIds(prev => prev.includes(alertId) ? prev : [...prev, alertId]);
       setMessage('👍 Acknowledged announcement');
-    } catch {
-      // Offline fallback: keep local state
+    } catch (e: any) {
+      setMessage(e?.message || 'Could not acknowledge announcement. Tap to retry.');
     }
   }
 
@@ -574,18 +575,20 @@ export default function LiveRideScreen() {
       longitude: position.lng,
       details: mechanicalDetails.trim() || undefined,
     });
-    setMechanicalModalVisible(false);
-    setMechanicalDetails('');
-    await sendAlert('mechanical', msg);
-    setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
-    Dialog.alert(
-      'Mechanical Assistance',
-      'Alert broadcast to your pack with your live GPS location. Would you like to view roadside assistance & breakdown helplines?',
-      [
-        { text: 'Later', style: 'cancel' },
-        { text: 'View Directory', onPress: () => void loadBreakdownDirectory() },
-      ]
-    );
+    const ok = await sendAlert('mechanical', msg);
+    if (ok) {
+      setMechanicalModalVisible(false);
+      setMechanicalDetails('');
+      setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
+      Dialog.alert(
+        'Mechanical Assistance',
+        'Alert broadcast to your pack with your live GPS location. Would you like to view roadside assistance & breakdown helplines?',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'View Directory', onPress: () => void loadBreakdownDirectory() },
+        ]
+      );
+    }
   }
 
   async function loadBreakdownDirectory() {

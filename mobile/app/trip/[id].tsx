@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal, Platform, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   buildGoogleMapsNavigationUrl,
@@ -30,7 +30,7 @@ import {
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
-import { saveCachedTrip, getCachedTrip } from '../../src/lib/tripCache';
+import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -250,13 +250,15 @@ export default function TripWorkspaceScreen() {
       }
       setChecklists(clData);
 
-      void saveCachedTrip(id, {
-        trip: tripResult.data as any,
-        waypoints: (waypointResult.data || []) as any,
-        stages: (stageResult.data || []) as any,
-        days: (dayResult.data || []) as any,
-        stays: (stayResult.data || []) as any,
-      }, user?.id);
+      if (generation === loadGeneration.current && user?.id) {
+        void saveCachedTrip(id, {
+          trip: tripResult.data as any,
+          waypoints: (waypointResult.data || []) as any,
+          stages: (stageResult.data || []) as any,
+          days: (dayResult.data || []) as any,
+          stays: (stayResult.data || []) as any,
+        }, user.id);
+      }
 
       if (user?.id) {
         const { data: entry } = await supabase
@@ -271,16 +273,23 @@ export default function TripWorkspaceScreen() {
       }
     } catch (e: any) {
       if (generation === loadGeneration.current) {
-        const cached = await getCachedTrip(id, user?.id);
-        if (cached?.trip) {
-          setTrip(cached.trip as any);
-          setWaypoints(cached.waypoints as any);
-          setDays(cached.days as any);
-          setStays(cached.stays as any);
-          setStages(cached.stages as any);
-          setError('Offline Mode: Showing cached trip itinerary.');
+        const isAuthOrPermissionError = e?.status === 401 || e?.status === 403 || e?.code === '42501' || /permission|unauthorized|not found/i.test(e?.message || '');
+        if (isAuthOrPermissionError) {
+          void clearCachedTrip(id, user?.id);
+          setTrip(null);
+          setError(e?.message || 'You do not have permission to view this trip.');
         } else {
-          setError(e?.message || 'Could not load this trip.');
+          const cached = await getCachedTrip(id, user?.id);
+          if (cached?.trip) {
+            setTrip(cached.trip as any);
+            setWaypoints(cached.waypoints as any);
+            setDays(cached.days as any);
+            setStays(cached.stays as any);
+            setStages(cached.stages as any);
+            setError('Offline Mode: Showing cached trip itinerary.');
+          } else {
+            setError(e?.message || 'Could not load this trip.');
+          }
         }
       }
     }
@@ -375,8 +384,8 @@ export default function TripWorkspaceScreen() {
   async function saveTripDetails() {
     if (!editName.trim()) { Alert.alert('Trip name required', 'Enter a name for this trip.'); return; }
     const maxPartNum = editMaxParticipants.trim() ? Number(editMaxParticipants) : null;
-    if (maxPartNum != null && (!Number.isFinite(maxPartNum) || maxPartNum < 2 || maxPartNum > 500)) {
-      Alert.alert('Invalid pack capacity', 'Pack size must be between 2 and 500 riders.'); return;
+    if (maxPartNum != null && (!Number.isInteger(maxPartNum) || maxPartNum < 2 || maxPartNum > 500)) {
+      Alert.alert('Invalid pack capacity', 'Pack size must be a whole number between 2 and 500 riders.'); return;
     }
     setSaving(true); setError('');
     try {
@@ -396,7 +405,11 @@ export default function TripWorkspaceScreen() {
     } finally { setSaving(false); }
   }
 
+  const [updatingAttendance, setUpdatingAttendance] = useState(false);
+
   async function handleUpdateAttendance(status: AttendanceStatus, targetUserId?: string) {
+    if (updatingAttendance) return;
+    setUpdatingAttendance(true);
     try {
       const { error: attError } = await supabase.rpc('update_participant_attendance', {
         p_ride_id: id,
@@ -412,6 +425,8 @@ export default function TripWorkspaceScreen() {
       }));
     } catch (e: any) {
       Alert.alert('Could not update attendance', e?.message || 'Please try again.');
+    } finally {
+      setUpdatingAttendance(false);
     }
   }
 
@@ -431,7 +446,7 @@ export default function TripWorkspaceScreen() {
     if (!trip || !isAdmin) return;
     setSaving(true); setError('');
     try {
-      await stopBackgroundLocationUpdates().catch(() => {});
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: id });
       if (deleteError) throw deleteError;
       router.replace('/(tabs)');
@@ -504,6 +519,27 @@ export default function TripWorkspaceScreen() {
       });
 
       const cleanName = trip.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          const blob = new Blob([gpxContent], { type: 'application/gpx+xml;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${cleanName}.gpx`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return;
+        }
+        await Share.share({
+          message: gpxContent,
+          title: `${cleanName}.gpx`,
+        });
+        return;
+      }
+
       const fileUri = `${FileSystem.cacheDirectory}${cleanName}.gpx`;
       await FileSystem.writeAsStringAsync(fileUri, gpxContent, { encoding: FileSystem.EncodingType.UTF8 });
 
@@ -605,7 +641,7 @@ export default function TripWorkspaceScreen() {
     if (!trip || isAdmin) return;
     setSaving(true); setError('');
     try {
-      await stopBackgroundLocationUpdates().catch(() => {});
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
       if (leaveError) throw leaveError;
       router.replace('/(tabs)');

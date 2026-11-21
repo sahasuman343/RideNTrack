@@ -111,9 +111,9 @@ export interface VerifiedBreakdownService {
 }
 
 export const SEEDED_BREAKDOWN_DIRECTORY: VerifiedBreakdownService[] = [
-  { name: 'NHAI 24x7 Highway Breakdown', category: 'towing', region: 'All India National Highways', phone: '1033', description: 'Emergency highway tow and clearance' },
+  { name: 'NHAI 24x7 Highway Emergency & Towing', category: 'towing', region: 'All India National Highways', phone: '1033', description: 'Emergency highway tow and clearance' },
   { name: 'Royal Enfield RSA Toll-Free', category: 'mechanic', region: 'All India', phone: '18002100007', description: 'Official motorcycle roadside assistance' },
-  { name: 'KTM 24x7 Roadside Assistance', category: 'mechanic', region: 'All India', phone: '18002660000', description: 'KTM & Husqvarna breakdown helpline' },
-  { name: 'Manali-Leh Highway Rescue', category: 'mechanic', region: 'Ladakh & Himachal', phone: '01982252018', description: 'Keylong & Sarchu high-altitude mechanic dispatch' },
-  { name: 'Western Ghats Motorcycle Rescue', category: 'puncture', region: 'Western Ghats / Goa', phone: '9822144332', description: 'Ghats puncture and flatbed towing service' },
+  { name: 'National Emergency Response Support', category: 'mechanic', region: 'All India', phone: '112', description: 'Unified emergency response support system' },
+  { name: 'Highway Medical & Ambulance Support', category: 'fuel', region: 'All India Highways', phone: '108', description: '24x7 Emergency response and medical dispatch' },
+  { name: 'National Traffic & Highway Safety', category: 'puncture', region: 'National Highways', phone: '1073', description: 'Traffic accident & road safety helpline' },
 ];

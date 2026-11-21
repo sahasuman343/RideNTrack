@@ -180,10 +180,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await clearAllCachedTripsForUser(userId).catch(() => {});
     await clearQueuedItemsForUser(userId).catch(() => {});
-    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
-    activeUserId.current = null;
-    setSession(null);
-    setProfile(null);
+    if (activeUserId.current === userId) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      activeUserId.current = null;
+      setSession(null);
+      setProfile(null);
+    }
   }
 
   return (

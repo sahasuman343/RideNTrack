@@ -1509,6 +1509,7 @@ test('migration 025 addresses all CodeRabbit security, concurrency, and integrit
 
   // 5. Duplicate trip sanitization for non-members
   assert.match(migration, /duplicate_trip/);
+  assert.match(migration, /duplicate_trip\(\s*p_ride_id UUID,\s*p_new_name TEXT DEFAULT NULL/i);
   assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.booking_reference ELSE NULL END/);
   assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.contact_phone ELSE NULL END/);
   assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.notes ELSE NULL END/);
@@ -1524,8 +1525,19 @@ test('migration 025 addresses all CodeRabbit security, concurrency, and integrit
 
   // 8. Delete user account caller validation
   assert.match(migration, /delete_user_account/);
+  assert.match(migration, /DROP FUNCTION IF EXISTS public\.delete_user_account\(\);/);
   assert.match(migration, /p_expected_user_id uuid DEFAULT NULL/i);
   assert.match(migration, /Target user ID does not match authenticated identity/);
+
+  // 9. Foreign key on closed_by with ON DELETE SET NULL
+  assert.match(migration, /trip_regroup_points_closed_by_fkey/);
+  assert.match(migration, /ON DELETE SET NULL/);
+
+  // 10. Private stay details restricted to trip members
+  assert.match(migration, /CREATE POLICY "Trip stays visible to ride members" ON public\.trip_stays/);
+
+  // 11. Private trip enforcement in join_ride_by_code
+  assert.match(migration, /v_ride\.visibility = 'private'/);
 });
 
 test('trip cache scopes stored itineraries by user ID to prevent cross-account leaks on shared devices', async () => {
@@ -1613,12 +1625,18 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
 test('trip workspace exports GPX via native file system and sharing dialog, and reports expense load errors', () => {
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
 
-  // GPX export writes to cacheDirectory and invokes native sharing
+  // GPX export writes to cacheDirectory and invokes native sharing with web compatibility
+  assert.match(tripSource, /Platform\.OS === 'web'/);
   assert.match(tripSource, /FileSystem\.cacheDirectory/);
   assert.match(tripSource, /FileSystem\.writeAsStringAsync/);
   assert.match(tripSource, /Sharing\.isAvailableAsync\(\)/);
   assert.match(tripSource, /Sharing\.shareAsync\(fileUri,/);
   assert.match(tripSource, /Share\.share\(\{/);
+
+  // Scoped background location stopping and permission cache clearance
+  assert.match(tripSource, /stopBackgroundLocationUpdates\(id\)/);
+  assert.match(tripSource, /clearCachedTrip\(id,\s*user\?\.id\)/);
+  assert.match(tripSource, /Number\.isInteger\(maxPartNum\)/);
 
   // Expense error handling and retry UI
   assert.match(tripSource, /const \[expenseError, setExpenseError\] = useState<string \| null>\(null\);/);
@@ -1647,6 +1665,11 @@ test('expense settlement supports multi-currency transaction records and calcula
   assert.equal(usdTrans[0].currency, 'USD');
   assert.equal(usdTrans[0].toUserId, 'u1');
   assert.equal(usdTrans[0].amount, 100);
+});
+
+test('syncQueue does not clear queued items on unauthorized error if active session has changed', () => {
+  const syncSource = fs.readFileSync(path.resolve('mobile/src/services/syncQueue.ts'), 'utf8');
+  assert.match(syncSource, /currentSession\?\.user\?\.id === userId/);
 });
 
 

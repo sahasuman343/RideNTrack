@@ -66,7 +66,7 @@ export default function MyRidesScreen() {
             onPress: async () => {
               setDeletingRideId(item.id);
               try {
-                await stopBackgroundLocationUpdates().catch(() => {});
+                await stopBackgroundLocationUpdates(item.id).catch(() => {});
                 const { error } = await supabase.rpc('delete_trip', { p_ride_id: item.id });
                 if (error) throw error;
                 setRides(prev => prev.filter(r => r.id !== item.id));
@@ -92,7 +92,7 @@ export default function MyRidesScreen() {
             onPress: async () => {
               setDeletingRideId(item.id);
               try {
-                await stopBackgroundLocationUpdates().catch(() => {});
+                await stopBackgroundLocationUpdates(item.id).catch(() => {});
                 const { error } = await supabase.rpc('leave_ride', { p_ride_id: item.id });
                 if (error) throw error;
                 setRides(prev => prev.filter(r => r.id !== item.id));

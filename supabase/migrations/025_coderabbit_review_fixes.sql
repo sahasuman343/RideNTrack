@@ -135,7 +135,7 @@ $$;
 -- 5. Scope stay cloning in duplicate_trip to avoid leaking private booking info when duplicating public trips
 CREATE OR REPLACE FUNCTION public.duplicate_trip(
   p_ride_id UUID,
-  p_new_name TEXT,
+  p_new_name TEXT DEFAULT NULL,
   p_new_start_date DATE DEFAULT NULL
 )
 RETURNS UUID
@@ -144,107 +144,107 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_source_ride public.rides%ROWTYPE;
-  v_new_ride_id UUID;
+  v_source public.rides%ROWTYPE;
+  v_new_ride_id UUID := gen_random_uuid();
   v_new_code TEXT;
-  v_days_offset INTEGER := 0;
+  v_name TEXT;
   v_day_record RECORD;
   v_new_day_id UUID;
-  v_day_map JSONB := '{}'::jsonb;
   v_stage_record RECORD;
-  v_waypoint_record RECORD;
+  v_new_stage_id UUID;
+  v_wp_record RECORD;
   v_stay_record RECORD;
+  v_day_map JSONB := '{}'::jsonb;
+  v_stage_map JSONB := '{}'::jsonb;
+  v_date_offset INTEGER := 0;
   v_is_member BOOLEAN;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Authentication required' USING ERRCODE = '28000';
   END IF;
 
-  SELECT * INTO v_source_ride FROM public.rides WHERE id = p_ride_id;
+  SELECT * INTO v_source FROM public.rides WHERE id = p_ride_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Source trip not found' USING ERRCODE = 'P0002';
   END IF;
 
-  v_is_member := public.is_ride_participant(p_ride_id, auth.uid()) OR v_source_ride.admin_id = auth.uid();
+  v_is_member := v_source.admin_id = auth.uid() OR public.is_ride_participant(p_ride_id, auth.uid());
 
-  IF NOT v_is_member AND v_source_ride.visibility != 'public' THEN
+  IF NOT v_is_member AND v_source.visibility != 'public' THEN
     RAISE EXCEPTION 'You do not have permission to duplicate this trip' USING ERRCODE = '42501';
   END IF;
 
-  v_new_code := upper(substring(md5(random()::text) from 1 for 6));
-  IF p_new_start_date IS NOT NULL AND v_source_ride.start_date IS NOT NULL THEN
-    v_days_offset := p_new_start_date - v_source_ride.start_date;
+  v_new_code := public.generate_ride_code();
+  v_name := COALESCE(NULLIF(trim(p_new_name), ''), v_source.name || ' (Copy)');
+
+  IF p_new_start_date IS NOT NULL AND v_source.start_date IS NOT NULL THEN
+    v_date_offset := p_new_start_date - v_source.start_date;
   END IF;
 
+  -- Insert cloned ride (admin auto-join trigger handles participant creation)
   INSERT INTO public.rides (
-    id, name, ride_code, admin_id, origin, destination, origin_coords, destination_coords,
-    route_geometry, status, description, trip_type, visibility, start_date, end_date,
-    estimated_distance_meters, estimated_duration_seconds, route_deviation_threshold_meters,
-    rider_behind_threshold_meters, max_participants, ride_rules
+    id, name, ride_code, admin_id, origin, destination,
+    origin_coords, destination_coords, route_geometry, status,
+    description, trip_type, visibility, start_date, end_date,
+    estimated_distance_meters, estimated_duration_seconds,
+    route_deviation_threshold_meters, rider_behind_threshold_meters,
+    max_participants, ride_rules, created_at
   ) VALUES (
-    gen_random_uuid(),
-    trim(p_new_name),
-    v_new_code,
-    auth.uid(),
-    v_source_ride.origin,
-    v_source_ride.destination,
-    v_source_ride.origin_coords,
-    v_source_ride.destination_coords,
-    v_source_ride.route_geometry,
-    'planned',
-    v_source_ride.description,
-    v_source_ride.trip_type,
-    'invite_only',
-    CASE WHEN v_source_ride.start_date IS NOT NULL THEN v_source_ride.start_date + v_days_offset ELSE NULL END,
-    CASE WHEN v_source_ride.end_date IS NOT NULL THEN v_source_ride.end_date + v_days_offset ELSE NULL END,
-    v_source_ride.estimated_distance_meters,
-    v_source_ride.estimated_duration_seconds,
-    v_source_ride.route_deviation_threshold_meters,
-    v_source_ride.rider_behind_threshold_meters,
-    v_source_ride.max_participants,
-    v_source_ride.ride_rules
-  ) RETURNING id INTO v_new_ride_id;
-
-  INSERT INTO public.ride_participants (ride_id, user_id, role, is_active)
-  VALUES (v_new_ride_id, auth.uid(), 'captain', true);
+    v_new_ride_id, v_name, v_new_code, auth.uid(), v_source.origin, v_source.destination,
+    v_source.origin_coords, v_source.destination_coords, v_source.route_geometry, 'planned',
+    v_source.description, v_source.trip_type, 'private',
+    CASE WHEN p_new_start_date IS NOT NULL THEN p_new_start_date ELSE v_source.start_date END,
+    CASE WHEN v_source.end_date IS NOT NULL AND v_date_offset != 0 THEN v_source.end_date + v_date_offset ELSE v_source.end_date END,
+    v_source.estimated_distance_meters, v_source.estimated_duration_seconds,
+    v_source.route_deviation_threshold_meters, v_source.rider_behind_threshold_meters,
+    v_source.max_participants, v_source.ride_rules, now()
+  );
 
   -- Clone trip_days
   FOR v_day_record IN SELECT * FROM public.trip_days WHERE ride_id = p_ride_id ORDER BY day_number LOOP
     v_new_day_id := gen_random_uuid();
     v_day_map := jsonb_set(v_day_map, ARRAY[v_day_record.id::text], to_jsonb(v_new_day_id::text));
-    INSERT INTO public.trip_days (id, ride_id, day_number, date, title, notes)
+
+    INSERT INTO public.trip_days (id, ride_id, day_number, trip_date, title, notes)
     VALUES (
       v_new_day_id, v_new_ride_id, v_day_record.day_number,
-      CASE WHEN v_day_record.date IS NOT NULL THEN v_day_record.date + v_days_offset ELSE NULL END,
+      CASE WHEN v_day_record.trip_date IS NOT NULL AND v_date_offset != 0 THEN v_day_record.trip_date + v_date_offset ELSE v_day_record.trip_date END,
       v_day_record.title, v_day_record.notes
     );
   END LOOP;
 
   -- Clone trip_stages
-  FOR v_stage_record IN SELECT * FROM public.trip_stages WHERE ride_id = p_ride_id ORDER BY sequence LOOP
+  FOR v_stage_record IN SELECT * FROM public.trip_stages WHERE ride_id = p_ride_id ORDER BY stage_number LOOP
+    v_new_stage_id := gen_random_uuid();
+    v_stage_map := jsonb_set(v_stage_map, ARRAY[v_stage_record.id::text], to_jsonb(v_new_stage_id::text));
+
     INSERT INTO public.trip_stages (
-      id, ride_id, trip_day_id, stage_name, sequence, start_location, end_location,
-      distance_meters, estimated_duration_seconds, notes
+      id, ride_id, trip_day_id, stage_number, name, start_name, destination_name,
+      start_coords, destination_coords, route_geometry, estimated_distance_meters,
+      estimated_duration_seconds, notes, status, created_at
     ) VALUES (
-      gen_random_uuid(), v_new_ride_id,
+      v_new_stage_id, v_new_ride_id,
       CASE WHEN v_stage_record.trip_day_id IS NOT NULL THEN (v_day_map->>v_stage_record.trip_day_id::text)::uuid ELSE NULL END,
-      v_stage_record.stage_name, v_stage_record.sequence, v_stage_record.start_location,
-      v_stage_record.end_location, v_stage_record.distance_meters,
-      v_stage_record.estimated_duration_seconds, v_stage_record.notes
+      v_stage_record.stage_number, v_stage_record.name, v_stage_record.start_name, v_stage_record.destination_name,
+      v_stage_record.start_coords, v_stage_record.destination_coords, v_stage_record.route_geometry,
+      v_stage_record.estimated_distance_meters, v_stage_record.estimated_duration_seconds,
+      v_stage_record.notes, 'planned', now()
     );
   END LOOP;
 
   -- Clone trip_waypoints
-  FOR v_waypoint_record IN SELECT * FROM public.trip_waypoints WHERE ride_id = p_ride_id ORDER BY sequence LOOP
+  FOR v_wp_record IN SELECT * FROM public.trip_waypoints WHERE ride_id = p_ride_id ORDER BY sequence LOOP
     INSERT INTO public.trip_waypoints (
-      id, ride_id, trip_day_id, name, latitude, longitude, sequence, waypoint_type,
-      notes, road_condition, provider_place_id
+      id, ride_id, sequence, waypoint_type, name, address, latitude, longitude,
+      provider_place_id, notes, is_optional, planned_arrival, planned_departure,
+      trip_day_id, trip_stage_id
     ) VALUES (
-      gen_random_uuid(), v_new_ride_id,
-      CASE WHEN v_waypoint_record.trip_day_id IS NOT NULL THEN (v_day_map->>v_waypoint_record.trip_day_id::text)::uuid ELSE NULL END,
-      v_waypoint_record.name, v_waypoint_record.latitude, v_waypoint_record.longitude,
-      v_waypoint_record.sequence, v_waypoint_record.waypoint_type, v_waypoint_record.notes,
-      v_waypoint_record.road_condition, v_waypoint_record.provider_place_id
+      gen_random_uuid(), v_new_ride_id, v_wp_record.sequence, v_wp_record.waypoint_type,
+      v_wp_record.name, v_wp_record.address, v_wp_record.latitude, v_wp_record.longitude,
+      v_wp_record.provider_place_id, v_wp_record.notes, v_wp_record.is_optional,
+      v_wp_record.planned_arrival, v_wp_record.planned_departure,
+      CASE WHEN v_wp_record.trip_day_id IS NOT NULL THEN (v_day_map->>v_wp_record.trip_day_id::text)::uuid ELSE NULL END,
+      CASE WHEN v_wp_record.trip_stage_id IS NOT NULL THEN (v_stage_map->>v_wp_record.trip_stage_id::text)::uuid ELSE NULL END
     );
   END LOOP;
 
@@ -444,6 +444,7 @@ END;
 $$;
 
 -- 8. Safe account deletion with expected_user_id validation
+DROP FUNCTION IF EXISTS public.delete_user_account();
 CREATE OR REPLACE FUNCTION public.delete_user_account(p_expected_user_id UUID DEFAULT NULL)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
 AS $$
@@ -470,6 +471,9 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.delete_user_account(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_user_account(UUID) TO authenticated;
+
 -- 9. Composite index on checklist ride_id and sequence
 CREATE INDEX IF NOT EXISTS idx_trip_checklists_ride_seq ON public.trip_checklists (ride_id, sequence);
 
@@ -491,5 +495,62 @@ CREATE POLICY "Users manage own completions" ON public.trip_checklist_completion
       WHERE c.id = checklist_id AND public.is_ride_participant(c.ride_id, auth.uid())
     )
   );
+
+-- 11. Foreign key constraint on trip_regroup_points.closed_by to allow user deletion
+ALTER TABLE public.trip_regroup_points
+  DROP CONSTRAINT IF EXISTS trip_regroup_points_closed_by_fkey;
+ALTER TABLE public.trip_regroup_points
+  ADD CONSTRAINT trip_regroup_points_closed_by_fkey
+  FOREIGN KEY (closed_by) REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+-- 12. Restrict direct trip_stays reads to participants and admins (prevents non-member leak of booking info on public trips)
+DROP POLICY IF EXISTS "Trip stays visible to ride members" ON public.trip_stays;
+CREATE POLICY "Trip stays visible to ride members" ON public.trip_stays
+  FOR SELECT USING (
+    public.is_ride_participant(ride_id, auth.uid())
+    OR EXISTS (SELECT 1 FROM public.rides WHERE id = ride_id AND admin_id = auth.uid())
+  );
+
+-- 13. Enforce private trip rule in join_ride_by_code
+CREATE OR REPLACE FUNCTION public.join_ride_by_code(p_code text)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_ride public.rides%ROWTYPE;
+  v_current_count INTEGER;
+  v_already_member BOOLEAN;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Sign in to join a ride'; END IF;
+  SELECT * INTO v_ride FROM public.rides WHERE ride_code = upper(trim(p_code)) AND status != 'completed';
+  IF v_ride.id IS NULL THEN RAISE EXCEPTION 'Invalid ride code or ride has ended'; END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.ride_participants WHERE ride_id = v_ride.id AND user_id = auth.uid() AND is_active = true
+  ) INTO v_already_member;
+
+  IF NOT v_already_member AND v_ride.visibility = 'private' THEN
+    RAISE EXCEPTION 'This trip is private. You need an invitation from the leader to join.' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT v_already_member AND v_ride.max_participants IS NOT NULL THEN
+    SELECT count(*) INTO v_current_count FROM public.ride_participants
+    WHERE ride_id = v_ride.id AND is_active = true;
+
+    IF v_current_count >= v_ride.max_participants THEN
+      RAISE EXCEPTION 'Group ride has reached maximum capacity (% riders)', v_ride.max_participants
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  INSERT INTO public.ride_participants (ride_id, user_id, role, is_active, joined_at)
+  VALUES (v_ride.id, auth.uid(), 'member', true, now())
+  ON CONFLICT (ride_id, user_id)
+  DO UPDATE SET is_active = true, role = 'member';
+
+  RETURN v_ride.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.join_ride_by_code(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.join_ride_by_code(text) TO authenticated;
 
 COMMIT;

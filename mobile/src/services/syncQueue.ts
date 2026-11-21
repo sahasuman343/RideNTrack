@@ -65,7 +65,12 @@ async function flush() {
           if (!res.error && res.data === 1) {
             await clearQueuedItems(userId, [item.id!]);
           } else if (res.error?.message?.includes('Invalid or unauthorized')) {
-            await clearQueuedItems(userId, [item.id!]);
+            const currentSession = (await supabase.auth.getSession().catch(() => null))?.data?.session;
+            if (currentSession?.user?.id === userId) {
+              await clearQueuedItems(userId, [item.id!]);
+            } else {
+              hasRemainingErrors = true;
+            }
           } else {
             hasRemainingErrors = true;
           }
