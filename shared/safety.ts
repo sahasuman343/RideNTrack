@@ -111,9 +111,9 @@ export interface VerifiedBreakdownService {
 }
 
 export const SEEDED_BREAKDOWN_DIRECTORY: VerifiedBreakdownService[] = [
-  { name: 'NHAI 24x7 Highway Emergency & Towing', category: 'towing', region: 'All India National Highways', phone: '1033', description: 'Emergency highway tow and clearance' },
-  { name: 'Royal Enfield RSA Toll-Free', category: 'mechanic', region: 'All India', phone: '18002100007', description: 'Official motorcycle roadside assistance' },
-  { name: 'National Emergency Response Support', category: 'mechanic', region: 'All India', phone: '112', description: 'Unified emergency response support system' },
-  { name: 'Highway Medical & Ambulance Support', category: 'fuel', region: 'All India Highways', phone: '108', description: '24x7 Emergency response and medical dispatch' },
-  { name: 'National Traffic & Highway Safety', category: 'puncture', region: 'National Highways', phone: '1073', description: 'Traffic accident & road safety helpline' },
+  { name: 'NHAI 24x7 Highway Emergency Towing', category: 'towing', region: 'All India', phone: '1033', description: 'National Highway Authority emergency response and vehicle clearance' },
+  { name: 'Royal Enfield Roadside Assistance', category: 'mechanic', region: 'All India', phone: '18002100007', description: '24x7 pan-India breakdown helpline for touring motorcycles' },
+  { name: 'KTM Roadside Assistance', category: 'mechanic', region: 'All India', phone: '18002660000', description: 'Emergency roadside support for KTM and Husqvarna tourers' },
+  { name: 'Manali-Leh Highway Himalayan Rescue', category: 'mechanic', region: 'Ladakh & Himachal', phone: '01982252018', description: 'Keylong, Darcha, Sarchu mountain rescue and mobile mechanic' },
+  { name: 'Western Ghats Monsoon Rescue & Towing', category: 'towing', region: 'Maharashtra & Goa', phone: '1033', description: 'Ghat sections heavy vehicle recovery and bike towing' },
 ];

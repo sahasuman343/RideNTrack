@@ -276,7 +276,7 @@ export default function TripWorkspaceScreen() {
     } catch (e: any) {
       if (generation === loadGeneration.current) {
         setExpenses(null); setExpenseSummary(null); setExpenseError('Expense data unavailable.');
-        const isAuthOrPermissionError = e?.status === 401 || e?.status === 403 || e?.code === '42501' || /permission|unauthorized|not found/i.test(e?.message || '');
+        const isAuthOrPermissionError = e?.status === 401 || e?.status === 403 || e?.code === '42501' || e?.code === 'PGRST116' || /permission|unauthorized|not found/i.test(e?.message || '');
         if (isAuthOrPermissionError) {
           void clearCachedTrip(id, user?.id);
           setTrip(null);
@@ -410,8 +410,8 @@ export default function TripWorkspaceScreen() {
 
   const [updatingAttendance, setUpdatingAttendance] = useState(false);
 
-  async function handleUpdateAttendance(status: AttendanceStatus, targetUserId?: string) {
-    if (updatingAttendance) return;
+  async function handleUpdateAttendance(status: AttendanceStatus, targetUserId?: string): Promise<boolean> {
+    if (updatingAttendance) return false;
     setUpdatingAttendance(true);
     try {
       const { error: attError } = await supabase.rpc('update_participant_attendance', {
@@ -426,8 +426,10 @@ export default function TripWorkspaceScreen() {
         }
         return r;
       }));
+      return true;
     } catch (e: any) {
       Alert.alert('Could not update attendance', e?.message || 'Please try again.');
+      return false;
     } finally {
       setUpdatingAttendance(false);
     }
@@ -449,9 +451,9 @@ export default function TripWorkspaceScreen() {
     if (!trip || !isAdmin) return;
     setSaving(true); setError('');
     try {
-      await stopBackgroundLocationUpdates(id).catch(() => {});
       const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: id });
       if (deleteError) throw deleteError;
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not delete this trip.');
@@ -637,9 +639,9 @@ export default function TripWorkspaceScreen() {
     if (!trip || isAdmin) return;
     setSaving(true); setError('');
     try {
-      await stopBackgroundLocationUpdates(id).catch(() => {});
       const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
       if (leaveError) throw leaveError;
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not leave this ride.');
@@ -1501,7 +1503,8 @@ export default function TripWorkspaceScreen() {
                 return (
                   <TouchableOpacity
                     key={status}
-                    style={[styles.smallButton, { flex: 1, alignItems: 'center' }, isSelected && styles.roleSelected]}
+                    disabled={updatingAttendance}
+                    style={[styles.smallButton, { flex: 1, alignItems: 'center' }, isSelected && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
                     onPress={() => void handleUpdateAttendance(status)}
                   >
                     <Text style={[styles.smallButtonText, isSelected && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
@@ -1938,10 +1941,13 @@ export default function TripWorkspaceScreen() {
                     return (
                       <TouchableOpacity
                         key={att}
-                        style={[styles.smallButton, isSel && styles.roleSelected]}
+                        disabled={updatingAttendance}
+                        style={[styles.smallButton, isSel && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
                         onPress={async () => {
-                          await handleUpdateAttendance(att, selectedRider.user_id);
-                          setSelectedRider(prev => prev ? { ...prev, attendance_status: att } : null);
+                          const ok = await handleUpdateAttendance(att, selectedRider.user_id);
+                          if (ok) {
+                            setSelectedRider(prev => prev ? { ...prev, attendance_status: att } : null);
+                          }
                         }}
                       >
                         <Text style={[styles.smallButtonText, isSel && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>

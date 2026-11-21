@@ -1538,6 +1538,11 @@ test('migration 025 addresses all CodeRabbit security, concurrency, and integrit
 
   // 11. Private trip enforcement in join_ride_by_code
   assert.match(migration, /v_ride\.visibility = 'private'/);
+
+  // 12. Concurrency lock and role preservation in join_ride_by_code & accept_trip_invitation
+  assert.match(migration, /PERFORM 1 FROM public\.rides WHERE id = v_ride\.id FOR UPDATE;/);
+  assert.match(migration, /DO UPDATE SET is_active = true;/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.accept_trip_invitation/);
 });
 
 test('trip cache scopes stored itineraries by user ID to prevent cross-account leaks on shared devices', async () => {
@@ -1634,6 +1639,8 @@ test('trip workspace exports GPX via native file system and sharing dialog, and 
   assert.match(tripSource, /stopBackgroundLocationUpdates\(id\)/);
   assert.match(tripSource, /clearCachedTrip\(id,\s*user\?\.id\)/);
   assert.match(tripSource, /Number\.isInteger\(maxPartNum\)/);
+  assert.match(tripSource, /e\?\.code === 'PGRST116'/);
+  assert.match(tripSource, /handleUpdateAttendance.*Promise<boolean>/);
 
   // Expense error handling and retry UI
   assert.match(tripSource, /const \[expenseError, setExpenseError\] = useState<string \| null>\(null\);/);

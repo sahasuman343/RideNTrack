@@ -227,11 +227,16 @@ export function stopBackgroundLocationUpdates(targetRideId?: string): Promise<vo
   if (targetRideId && context?.rideId && context.rideId !== targetRideId) {
     return Promise.resolve();
   }
-  ++generation; context = null;
+  if (!targetRideId || (context?.rideId && context.rideId === targetRideId)) {
+    ++generation;
+    context = null;
+  }
   return serialize(async () => {
     if (targetRideId) {
       const saved = JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
       if (saved?.rideId && saved.rideId !== targetRideId) return;
+      ++generation;
+      context = null;
     }
     fallback?.remove(); fallback = null;
     await AsyncStorage.removeItem(CONTEXT_KEY);

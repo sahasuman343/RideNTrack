@@ -514,7 +514,7 @@ CREATE POLICY "Trip stays visible to ride members" ON public.trip_stays
     OR EXISTS (SELECT 1 FROM public.rides WHERE id = ride_id AND admin_id = auth.uid())
   );
 
--- 13. Enforce private trip rule in join_ride_by_code
+-- 13. Enforce private trip rule in join_ride_by_code & preserve role on conflict
 CREATE OR REPLACE FUNCTION public.join_ride_by_code(p_code text)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
@@ -535,6 +535,7 @@ BEGIN
   END IF;
 
   IF NOT v_already_member AND v_ride.max_participants IS NOT NULL THEN
+    PERFORM 1 FROM public.rides WHERE id = v_ride.id FOR UPDATE;
     SELECT count(*) INTO v_current_count FROM public.ride_participants
     WHERE ride_id = v_ride.id AND is_active = true;
 
@@ -547,7 +548,7 @@ BEGIN
   INSERT INTO public.ride_participants (ride_id, user_id, role, is_active, joined_at)
   VALUES (v_ride.id, auth.uid(), 'member', true, now())
   ON CONFLICT (ride_id, user_id)
-  DO UPDATE SET is_active = true, role = 'member';
+  DO UPDATE SET is_active = true;
 
   RETURN v_ride.id;
 END;
@@ -555,5 +556,61 @@ $$;
 
 REVOKE ALL ON FUNCTION public.join_ride_by_code(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.join_ride_by_code(text) TO authenticated;
+
+-- 14. Serialize capacity check in accept_trip_invitation
+CREATE OR REPLACE FUNCTION public.accept_trip_invitation(p_token UUID)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
+AS $$
+DECLARE
+  v_inv public.trip_invitations%ROWTYPE;
+  v_ride public.rides%ROWTYPE;
+  v_email TEXT;
+  v_current_count INTEGER;
+  v_already_member BOOLEAN;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE='28000'; END IF;
+  SELECT lower(u.email) INTO v_email FROM auth.users u WHERE u.id=auth.uid();
+  SELECT * INTO v_inv FROM public.trip_invitations i
+    WHERE i.token=p_token FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Invitation not found'; END IF;
+  IF v_inv.status <> 'pending' THEN RAISE EXCEPTION 'Invitation is no longer pending'; END IF;
+  IF v_inv.expires_at <= now() THEN
+    UPDATE public.trip_invitations SET status='expired' WHERE id=v_inv.id;
+    RETURN NULL;
+  END IF;
+  IF v_inv.invited_email IS NOT NULL AND v_inv.invited_email IS DISTINCT FROM v_email THEN
+    RAISE EXCEPTION 'This invitation was sent to a different email address' USING ERRCODE='42501';
+  END IF;
+
+  SELECT * INTO v_ride FROM public.rides WHERE id = v_inv.ride_id;
+  SELECT EXISTS (
+    SELECT 1 FROM public.ride_participants WHERE ride_id = v_ride.id AND user_id = auth.uid() AND is_active = true
+  ) INTO v_already_member;
+
+  IF NOT v_already_member AND v_ride.max_participants IS NOT NULL THEN
+    PERFORM 1 FROM public.rides WHERE id = v_ride.id FOR UPDATE;
+    SELECT count(*) INTO v_current_count FROM public.ride_participants
+    WHERE ride_id = v_ride.id AND is_active = true;
+
+    IF v_current_count >= v_ride.max_participants THEN
+      RAISE EXCEPTION 'Group ride has reached maximum capacity (% riders)', v_ride.max_participants
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  INSERT INTO public.ride_participants(ride_id, user_id, is_active, role, attendance_status)
+  VALUES(v_inv.ride_id, auth.uid(), true, v_inv.assigned_role, 'confirmed')
+  ON CONFLICT(ride_id, user_id) DO UPDATE SET is_active=true,
+    role=CASE WHEN public.ride_participants.role IN ('captain', 'leader') THEN public.ride_participants.role ELSE EXCLUDED.role END;
+
+  UPDATE public.trip_invitations SET status='accepted', accepted_by=auth.uid(), accepted_at=now()
+    WHERE id=v_inv.id;
+
+  RETURN v_inv.ride_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.accept_trip_invitation(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.accept_trip_invitation(UUID) TO authenticated;
 
 COMMIT;
