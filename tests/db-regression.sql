@@ -913,12 +913,10 @@ BEGIN
 
   -- 2. Create Trip with Capacity and Rules
   test_ride_id := public.create_trip_plan(
-    'Himalayan Odyssey', 'Adventure touring trip',
-    'Chandigarh', 'Manali',
-    ARRAY[76.7794, 30.7333]::double precision[],
-    ARRAY[77.1892, 32.2396]::double precision[],
-    NULL, 'touring', '2026-07-01'::date, '2026-07-07'::date,
-    300000, 28800, 'private'
+    '{"name":"Himalayan Odyssey","description":"Adventure touring trip","origin":"Chandigarh","destination":"Manali","origin_coords":[76.7794,30.7333],"destination_coords":[77.1892,32.2396],"trip_type":"touring","start_date":"2026-07-01","end_date":"2026-07-07","total_distance_meters":300000,"estimated_duration_seconds":28800,"visibility":"private"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Chandigarh","latitude":30.7333,"longitude":76.7794},{"sequence":1,"waypoint_type":"destination","name":"Manali","latitude":32.2396,"longitude":77.1892}]'::jsonb,
+    '[]'::jsonb,
+    NULL
   );
 
   SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
@@ -1012,12 +1010,10 @@ BEGIN
   -- 1. Create Trip & Regroup Point
   PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
   test_ride_id := public.create_trip_plan(
-    'Western Ghats Tour', 'Monsoon expedition',
-    'Bangalore', 'Chikmagalur',
-    ARRAY[77.5946, 12.9716]::double precision[],
-    ARRAY[75.7720, 13.3161]::double precision[],
-    NULL, 'touring', '2026-08-10'::date, '2026-08-12'::date,
-    250000, 18000, 'invite_only'
+    '{"name":"Western Ghats Tour","description":"Monsoon expedition","origin":"Bangalore","destination":"Chikmagalur","origin_coords":[77.5946,12.9716],"destination_coords":[75.7720,13.3161],"trip_type":"touring","start_date":"2026-08-10","end_date":"2026-08-12","total_distance_meters":250000,"estimated_duration_seconds":18000,"visibility":"invite_only"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bangalore","latitude":12.9716,"longitude":77.5946},{"sequence":1,"waypoint_type":"destination","name":"Chikmagalur","latitude":13.3161,"longitude":75.7720}]'::jsonb,
+    '[]'::jsonb,
+    NULL
   );
 
   SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
@@ -1128,12 +1124,10 @@ BEGIN
   -- 1. Create Trip & Member
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   v_trip_id := public.create_trip_plan(
-    'CR Test Trip', 'Audit fixes trip',
-    'Bangalore', 'Mysore',
-    ARRAY[77.5946, 12.9716]::double precision[],
-    ARRAY[76.6394, 12.2958]::double precision[],
-    NULL, 'touring', '2026-09-01'::date, '2026-09-02'::date,
-    150000, 10800, 'public'
+    '{"name":"CR Test Trip","description":"Audit fixes trip","origin":"Bangalore","destination":"Mysore","origin_coords":[77.5946,12.9716],"destination_coords":[76.6394,12.2958],"trip_type":"touring","start_date":"2026-09-01","end_date":"2026-09-02","total_distance_meters":150000,"estimated_duration_seconds":10800,"visibility":"public"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bangalore","latitude":12.9716,"longitude":77.5946},{"sequence":1,"waypoint_type":"destination","name":"Mysore","latitude":12.2958,"longitude":76.6394}]'::jsonb,
+    '[]'::jsonb,
+    NULL
   );
 
   SELECT ride_code INTO v_code FROM public.rides WHERE id = v_trip_id;
