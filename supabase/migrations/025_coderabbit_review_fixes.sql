@@ -330,7 +330,10 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM unnest(v_cleaned_splits) u
     WHERE NOT (
-      public.is_ride_participant(p_ride_id, u)
+      EXISTS (
+        SELECT 1 FROM public.ride_participants
+        WHERE ride_id = p_ride_id AND user_id = u AND is_active = true
+      )
       OR EXISTS (SELECT 1 FROM public.rides WHERE id = p_ride_id AND admin_id = u)
     )
   ) THEN
