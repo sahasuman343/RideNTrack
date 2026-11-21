@@ -28,7 +28,7 @@ BEGIN
     'public.get_regroup_points(uuid)'::regprocedure,
     'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
     'public.get_rider_analytics(uuid)'::regprocedure,
-    'public.delete_user_account()'::regprocedure,
+    'public.delete_user_account(uuid)'::regprocedure,
     'public.archive_trip(uuid)'::regprocedure,
     'public.unarchive_trip(uuid)'::regprocedure,
     'public.duplicate_trip(uuid,text,date)'::regprocedure,
