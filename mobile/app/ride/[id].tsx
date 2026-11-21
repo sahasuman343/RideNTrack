@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image, ScrollView, TextInput, PanResponder, LayoutAnimation, UIManager } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
@@ -42,6 +42,10 @@ if (MAPBOX_TOKEN) {
   catch { /* Native maps are unavailable in Expo Go; the rider panel still works. */ }
 }
 
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  try { UIManager.setLayoutAnimationEnabledExperimental(true); } catch { /* ignore */ }
+}
+
 
 
 export default function LiveRideScreen() {
@@ -66,6 +70,29 @@ export default function LiveRideScreen() {
   const [backgroundPermissionGranted, setBackgroundPermissionGranted] = useState(false);
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy < -20 || gestureState.vy < -0.4) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setExpanded(true);
+          } else if (gestureState.dy > 20 || gestureState.vy > 0.4) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setExpanded(false);
+          }
+        },
+      }),
+    []
+  );
+  const toggleExpanded = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded(v => !v);
+  };
   const [sheetHeight, setSheetHeight] = useState(200);
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
@@ -819,7 +846,11 @@ export default function LiveRideScreen() {
       </TouchableOpacity>
       <View style={s.title}>
         <Text numberOfLines={1} style={s.heading}>{ride.name}</Text>
-        <Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text>
+        <Text numberOfLines={1} style={s.muted}>
+          {ride.origin && ride.destination && !ride.origin.includes('+')
+            ? `${ride.origin} → ${ride.destination}`
+            : `Code: ${ride.ride_code} · ${active ? 'Live' : ride.status}`}
+        </Text>
       </View>
       <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
         <Text style={s.sosTopButtonText}>SOS</Text>
@@ -829,17 +860,6 @@ export default function LiveRideScreen() {
           <Text style={[s.topBarIcon, { color: theme.accent }]}>👑</Text>
         </TouchableOpacity>
       )}
-      {(admin || ride?.status === 'completed') && (
-        <TouchableOpacity accessibilityLabel="Trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
-          <Text style={s.topBarIcon}>✎</Text>
-        </TouchableOpacity>
-      )}
-      <TouchableOpacity accessibilityLabel="Live Ride Statistics" style={s.square} onPress={() => setStatsModalVisible(true)}>
-        <Text style={s.topBarIcon}>📊</Text>
-      </TouchableOpacity>
-      <TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}>
-        <Text style={s.topBarIcon}>↗</Text>
-      </TouchableOpacity>
     </View>
 
     {active && (
@@ -919,268 +939,334 @@ export default function LiveRideScreen() {
     )}
 
     {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
-    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet, { paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'}
-        onPress={() => setExpanded(v => !v)}
-        style={s.sheetHeader}
-      >
-        <View style={s.handle} />
-        <View style={s.row}>
-          <View style={s.sheetTitleGroup}>
-            <View style={s.statusBadge}>
-              <View style={[s.liveDot, { backgroundColor: sync.isOnline && active ? '#22C55E' : theme.muted }]} />
-              <Text style={s.eyebrow}>{status}</Text>
-            </View>
-            <Text style={s.heading}>
-              {points.length} {points.length === 1 ? 'rider' : 'riders'} on map
-            </Text>
-          </View>
-          <View style={s.headerRight}>
-            <View style={s.codeBadge}>
-              <Text style={s.codeLabel}>CODE</Text>
-              <Text style={s.code}>{ride.ride_code}</Text>
-            </View>
-            <View style={[s.expandButton, expanded && s.expandButtonActive]}>
-              <Text style={[s.expandButtonIcon, expanded && s.expandButtonIconActive]}>
-                {expanded ? '▼' : '▲'}
+    {/* Floating Navigation and Alert buttons on the map */}
+    {active && (
+      <View style={[s.floatingButtonsRow, { bottom: sheetHeight + 12 }]}>
+        {active && nextWaypoint ? (
+          <View style={{ flex: 1, flexDirection: 'row', gap: 6 }}>
+            <TouchableOpacity
+              style={[s.navButton, s.floatingNavButton]}
+              onPress={() => void navigateToNextWaypoint()}
+              accessibilityRole="button"
+              accessibilityLabel={`Navigate to ${nextWaypoint.name}`}
+            >
+              <Text numberOfLines={1} style={[s.navButtonText, s.floatingNavText]}>
+                🧭 Navigate to {nextWaypoint.name} ↗
               </Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-      {newest && (
-        <View style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>
-                {(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}
-                {newest.message ? `: "${newest.message}"` : ''}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => setDismissed(ids => [...ids, newest.id])}>
-              <Text style={{ color: theme.muted, fontSize: 16, fontWeight: '700', padding: 4 }}>✕</Text>
             </TouchableOpacity>
-          </View>
-          {newest.type === 'announcement' && (
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-              {acknowledgedAlertIds.includes(newest.id) ? (
-                <View style={s.acknowledgedBadge}>
-                  <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={s.acknowledgeButton}
-                  onPress={() => void acknowledgeAnnouncement(newest.id)}
-                >
-                  <Text style={s.acknowledgeButtonText}>👍 Acknowledge</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-          {newest.type === 'emergency' && (
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            {upcomingWaypoints.length > 1 && (
               <TouchableOpacity
-                style={[s.acknowledgeButton, { backgroundColor: theme.danger }]}
-                onPress={() => void escalateEmergency(newest.id)}
+                style={s.floatingWaypointSwitch}
+                onPress={() => setTargetWaypointIndex(curr => (curr + 1) % upcomingWaypoints.length)}
+                accessibilityRole="button"
+                accessibilityLabel="Switch to next stop on route"
               >
-                <Text style={s.acknowledgeButtonText}>🚨 Escalate / Call 112</Text>
+                <Text style={s.floatingWaypointText}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
               </TouchableOpacity>
-              {newest.lat && newest.lng && (
-                <TouchableOpacity
-                  style={[s.acknowledgeButton, { backgroundColor: theme.accent }]}
-                  onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
-                >
-                  <Text style={s.acknowledgeButtonText}>📍 Open Location</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-      {packFormation.length > 1 && (
-        <View style={s.formationContainer}>
-          <View style={s.formationHeader}>
-            <Text style={s.formationTitle}>FORMATION & SPACING</Text>
-            {packFormation.some(p => p.isSeparated) && (
-              <Text style={s.separationBadge}>⚠️ Gap Alert</Text>
             )}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.formationStrip}>
-            {packFormation.map(rider => (
-              <View key={rider.userId} style={s.formationItem}>
-                <View style={[s.formationBadge, rider.isLeader ? s.leaderBadge : rider.isTail ? s.tailBadge : s.memberBadge]}>
-                  <Text style={s.formationBadgeText}>
-                    {rider.isLeader ? '👑 LEAD' : rider.isTail ? '🧹 SWEEP' : `#${rider.order}`}
-                  </Text>
-                </View>
-                <Text numberOfLines={1} style={s.formationName}>{rider.displayName}</Text>
-                <Text style={[s.formationGap, rider.isSeparated ? s.separatedGap : null]}>
-                  {rider.isLeader ? 'Lead' : `+${rider.gapToAheadMeters >= 1000 ? (rider.gapToAheadMeters / 1000).toFixed(1) + 'km' : rider.gapToAheadMeters + 'm'}`}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-      {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
-      {expanded && <FlatList
-        data={points}
-        style={s.riders}
-        keyExtractor={item => item.user_id}
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={5}
-        updateCellsBatchingPeriod={50}
-        removeClippedSubviews
-        ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
-        renderItem={({ item: p }) => {
-          const riderStatus = getRiderLiveStatus(p, ride.status, now);
-          const isDisconnected = riderStatus.status === 'disconnected';
-          return (
-            <TouchableOpacity style={s.rider} onPress={() => {
-              setFollow(false);
-              if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
-                try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
-              }
-            }}>
-              <View style={[
-                s.avatar,
-                riderStatus.status === 'riding' ? s.avatarRiding :
-                riderStatus.status === 'stopped' ? s.avatarStopped :
-                riderStatus.status === 'completed' ? s.avatarCompleted : s.stale
-              ]}>
-                <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
-              </View>
-              <View style={s.grow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
-                  <View style={[
-                    s.statusPill,
-                    riderStatus.status === 'riding' ? s.statusPillRiding :
-                    riderStatus.status === 'stopped' ? s.statusPillStopped :
-                    riderStatus.status === 'completed' ? s.statusPillCompleted : s.statusPillDisconnected
-                  ]}>
-                    <Text style={[
-                      s.statusPillText,
-                      riderStatus.status === 'riding' ? s.statusPillTextRiding :
-                      riderStatus.status === 'stopped' ? s.statusPillTextStopped :
-                      riderStatus.status === 'completed' ? s.statusPillTextCompleted : s.statusPillTextDisconnected
-                    ]}>
-                      {riderStatus.label}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={s.muted}>
-                  {isDisconnected
-                    ? (riderStatus.lastSeenText || 'Last known position')
-                    : riderStatus.status === 'completed'
-                    ? 'Ride completed'
-                    : 'Live location'}
-                </Text>
-              </View>
-              <Text style={s.text}>
-                {riderStatus.status === 'riding'
-                  ? Math.round((p.speed || 0) * 3.6) + ' km/h'
-                  : riderStatus.status === 'stopped'
-                  ? '0 km/h'
-                  : '—'}
-              </Text>
-            </TouchableOpacity>
-          );
-        }}
-      />}
-      {active && nextWaypoint && <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
-        <TouchableOpacity style={[s.navButton, { flex: 1, marginBottom: 0 }]} onPress={() => void navigateToNextWaypoint()}>
-          <Text style={s.navButtonText}>Navigate to {nextWaypoint.name} ↗</Text>
-        </TouchableOpacity>
-        {upcomingWaypoints.length > 1 && <TouchableOpacity
-          style={[s.control, { minHeight: 48, justifyContent: 'center', paddingHorizontal: 12 }]}
-          onPress={() => setTargetWaypointIndex(curr => (curr + 1) % upcomingWaypoints.length)}
-          accessibilityLabel="Switch to next stop on route"
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+
+        <TouchableOpacity
+          style={[
+            s.alertButton,
+            s.floatingAlertButton,
+            (!position || isStale(position.timestamp, now)) && s.disabled,
+          ]}
+          disabled={busy || !position || isStale(position.timestamp, now)}
+          onPress={() => setModal(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Broadcast alert to group"
         >
-          <Text style={s.text}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
-        </TouchableOpacity>}
-      </View>}
-      {active ? (
-        <View style={s.activeActionsContainer}>
-          <View style={s.actionsRow}>
-            <TouchableOpacity
-              style={s.actionButton}
-              onPress={() => setSharing(v => !v)}
-              accessibilityRole="button"
-              accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
-            >
-              <Text style={s.actionButtonText} numberOfLines={1}>
-                {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
+          <Text style={[s.alertButtonText, s.floatingAlertText]} numberOfLines={1}>🚨 Alert</Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    <View
+      onLayout={event => setSheetHeight(event.nativeEvent.layout.height)}
+      style={[
+        s.sheet,
+        { paddingBottom: Math.max(insets.bottom + 12, 28) },
+        expanded && s.sheetExpanded,
+      ]}
+    >
+      <View {...panResponder.panHandlers}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Collapse rider drawer' : 'Swipe up or tap to expand rider drawer'}
+          onPress={toggleExpanded}
+          style={s.sheetHeader}
+          activeOpacity={0.8}
+        >
+          <View style={s.handle} />
+          <View style={s.row}>
+            <View style={s.sheetTitleGroup}>
+              <View style={s.statusBadge}>
+                <View style={[s.liveDot, { backgroundColor: sync.isOnline && active ? '#22C55E' : theme.muted }]} />
+                <Text style={s.eyebrow}>{status}</Text>
+              </View>
+              <Text style={s.heading}>
+                {points.length} {points.length === 1 ? 'rider' : 'riders'} on map
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.alertButton, (!position || isStale(position.timestamp, now)) && s.disabled]}
-              disabled={busy || !position || isStale(position.timestamp, now)}
-              onPress={() => setModal(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Broadcast alert to group"
-            >
-              <Text style={s.alertButtonText} numberOfLines={1}>🚨 Alert</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={s.actionButton}
-              disabled={!position}
-              onPress={() => void shareLiveLocation()}
-              accessibilityRole="button"
-              accessibilityLabel="Share live location with contact"
-            >
-              <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
-            </TouchableOpacity>
+            </View>
+            <View style={s.headerRight}>
+              <View style={s.codeBadge}>
+                <Text style={s.codeLabel}>CODE</Text>
+                <Text style={s.code}>{ride.ride_code}</Text>
+              </View>
+              <View style={[s.expandButton, expanded && s.expandButtonActive]}>
+                <Text style={[s.expandButtonIcon, expanded && s.expandButtonIconActive]}>
+                  {expanded ? '▼' : '▲'}
+                </Text>
+              </View>
+            </View>
           </View>
+          {!expanded && (
+            <Text style={s.swipeUpHint}>Swipe up for controls & riders</Text>
+          )}
+        </TouchableOpacity>
+      </View>
 
-          {((tracking !== 'background' && sharing) || (admin && active)) && (
-            <View style={s.subActionsRow}>
-              {tracking !== 'background' && sharing && (
-                <TouchableOpacity
-                  style={[s.subActionButton, (admin && active) ? { flex: 1 } : { width: '100%' }]}
-                  onPress={() => void enableBackgroundGps()}
-                  accessibilityRole="button"
-                  accessibilityLabel="Enable background GPS tracking"
-                >
-                  <Text style={s.subActionText} numberOfLines={1}>
-                    📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+      {expanded && (
+        <ScrollView
+          style={s.drawerContent}
+          contentContainerStyle={s.drawerScrollContent}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
+          {newest && (
+            <View style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>
+                    {(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}
+                    {newest.message ? `: "${newest.message}"` : ''}
                   </Text>
+                </View>
+                <TouchableOpacity onPress={() => setDismissed(ids => [...ids, newest.id])}>
+                  <Text style={{ color: theme.muted, fontSize: 16, fontWeight: '700', padding: 4 }}>✕</Text>
                 </TouchableOpacity>
+              </View>
+              {newest.type === 'announcement' && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  {acknowledgedAlertIds.includes(newest.id) ? (
+                    <View style={s.acknowledgedBadge}>
+                      <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={s.acknowledgeButton}
+                      onPress={() => void acknowledgeAnnouncement(newest.id)}
+                    >
+                      <Text style={s.acknowledgeButtonText}>👍 Acknowledge</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
-
-              {admin && active && (
-                <TouchableOpacity
-                  accessibilityLabel="End ride for everyone"
-                  style={[s.endRideButton, (tracking !== 'background' && sharing) ? { flex: 1 } : { width: '100%' }]}
-                  disabled={busy}
-                  onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
-                    { text: 'Keep riding', style: 'cancel' },
-                    { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
-                  ])}
-                >
-                  <Text style={s.endRideText}>🏁 End Ride</Text>
-                </TouchableOpacity>
+              {newest.type === 'emergency' && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity
+                    style={[s.acknowledgeButton, { backgroundColor: theme.danger }]}
+                    onPress={() => void escalateEmergency(newest.id)}
+                  >
+                    <Text style={s.acknowledgeButtonText}>🚨 Escalate / Call 112</Text>
+                  </TouchableOpacity>
+                  {newest.lat && newest.lng && (
+                    <TouchableOpacity
+                      style={[s.acknowledgeButton, { backgroundColor: theme.accent }]}
+                      onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
+                    >
+                      <Text style={s.acknowledgeButtonText}>📍 Open Location</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
           )}
-        </View>
-      ) : admin && ride.status === 'planned' ? (
-        <View style={s.actions}>
-          <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
-            <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={s.actions}>
-          <Text style={s.muted}>
-            {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
-          </Text>
-        </View>
+
+          {packFormation.length > 1 && (
+            <View style={s.formationContainer}>
+              <View style={s.formationHeader}>
+                <Text style={s.formationTitle}>FORMATION & SPACING</Text>
+                {packFormation.some(p => p.isSeparated) && (
+                  <Text style={s.separationBadge}>⚠️ Gap Alert</Text>
+                )}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.formationStrip}>
+                {packFormation.map(rider => (
+                  <View key={rider.userId} style={s.formationItem}>
+                    <View style={[s.formationBadge, rider.isLeader ? s.leaderBadge : rider.isTail ? s.tailBadge : s.memberBadge]}>
+                      <Text style={s.formationBadgeText}>
+                        {rider.isLeader ? '👑 LEAD' : rider.isTail ? '🧹 SWEEP' : `#${rider.order}`}
+                      </Text>
+                    </View>
+                    <Text numberOfLines={1} style={s.formationName}>{rider.displayName}</Text>
+                    <Text style={[s.formationGap, rider.isSeparated ? s.separatedGap : null]}>
+                      {rider.isLeader ? 'Lead' : `+${rider.gapToAheadMeters >= 1000 ? (rider.gapToAheadMeters / 1000).toFixed(1) + 'km' : rider.gapToAheadMeters + 'm'}`}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {active ? (
+            <View style={s.activeActionsContainer}>
+              <View style={s.actionsRow}>
+                <TouchableOpacity
+                  style={s.actionButton}
+                  onPress={() => setSharing(v => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>
+                    {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.actionButton}
+                  disabled={!position}
+                  onPress={() => void shareLiveLocation()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share live location with contact"
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.actionButton}
+                  onPress={() => router.push('/trip/' + id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Trip workspace and details"
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>✎ Details</Text>
+                </TouchableOpacity>
+              </View>
+
+              {((tracking !== 'background' && sharing) || (admin && active)) && (
+                <View style={s.subActionsRow}>
+                  {tracking !== 'background' && sharing && (
+                    <TouchableOpacity
+                      style={[s.subActionButton, (admin && active) ? { flex: 1 } : { width: '100%' }]}
+                      onPress={() => void enableBackgroundGps()}
+                      accessibilityRole="button"
+                      accessibilityLabel="Enable background GPS tracking"
+                    >
+                      <Text style={s.subActionText} numberOfLines={1}>
+                        📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {admin && active && (
+                    <TouchableOpacity
+                      accessibilityLabel="End ride for everyone"
+                      style={[s.endRideButton, (tracking !== 'background' && sharing) ? { flex: 1 } : { width: '100%' }]}
+                      disabled={busy}
+                      onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
+                        { text: 'Keep riding', style: 'cancel' },
+                        { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
+                      ])}
+                    >
+                      <Text style={s.endRideText}>🏁 End Ride</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          ) : admin && ride.status === 'planned' ? (
+            <View style={s.actions}>
+              <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
+                <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={s.actions}>
+              <Text style={s.muted}>
+                {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
+              </Text>
+            </View>
+          )}
+
+          <FlatList
+            data={points}
+            style={s.riders}
+            scrollEnabled={false}
+            keyExtractor={item => item.user_id}
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={5}
+            updateCellsBatchingPeriod={50}
+            removeClippedSubviews
+            ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
+            renderItem={({ item: p }) => {
+              const riderStatus = getRiderLiveStatus(p, ride.status, now);
+              const isDisconnected = riderStatus.status === 'disconnected';
+              return (
+                <TouchableOpacity style={s.rider} onPress={() => {
+                  setFollow(false);
+                  if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
+                    try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
+                  }
+                }}>
+                  <View style={[
+                    s.avatar,
+                    riderStatus.status === 'riding' ? s.avatarRiding :
+                    riderStatus.status === 'stopped' ? s.avatarStopped :
+                    riderStatus.status === 'completed' ? s.avatarCompleted : s.stale
+                  ]}>
+                    <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
+                  </View>
+                  <View style={s.grow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
+                      <View style={[
+                        s.statusPill,
+                        riderStatus.status === 'riding' ? s.statusPillRiding :
+                        riderStatus.status === 'stopped' ? s.statusPillStopped :
+                        riderStatus.status === 'completed' ? s.statusPillCompleted : s.statusPillDisconnected
+                      ]}>
+                        <Text style={[
+                          s.statusPillText,
+                          riderStatus.status === 'riding' ? s.statusPillTextRiding :
+                          riderStatus.status === 'stopped' ? s.statusPillTextStopped :
+                          riderStatus.status === 'completed' ? s.statusPillTextCompleted : s.statusPillTextDisconnected
+                        ]}>
+                          {riderStatus.label}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.muted}>
+                      {isDisconnected
+                        ? (riderStatus.lastSeenText || 'Last known position')
+                        : riderStatus.status === 'completed'
+                        ? 'Ride completed'
+                        : 'Live location'}
+                    </Text>
+                  </View>
+                  <Text style={s.text}>
+                    {riderStatus.status === 'riding'
+                      ? Math.round((p.speed || 0) * 3.6) + ' km/h'
+                      : riderStatus.status === 'stopped'
+                      ? '0 km/h'
+                      : '—'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+
+          {(pending > 0 || sync.syncError) && (
+            <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}>
+              <Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>
+              {sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}
+            </TouchableOpacity>
+          )}
+        </ScrollView>
       )}
     </View>
     <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
@@ -1691,7 +1777,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
   text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'800',letterSpacing:-0.3},
   top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},
-  title:{flex:1,paddingHorizontal:14,paddingVertical:10,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  title:{flex:1,minWidth:0,justifyContent:'center',paddingHorizontal:12,paddingVertical:8,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
   square:{width:44,height:48,borderRadius:14,backgroundColor:c.surface,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
   backIcon:{color:c.text,fontSize:24,fontWeight:'700',lineHeight:26,marginTop:-2},
   topBarIcon:{color:c.text,fontSize:16,fontWeight:'700'},
@@ -1702,7 +1788,18 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
   controlText:{color:c.text,fontSize:13,fontWeight:'700'},
   selectedText:{color:c.accent,fontWeight:'800'},
-  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8,borderWidth:1,borderColor:c.border},
+  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8,borderWidth:1,borderColor:c.border,zIndex:20},
+  sheetExpanded:{maxHeight:'65%'},
+  swipeUpHint:{color:c.muted,fontSize:10,fontWeight:'700',textAlign:'center',marginTop:4,letterSpacing:0.3},
+  drawerContent:{marginTop:4},
+  drawerScrollContent:{paddingBottom:12},
+  floatingButtonsRow:{position:'absolute',left:14,right:14,flexDirection:'row',gap:10,alignItems:'center',zIndex:15},
+  floatingNavButton:{flex:1,backgroundColor:c.accent,borderRadius:16,minHeight:48,paddingHorizontal:14,flexDirection:'row',alignItems:'center',justifyContent:'center',elevation:4,shadowColor:c.accent,shadowOpacity:0.3,shadowRadius:6,shadowOffset:{width:0,height:2},marginBottom:0},
+  floatingNavText:{color:'#FFFFFF',fontSize:13,fontWeight:'800',letterSpacing:0.2},
+  floatingWaypointSwitch:{backgroundColor:c.surface,borderRadius:16,minHeight:48,paddingHorizontal:10,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.border,elevation:4,shadowColor:'#000',shadowOpacity:0.1,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  floatingWaypointText:{color:c.text,fontSize:11,fontWeight:'800'},
+  floatingAlertButton:{minWidth:95,backgroundColor:c.danger,borderRadius:16,minHeight:48,paddingHorizontal:14,alignItems:'center',justifyContent:'center',elevation:4,shadowColor:c.danger,shadowOpacity:0.3,shadowRadius:6,shadowOffset:{width:0,height:2}},
+  floatingAlertText:{color:'#FFFFFF',fontSize:13,fontWeight:'900',letterSpacing:0.3},
   sheetHeader:{paddingTop:10,paddingBottom:16},
   handle:{width:44,height:4,backgroundColor:c.border,borderRadius:2,alignSelf:'center',marginBottom:12},
   row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},
