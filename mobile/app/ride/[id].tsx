@@ -466,21 +466,35 @@ export default function LiveRideScreen() {
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not update ride.'); }
     finally { setBusy(false); }
   }
-  async function sendAlert(type: AlertType, customMessage?: string): Promise<boolean> {
+  async function sendAlert(type: AlertType, customMessage?: string): Promise<'sent' | 'queued' | 'failed'> {
     if (!position || !userId || isStale(position.timestamp)) {
       setMessage('Wait for a fresh GPS fix before sending an alert.');
-      return false;
+      return 'failed';
     }
     setBusy(true);
     try {
-      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
+      const alert = { id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() };
+      if (sync.isOnline) {
+        // Reuse this ID on retry if the connection drops after the insert.
+        const { error, status } = await supabase.from('alerts').upsert(alert, { onConflict: 'id', ignoreDuplicates: true });
+        if (!error) {
+          setModal(false);
+          void refresh();
+          return 'sent';
+        }
+        if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+          setMessage(error.message);
+          return 'failed';
+        }
+      }
+      await enqueueAlert(alert);
       setModal(false);
-      await sync.flushQueue();
-      await refresh();
-      return true;
+      void sync.updateCounts().catch(() => {});
+      setMessage('Alert queued for delivery.');
+      return 'queued';
     } catch(e) {
       setMessage(e instanceof Error ? e.message : 'Could not save alert.');
-      return false;
+      return 'failed';
     } finally {
       setBusy(false);
     }
@@ -488,8 +502,8 @@ export default function LiveRideScreen() {
 
   async function broadcastAnnouncement(msg: string): Promise<boolean> {
     if (!msg || !msg.trim()) return false;
-    const ok = await sendAlert('announcement', msg.trim());
-    if (ok) {
+    const outcome = await sendAlert('announcement', msg.trim());
+    if (outcome === 'sent') {
       setAnnouncementModal(false);
       setCustomAnnouncement('');
       setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
@@ -575,8 +589,8 @@ export default function LiveRideScreen() {
       longitude: position.lng,
       details: mechanicalDetails.trim() || undefined,
     });
-    const ok = await sendAlert('mechanical', msg);
-    if (ok) {
+    const outcome = await sendAlert('mechanical', msg);
+    if (outcome === 'sent') {
       setMechanicalModalVisible(false);
       setMechanicalDetails('');
       setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
@@ -648,7 +662,7 @@ export default function LiveRideScreen() {
       setMessage('Wait for a fresh GPS fix before sending an emergency alert.');
       return;
     }
-    await sendAlert('emergency');
+    if (await sendAlert('emergency') !== 'sent') return;
     setMessage('🚨 Emergency alert broadcast to group with your live coordinates.');
   }
 
@@ -1211,6 +1225,7 @@ export default function LiveRideScreen() {
       <View style={s.overlay}>
         <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <Text style={[s.heading, { color: theme.accent }]}>📢 Captain Announcement</Text>
+          {message && <Text style={s.warningText}>{message}</Text>}
           <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
           <View style={{ gap: 8, marginVertical: 4 }}>
             {[

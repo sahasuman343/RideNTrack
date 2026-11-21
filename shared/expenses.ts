@@ -43,6 +43,7 @@ export interface ParticipantBalance {
 }
 
 export interface TripExpenseSummary {
+  currency: string;
   total_spend: number;
   my_paid: number;
   my_share: number;

@@ -173,11 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await stopBackgroundLocationUpdates();
     const { error } = await supabase.rpc('delete_user_account', { p_expected_user_id: userId });
-    if (error) {
-      // Fallback: try edge function if available
-      const edgeRes = await supabase.functions.invoke('delete-account', { body: { expected_user_id: userId } });
-      if (edgeRes.error && error) throw new Error(error.message || edgeRes.error.message || 'Account deletion failed.');
-    }
+    if (error) throw new Error(error.message || 'Account deletion failed.');
     await clearAllCachedTripsForUser(userId).catch(() => {});
     await clearQueuedItemsForUser(userId).catch(() => {});
     if (activeUserId.current === userId) {

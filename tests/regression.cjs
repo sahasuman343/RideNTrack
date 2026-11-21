@@ -1612,14 +1612,9 @@ test('auth hook verifies target user ID, invokes delete_user_account RPC with ex
 test('live ride broadcast announcement strictly validates GPS fix and sendAlert outcome before reporting success', () => {
   const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
 
-  // sendAlert returns boolean
-  assert.match(rideSource, /async function sendAlert\(type: AlertType, customMessage\?: string\): Promise<boolean>/);
-  assert.match(rideSource, /if\s*\(!position \|\| !userId \|\| isStale\(position\.timestamp\)\)\s*\{\s*setMessage\('Wait for a fresh GPS fix before sending an alert\.'\);\s*return false;\s*\}/);
-
-  // broadcastAnnouncement validates trimmed message and sendAlert success
-  assert.match(rideSource, /async function broadcastAnnouncement\(msg: string\): Promise<boolean>/);
-  assert.match(rideSource, /const ok = await sendAlert\('announcement', msg\.trim\(\)\);/);
-  assert.match(rideSource, /if\s*\(ok\)\s*\{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
+  assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
+  assert.match(rideSource, /isStale\(position.timestamp\)\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /if \(outcome === 'sent'\) \{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
 });
 
 test('trip workspace exports GPX via native file system and sharing dialog, and reports expense load errors', () => {
@@ -1632,6 +1627,8 @@ test('trip workspace exports GPX via native file system and sharing dialog, and 
   assert.match(tripSource, /Sharing\.isAvailableAsync\(\)/);
   assert.match(tripSource, /Sharing\.shareAsync\(fileUri,/);
   assert.match(tripSource, /Share\.share\(\{/);
+
+  assert.doesNotMatch(tripSource, /message: gpxContent/);
 
   // Scoped background location stopping and permission cache clearance
   assert.match(tripSource, /stopBackgroundLocationUpdates\(id\)/);

@@ -40,6 +40,7 @@ type Trip = {
   origin_coords?: [number, number] | null; destination_coords?: [number, number] | null;
   status: string; trip_type?: string; start_date?: string | null; end_date?: string | null;
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
+  expense_currency: string;
   ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
   visibility?: 'private' | 'invite_only' | 'public';
   max_participants?: number | null;
@@ -114,7 +115,7 @@ export default function TripWorkspaceScreen() {
   const [weatherPoints, setWeatherPoints] = useState<RouteWeatherPoint[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
-  const [expenses, setExpenses] = useState<TripExpense[]>([]);
+  const [expenses, setExpenses] = useState<TripExpense[] | null>(null);
   const [expenseSummary, setExpenseSummary] = useState<TripExpenseSummary | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [expenseModal, setExpenseModal] = useState(false);
@@ -125,8 +126,8 @@ export default function TripWorkspaceScreen() {
   const [newExpenseNotes, setNewExpenseNotes] = useState('');
 
   const settlements = useMemo(() => {
-    return calculateExpenseSettlement(expenseSummary?.participant_balances || []);
-  }, [expenseSummary?.participant_balances]);
+    return calculateExpenseSettlement(expenseSummary?.participant_balances || [], expenseSummary?.currency);
+  }, [expenseSummary]);
 
   useEffect(() => {
     if (!trip) return;
@@ -203,6 +204,7 @@ export default function TripWorkspaceScreen() {
     const generation = ++loadGeneration.current;
     if (!id) return;
     setLoading(true); setError('');
+    setExpenses(null); setExpenseSummary(null); setExpenseError(null);
     try {
       const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult, checklistResult, expensesResult, expenseSummaryResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
@@ -230,15 +232,14 @@ export default function TripWorkspaceScreen() {
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
-      if (expensesResult?.error) {
-        setExpenseError(expensesResult.error.message || 'Could not load expenses');
-      } else if (expenseSummaryResult?.error) {
-        setExpenseError(expenseSummaryResult.error.message || 'Could not load expense balances');
-      } else {
-        setExpenseError(null);
-        if (expensesResult?.data) setExpenses(expensesResult.data as TripExpense[]);
-        if (expenseSummaryResult?.data) setExpenseSummary(expenseSummaryResult.data as TripExpenseSummary);
-      }
+      const list = expensesResult.error ? null : expensesResult.data as TripExpense[] | null;
+      const summary = expenseSummaryResult.error ? null : expenseSummaryResult.data as TripExpenseSummary | null;
+      setExpenses(list);
+      setExpenseSummary(summary);
+      setExpenseError([
+        !list && (expensesResult.error?.message || 'Expense list unavailable.'),
+        !summary && (expenseSummaryResult.error?.message || 'Expense balances unavailable.'),
+      ].filter(Boolean).join(' · ') || null);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
 
@@ -271,8 +272,10 @@ export default function TripWorkspaceScreen() {
           setJournalEntry(entry as TripJournalEntry);
         }
       }
+      return !!summary && generation === loadGeneration.current;
     } catch (e: any) {
       if (generation === loadGeneration.current) {
+        setExpenses(null); setExpenseSummary(null); setExpenseError('Expense data unavailable.');
         const isAuthOrPermissionError = e?.status === 401 || e?.status === 403 || e?.code === '42501' || /permission|unauthorized|not found/i.test(e?.message || '');
         if (isAuthOrPermissionError) {
           void clearCachedTrip(id, user?.id);
@@ -533,11 +536,7 @@ export default function TripWorkspaceScreen() {
           URL.revokeObjectURL(url);
           return;
         }
-        await Share.share({
-          message: gpxContent,
-          title: `${cleanName}.gpx`,
-        });
-        return;
+        throw new Error('File downloads are unavailable in this browser.');
       }
 
       const fileUri = `${FileSystem.cacheDirectory}${cleanName}.gpx`;
@@ -550,10 +549,7 @@ export default function TripWorkspaceScreen() {
           UTI: 'com.topografix.gpx',
         });
       } else {
-        await Share.share({
-          message: gpxContent,
-          title: `${cleanName}.gpx`,
-        });
+        throw new Error('File sharing is unavailable on this device.');
       }
     } catch (err: any) {
       Alert.alert('Could not export GPX', err?.message || 'Please try again.');
@@ -590,8 +586,8 @@ export default function TripWorkspaceScreen() {
       setNewExpenseTitle('');
       setNewExpenseAmount('');
       setNewExpenseNotes('');
-      await load();
-      Alert.alert('Expense Added', 'Group expense recorded and split calculated.');
+      const refreshed = await load();
+      Alert.alert('Expense Added', refreshed ? 'Group expense recorded and split calculated.' : 'Expense saved. Balances could not be refreshed.');
     } catch (err: any) {
       Alert.alert('Could not save expense', err?.message || 'Please try again.');
     } finally {
@@ -1324,29 +1320,29 @@ export default function TripWorkspaceScreen() {
         )}
 
         {/* Spend Overview */}
-        <View style={styles.expenseSummaryRow}>
+        {expenseSummary && <View style={styles.expenseSummaryRow}>
           <View style={styles.expenseSummaryBlock}>
-            <Text style={styles.expenseSummaryValue}>₹{expenseSummary?.total_spend || 0}</Text>
+            <Text style={styles.expenseSummaryValue}>{expenseSummary.currency} {expenseSummary.total_spend}</Text>
             <Text style={styles.expenseSummaryLabel}>TOTAL SPEND</Text>
           </View>
           <View style={styles.expenseSummaryDivider} />
           <View style={styles.expenseSummaryBlock}>
-            <Text style={styles.expenseSummaryValue}>₹{expenseSummary?.my_share || 0}</Text>
+            <Text style={styles.expenseSummaryValue}>{expenseSummary.currency} {expenseSummary.my_share}</Text>
             <Text style={styles.expenseSummaryLabel}>YOUR SHARE</Text>
           </View>
           <View style={styles.expenseSummaryDivider} />
           <View style={styles.expenseSummaryBlock}>
             <Text style={[
               styles.expenseSummaryValue,
-              (expenseSummary?.net_balance || 0) > 0 ? { color: '#16A34A' } : (expenseSummary?.net_balance || 0) < 0 ? { color: '#EA580C' } : null
+              expenseSummary.net_balance > 0 ? { color: '#16A34A' } : expenseSummary.net_balance < 0 ? { color: '#EA580C' } : null
             ]}>
-              {(expenseSummary?.net_balance || 0) > 0 ? `+₹${expenseSummary?.net_balance}` : (expenseSummary?.net_balance || 0) < 0 ? `-₹${Math.abs(expenseSummary?.net_balance || 0)}` : '₹0'}
+              {expenseSummary.net_balance > 0 ? `+${expenseSummary.currency} ${expenseSummary.net_balance}` : expenseSummary.net_balance < 0 ? `-${expenseSummary.currency} ${Math.abs(expenseSummary.net_balance)}` : `${expenseSummary.currency} 0`}
             </Text>
             <Text style={styles.expenseSummaryLabel}>
-              {(expenseSummary?.net_balance || 0) > 0 ? 'YOU ARE OWED' : (expenseSummary?.net_balance || 0) < 0 ? 'YOU OWE' : 'SETTLED'}
+              {expenseSummary.net_balance > 0 ? 'YOU ARE OWED' : expenseSummary.net_balance < 0 ? 'YOU OWE' : 'SETTLED'}
             </Text>
           </View>
-        </View>
+        </View>}
 
         {/* Settlement Breakdown ("Who Owes Whom") */}
         {settlements.length > 0 && (
@@ -1357,14 +1353,14 @@ export default function TripWorkspaceScreen() {
                 <Text style={styles.settlementFrom}>{s.fromName}</Text>
                 <Text style={styles.settlementArrow}>pays</Text>
                 <Text style={styles.settlementTo}>{s.toName}</Text>
-                <Text style={styles.settlementAmount}>₹{s.amount}</Text>
+                <Text style={styles.settlementAmount}>{s.currency} {s.amount}</Text>
               </View>
             ))}
           </View>
         )}
 
         {/* Expenses List */}
-        {expenses.length === 0 ? (
+        {expenses === null ? null : expenses.length === 0 ? (
           <Text style={styles.mutedSmall}>No expenses logged yet. Record fuel, food, and stays to split fairly.</Text>
         ) : (
           <View style={{ gap: 8, marginTop: 10 }}>
@@ -1374,10 +1370,10 @@ export default function TripWorkspaceScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Text style={styles.expenseItemTitle}>{exp.title}</Text>
-                    <Text style={styles.expenseItemAmount}>₹{exp.amount}</Text>
+                    <Text style={styles.expenseItemAmount}>{exp.currency} {exp.amount}</Text>
                   </View>
                   <Text style={styles.mutedSmall}>
-                    Paid by {exp.payer_name} · Split among {exp.splits.length} {exp.splits.length === 1 ? 'rider' : 'riders'} (₹{exp.splits[0]?.amount || 0}/ea)
+                    Paid by {exp.payer_name} · Split among {exp.splits.length} {exp.splits.length === 1 ? 'rider' : 'riders'} ({exp.currency} {exp.splits[0]?.amount || 0}/ea)
                   </Text>
                   {!!exp.notes && (
                     <Text style={[styles.mutedSmall, { fontStyle: 'italic', marginTop: 2 }]}>
@@ -1995,7 +1991,7 @@ export default function TripWorkspaceScreen() {
               onChangeText={setNewExpenseTitle}
             />
 
-            <Text style={styles.label}>Amount (₹) *</Text>
+            <Text style={styles.label}>Amount ({trip.expense_currency}) *</Text>
             <TextInput
               style={styles.input}
               placeholder="0.00"

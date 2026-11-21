@@ -738,6 +738,9 @@ END $$;
 -- RT-003: Cascading account deletion via delete_user_account()
 RESET ROLE;
 INSERT INTO auth.users VALUES ('44444444-4444-4444-8444-444444444444', 'to_delete@example.test', '{"username":"deleteme","display_name":"DeleteMe"}');
+CREATE TABLE identity_hold (id uuid REFERENCES auth.users(id));
+INSERT INTO identity_hold VALUES ('44444444-4444-4444-8444-444444444444');
+GRANT DELETE ON identity_hold TO authenticated;
 SET ROLE authenticated;
 
 DO $$
@@ -758,6 +761,22 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id AND admin_id = test_user_id) THEN
     RAISE EXCEPTION 'failed to create ride for account deletion test';
   END IF;
+
+  BEGIN
+    PERFORM public.delete_user_account(gen_random_uuid());
+    RAISE EXCEPTION 'mismatched account identity accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.delete_user_account(test_user_id);
+    RAISE EXCEPTION 'identity deletion failure was suppressed';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = test_user_id) OR
+     NOT EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id) THEN
+    RAISE EXCEPTION 'failed account deletion did not roll back';
+  END IF;
+  DELETE FROM identity_hold;
 
   -- Call delete_user_account()
   PERFORM public.delete_user_account();
@@ -1196,11 +1215,36 @@ BEGIN
     RAISE EXCEPTION 'add_trip_expense accepted non-member outsider in split';
   END IF;
 
+  BEGIN
+    PERFORM public.add_trip_expense(v_trip_id, 'Duplicate', 10, 'food', ARRAY[v_member, v_member]);
+    RAISE EXCEPTION 'duplicate recipient accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.add_trip_expense(v_trip_id, 'Null', 10, 'food', ARRAY[v_member, NULL]);
+    RAISE EXCEPTION 'null recipient accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE public.rides SET expense_currency = 'USD' WHERE id = v_trip_id;
+  BEGIN
+    INSERT INTO public.trip_expenses(ride_id, payer_id, title, amount, category, currency)
+    VALUES (v_trip_id, v_admin, 'Mixed currency', 10, 'food', 'INR');
+    RAISE EXCEPTION 'mixed currency accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+
   -- Valid split works
   PERFORM public.add_trip_expense(
     v_trip_id, 'Highway Toll', 200, 'toll',
     ARRAY[v_admin, v_member]::uuid[], 'Fastag toll'
   );
+
+  BEGIN
+    INSERT INTO public.trip_expense_splits(expense_id, user_id, amount)
+    SELECT id, v_outsider, 1 FROM public.trip_expenses WHERE ride_id = v_trip_id;
+    RAISE EXCEPTION 'direct outsider split accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
 
   -- Member deactivates / leaves trip
   PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
@@ -1209,6 +1253,9 @@ BEGIN
   -- Summary still retains member balance
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   v_summary := public.get_trip_expense_summary(v_trip_id);
+  IF v_summary->>'currency' IS DISTINCT FROM 'USD' OR (v_summary->>'total_spend')::numeric IS DISTINCT FROM 200 THEN
+    RAISE EXCEPTION 'unexpected expense currency or total';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM jsonb_array_elements(v_summary->'participant_balances') elem
     WHERE elem->>'user_id' = v_member::text AND (elem->>'share')::numeric = 100
