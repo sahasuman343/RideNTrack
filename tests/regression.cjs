@@ -1676,6 +1676,20 @@ test('syncQueue does not clear queued items on unauthorized error if active sess
   assert.match(syncSource, /currentSession\?\.user\?\.id === userId/);
 });
 
+test('live ride displays incoming broadcast alerts as a floating card on the map with notification chime and haptic feedback', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /playAlertSound/);
+  assert.match(rideSource, /lastPlayedAlertId/);
+  assert.match(rideSource, /floatingAlertBanner/);
+  assert.match(rideSource, /floatingAlertHeader/);
+  assert.match(rideSource, /floatingAlertTitle/);
+
+  const soundSource = fs.readFileSync(path.resolve('mobile/src/services/alertSound.ts'), 'utf8');
+  assert.match(soundSource, /Vibration\.vibrate/);
+  assert.match(soundSource, /alert_chime\.wav/);
+  assert.ok(fs.existsSync(path.resolve('mobile/assets/sounds/alert_chime.wav')));
+});
+
 
 
 

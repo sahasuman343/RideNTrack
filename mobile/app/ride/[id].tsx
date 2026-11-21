@@ -34,6 +34,7 @@ import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { enableBackgroundLocationUpdates, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { playAlertSound } from '../../src/services/alertSound';
 
 const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 let Mapbox: typeof import('@rnmapbox/maps').default | null = null;
@@ -174,6 +175,13 @@ export default function LiveRideScreen() {
       }),
   }), [animated, userId, now, ride?.status]);
   const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
+  const lastPlayedAlertId = useRef<string | null>(null);
+  useEffect(() => {
+    if (newest && newest.id !== lastPlayedAlertId.current) {
+      lastPlayedAlertId.current = newest.id;
+      void playAlertSound(newest.type === 'emergency');
+    }
+  }, [newest?.id, newest?.type]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()),15000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     if (!active || !position || !userId || isStale(position.timestamp, now) || !ride) return;
@@ -896,15 +904,103 @@ export default function LiveRideScreen() {
       </TouchableOpacity>
     )}
 
+    {/* Prominent Floating Alert Overlay Card (Petrol, Break, Food, Emergency, Announcement) */}
+    {newest && (
+      <View
+        style={[
+          s.floatingAlertBanner,
+          { top: insets.top + (active ? 132 : 74) },
+          newest.type === 'emergency' && s.floatingAlertEmergency,
+          newest.type === 'announcement' && s.floatingAlertAnnouncement,
+          newest.type === 'fuel' && s.floatingAlertFuel,
+          newest.type === 'break' && s.floatingAlertBreak,
+        ]}
+      >
+        <View style={s.floatingAlertHeader}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <Text style={s.floatingAlertTitle} numberOfLines={1}>
+              {ALERT_LABELS[newest.type] || '🚨 Rider Alert'} · {newest.display_name || 'Rider'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            accessibilityLabel="Dismiss alert"
+            onPress={() => setDismissed(ids => [...ids, newest.id])}
+            style={s.floatingAlertDismiss}
+          >
+            <Text style={s.floatingAlertDismissText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        {newest.message ? (
+          <Text style={s.floatingAlertMessage}>"{newest.message}"</Text>
+        ) : null}
+
+        <View style={s.floatingAlertActionsRow}>
+          {newest.type === 'announcement' && (
+            acknowledgedAlertIds.includes(newest.id) ? (
+              <View style={s.acknowledgedBadge}>
+                <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={s.floatingAlertActionBtn}
+                onPress={() => void acknowledgeAnnouncement(newest.id)}
+              >
+                <Text style={s.floatingAlertActionText}>👍 Acknowledge</Text>
+              </TouchableOpacity>
+            )
+          )}
+
+          {newest.type === 'emergency' && (
+            <TouchableOpacity
+              style={[s.floatingAlertActionBtn, { backgroundColor: theme.danger }]}
+              onPress={() => void escalateEmergency(newest.id)}
+            >
+              <Text style={s.floatingAlertActionText}>🚨 Escalate / Call 112</Text>
+            </TouchableOpacity>
+          )}
+
+          {newest.lat && newest.lng && (
+            <>
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => {
+                  setFollow(false);
+                  if (typeof newest.lat === 'number' && typeof newest.lng === 'number') {
+                    try {
+                      camera.current?.setCamera({
+                        centerCoordinate: [newest.lng, newest.lat],
+                        zoomLevel: 15,
+                        animationDuration: 700,
+                      });
+                    } catch {}
+                  }
+                }}
+              >
+                <Text style={s.floatingAlertSecondaryText}>📍 Focus on Map</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
+              >
+                <Text style={s.floatingAlertSecondaryText}>🧭 Directions ↗</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    )}
+
     {gpsRecoveryStatus === 'recovered' && (
-      <View style={[s.arrivalToast, { backgroundColor: '#22c55e', top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.arrivalToast, { backgroundColor: '#22c55e', top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text style={s.arrivalToastText}>
           🛰️ GPS signal restored! Tracking resumed smoothly.
         </Text>
       </View>
     )}
 
-    <View style={[s.controls, { top: insets.top + (active ? 134 : 74) }]}>
+    <View style={[s.controls, { top: insets.top + (active ? 134 : 74) + (newest ? 120 : 0) }]}>
       <TouchableOpacity accessibilityLabel="Follow my location" style={[s.control, follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}>
         <Text style={[s.controlText, follow && s.selectedText]}>◎ Me</Text>
       </TouchableOpacity>
@@ -914,7 +1010,7 @@ export default function LiveRideScreen() {
     </View>
 
     {arrivingRegroupPoint && (
-      <View style={[s.regroupBanner, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.regroupBanner, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text numberOfLines={1} style={s.regroupBannerText}>📍 Near Regroup: {arrivingRegroupPoint.name}</Text>
         <TouchableOpacity style={s.confirmRegroupButton} disabled={busy} onPress={() => void confirmArrival(arrivingRegroupPoint.id)}>
           <Text style={s.confirmRegroupText}>Confirm arrival</Text>
@@ -923,7 +1019,7 @@ export default function LiveRideScreen() {
     )}
 
     {routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
-      <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text style={s.deviationWarningText}>
           ⚠️ Route Deviation: ~{Math.round(routeDeviation)} m from planned route
         </Text>
@@ -931,14 +1027,14 @@ export default function LiveRideScreen() {
     )}
 
     {lastArrivedWaypoint && (
-      <View style={[s.arrivalToast, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.arrivalToast, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text style={s.arrivalToastText}>
           🏁 Arrived at {lastArrivedWaypoint}! Next stop loaded.
         </Text>
       </View>
     )}
 
-    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
+    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) + (newest ? 115 : 0) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
     {/* Floating Navigation and Alert buttons on the map */}
     {active && (
       <View style={[s.floatingButtonsRow, { bottom: sheetHeight + 12 }]}>
@@ -1800,6 +1896,21 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   floatingWaypointText:{color:c.text,fontSize:11,fontWeight:'800'},
   floatingAlertButton:{minWidth:95,backgroundColor:c.danger,borderRadius:16,minHeight:48,paddingHorizontal:14,alignItems:'center',justifyContent:'center',elevation:4,shadowColor:c.danger,shadowOpacity:0.3,shadowRadius:6,shadowOffset:{width:0,height:2}},
   floatingAlertText:{color:'#FFFFFF',fontSize:13,fontWeight:'900',letterSpacing:0.3},
+  floatingAlertBanner:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:16,padding:14,borderWidth:1.5,borderColor:c.accent,elevation:8,shadowColor:'#000',shadowOpacity:0.18,shadowRadius:10,shadowOffset:{width:0,height:4},zIndex:50},
+  floatingAlertEmergency:{backgroundColor:'#FEF2F2',borderColor:c.danger,borderWidth:2},
+  floatingAlertAnnouncement:{backgroundColor:'#FFF7ED',borderColor:'#F97316'},
+  floatingAlertFuel:{backgroundColor:'#FFFBEB',borderColor:'#F59E0B'},
+  floatingAlertBreak:{backgroundColor:'#FEF3C7',borderColor:'#D97706'},
+  floatingAlertHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6},
+  floatingAlertTitle:{color:c.text,fontSize:14,fontWeight:'800',letterSpacing:-0.2},
+  floatingAlertDismiss:{padding:4,marginLeft:8},
+  floatingAlertDismissText:{color:c.muted,fontSize:16,fontWeight:'800'},
+  floatingAlertMessage:{color:c.text,fontSize:13,fontWeight:'600',lineHeight:18,marginBottom:10},
+  floatingAlertActionsRow:{flexDirection:'row',flexWrap:'wrap',gap:8,alignItems:'center'},
+  floatingAlertActionBtn:{backgroundColor:c.accent,paddingHorizontal:14,paddingVertical:8,borderRadius:10,alignItems:'center',justifyContent:'center'},
+  floatingAlertActionText:{color:'#FFFFFF',fontSize:12,fontWeight:'800'},
+  floatingAlertSecondaryBtn:{backgroundColor:c.surfaceRaised,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:c.border,alignItems:'center',justifyContent:'center'},
+  floatingAlertSecondaryText:{color:c.text,fontSize:12,fontWeight:'700'},
   sheetHeader:{paddingTop:10,paddingBottom:16},
   handle:{width:44,height:4,backgroundColor:c.border,borderRadius:2,alignSelf:'center',marginBottom:12},
   row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},
