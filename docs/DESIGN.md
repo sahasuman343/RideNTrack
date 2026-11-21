@@ -158,17 +158,8 @@ Post-ride settlement module.
    The Stitch MCP server (`https://stitch.googleapis.com/mcp`) manages user projects hosted at [stitch.withgoogle.com](https://stitch.withgoogle.com). Google Cloud endpoints require user-level OAuth 2 authentication (`Authorization: Bearer <access_token>`).
 
 2. **Connecting Stitch MCP**:
-   * **Via Google Cloud CLI**:
-     ```bash
-     # 1. Log in to your Google Cloud account:
-     gcloud auth login
-     gcloud auth application-default login
-
-     # 2. Print an active OAuth access token:
-     gcloud auth print-access-token
-     ```
    * **Via `mcp_config.json`**:
-     Add the Bearer token or configure the proxy command:
+     Configure the Stitch API key in `~/.gemini/config/mcp_config.json`:
      ```json
      "StitchMCP": {
        "command": "npx",
@@ -177,14 +168,22 @@ Post-ride settlement module.
          "mcp-remote",
          "https://stitch.googleapis.com/mcp",
          "--header",
-         "Authorization: Bearer <YOUR_ACCESS_TOKEN>"
+         "X-Goog-Api-Key: <YOUR_STITCH_API_KEY>"
        ]
      }
      ```
 
-3. **Generating Screens Directly from this Specification**:
-   Once authenticated, Stitch MCP tools can be invoked directly:
-   * `create_project`: Creates a project container named `RideNTrack`.
-   * `upload_design_md`: Uploads this `DESIGN.md` specification.
-   * `create_design_system_from_design_md`: Establishes the dynamic color and typography theme.
-   * `generate_screen_from_text`: Prompts Gemini on Stitch to generate production-ready UI screens and React Native components.
+3. **Active Stitch Project**:
+   * **Project Title**: `RideNTrack Motorcycle Touring Companion`
+   * **Project ID**: `11436558524662716734`
+   * **Resource Name**: `projects/11436558524662716734`
+
+4. **Synchronized Stitch Screens (available in `docs/stitch-designs/`)**:
+   1. [Live Ride Map & HUD](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/live-ride-hud.html) (`projects/11436558524662716734/screens/6d11ef19f7cd4576a215955bf89668bf`)
+   2. [Trip Expedition & Itinerary Planner](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/trip-expedition-planner.html) (`projects/11436558524662716734/screens/9f4dd15e88e74e048ca0cb3b0644aaba`)
+   3. [Group Expense & Fuel Split Ledger](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/group-expense-ledger.html) (`projects/11436558524662716734/screens/7a6aef9787cc4ad689bcdae394bf647c`)
+   4. [Home Dashboard](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/home-dashboard.html) (`projects/11436558524662716734/screens/2526812f96b74c5686f1b1e3be19bd20`)
+   5. [Plan a Trip Wizard](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/plan-trip-wizard.html) (`projects/11436558524662716734/screens/012deecd6d0a47f09a2c026c27cc61de`)
+   6. [Ride Detail Overview](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/ride-detail-overview.html) (`projects/11436558524662716734/screens/8961021e096a4286b6a2a9a33f379960`)
+   7. [Rider Profile & Garage](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/rider-profile-garage.html) (`projects/11436558524662716734/screens/5575f1e919c2434bab62347caefd3123`)
+   8. [Rides Directory & History](file:///Users/suman/Documents/Work/RideNTrack/docs/stitch-designs/rides-directory-history.html) (`projects/11436558524662716734/screens/5f07b652b4b1410c83023868fb4d7d80`)
