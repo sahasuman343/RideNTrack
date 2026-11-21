@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal, TextInput, Image, Switch, ScrollView } from 'react-native';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, useRideThemeSettings, RidePalette } from '../../src/theme';
+import { supabase } from '../../src/lib/supabase';
+import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES } from '@ridentrack/shared';
 
 export default function ProfileScreen() {
   const { profile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -20,6 +22,93 @@ export default function ProfileScreen() {
   const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
   const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
   const [reserve, setReserve] = useState(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
+
+  // Saved Places & Destination Lists
+  const [savedPlaces, setSavedPlaces] = useState<UserSavedPlace[]>([]);
+  const [placeModalVisible, setPlaceModalVisible] = useState(false);
+  const [placeName, setPlaceName] = useState('');
+  const [placeCategory, setPlaceCategory] = useState<SavedPlaceCategory>('viewpoint');
+  const [placeAddress, setPlaceAddress] = useState('');
+  const [placeLat, setPlaceLat] = useState('');
+  const [placeLng, setPlaceLng] = useState('');
+  const [placeNotes, setPlaceNotes] = useState('');
+  const [savingPlace, setSavingPlace] = useState(false);
+
+  const loadSavedPlaces = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_user_saved_places');
+      if (error) throw error;
+      setSavedPlaces(data || []);
+    } catch {
+      // Non-critical; fallback to empty list
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSavedPlaces();
+  }, [loadSavedPlaces]);
+
+  async function handleAddSavedPlace() {
+    if (!placeName.trim()) {
+      Alert.alert('Name required', 'Please enter a name for this place.');
+      return;
+    }
+    const lat = Number(placeLat);
+    const lng = Number(placeLng);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      Alert.alert('Invalid coordinates', 'Enter valid latitude (-90 to 90) and longitude (-180 to 180).');
+      return;
+    }
+
+    setSavingPlace(true);
+    try {
+      const { error } = await supabase.rpc('add_saved_place', {
+        p_name: placeName.trim(),
+        p_category: placeCategory,
+        p_latitude: lat,
+        p_longitude: lng,
+        p_address: placeAddress.trim() || null,
+        p_notes: placeNotes.trim() || null,
+      });
+      if (error) throw error;
+
+      setPlaceName('');
+      setPlaceAddress('');
+      setPlaceLat('');
+      setPlaceLng('');
+      setPlaceNotes('');
+      setPlaceModalVisible(false);
+      await loadSavedPlaces();
+      Alert.alert('Place saved', 'This destination has been added to your touring bookmarks.');
+    } catch (e: any) {
+      Alert.alert('Could not save place', e?.message || 'Please try again.');
+    } finally {
+      setSavingPlace(false);
+    }
+  }
+
+  async function handleDeleteSavedPlace(placeId: string, name: string) {
+    Alert.alert(
+      'Remove saved place?',
+      `Delete "${name}" from your saved destinations?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.rpc('delete_saved_place', { p_place_id: placeId });
+              if (error) throw error;
+              setSavedPlaces(prev => prev.filter(p => p.id !== placeId));
+            } catch (e: any) {
+              Alert.alert('Could not delete place', e?.message || 'Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  }
 
   function openEditor() {
     setDisplayName(profile?.display_name || '');
@@ -130,6 +219,43 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <Text style={[styles.section, { marginBottom: 0 }]}>Saved Places & Destinations ({savedPlaces.length})</Text>
+          <TouchableOpacity
+            style={[styles.catPill, { backgroundColor: theme.accent, borderColor: theme.accent }]}
+            onPress={() => setPlaceModalVisible(true)}
+          >
+            <Text style={[styles.catPillText, { color: '#fff' }]}>+ Add Place</Text>
+          </TouchableOpacity>
+        </View>
+        {savedPlaces.length === 0 ? (
+          <Text style={styles.hint}>No saved destinations yet. Bookmark mountain passes, viewpoints, trusted fuel bunks, or dhabas for your tours.</Text>
+        ) : (
+          savedPlaces.map(place => {
+            const catMeta = SAVED_PLACE_CATEGORIES[place.category] || { label: place.category, icon: '📍' };
+            return (
+              <View key={place.id} style={styles.infoRow}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={styles.infoValue}>{catMeta.icon} {place.name}</Text>
+                    <Text style={[styles.infoLabel, { marginTop: 2 }]}>{catMeta.label} · {place.latitude.toFixed(4)}, {place.longitude.toFixed(4)}</Text>
+                    {!!place.address && <Text style={[styles.hint, { marginTop: 2 }]}>{place.address}</Text>}
+                    {!!place.notes && <Text style={[styles.hint, { fontStyle: 'italic', marginTop: 2 }]}>{place.notes}</Text>}
+                  </View>
+                  <TouchableOpacity
+                    style={{ padding: 4 }}
+                    onPress={() => void handleDeleteSavedPlace(place.id, place.name)}
+                  >
+                    <Text style={{ color: theme.danger, fontSize: 13, fontWeight: '700' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.section}>Appearance</Text>
         <View style={styles.settingRow}>
           <View style={{ flex: 1 }}><Text style={styles.settingTitle}>Dark mode</Text><Text style={styles.settingHint}>{mode === 'system' ? 'Following your device setting' : dark ? 'Dark theme enabled' : 'Light theme enabled'}</Text></View>
@@ -217,6 +343,55 @@ export default function ProfileScreen() {
 
           <TouchableOpacity disabled={saving} style={styles.saveButton} onPress={() => void saveProfile()}><Text style={styles.saveText}>{saving ? 'Saving…' : 'Save changes'}</Text></TouchableOpacity>
           <TouchableOpacity style={styles.cancelButton} onPress={() => setEditing(false)}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+        </ScrollView></View>
+      </Modal>
+
+      <Modal visible={placeModalVisible} transparent animationType="slide" onRequestClose={() => setPlaceModalVisible(false)}>
+        <View style={styles.overlay}><ScrollView style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
+          <Text style={styles.modalTitle}>Bookmark Saved Place</Text>
+          <Text style={styles.fieldLabel}>Place Name</Text>
+          <TextInput style={styles.input} value={placeName} onChangeText={setPlaceName} placeholder="e.g. Rohtang Pass, Highway Dhaba, Petrol Bunk" placeholderTextColor={theme.subtle} />
+          
+          <Text style={styles.fieldLabel}>Category</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+            {(Object.keys(SAVED_PLACE_CATEGORIES) as SavedPlaceCategory[]).map(cat => {
+              const meta = SAVED_PLACE_CATEGORIES[cat];
+              const isSelected = placeCategory === cat;
+              return (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.catPill, isSelected && { backgroundColor: theme.accent, borderColor: theme.accent }]}
+                  onPress={() => setPlaceCategory(cat)}
+                >
+                  <Text style={[styles.catPillText, isSelected && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Latitude</Text>
+              <TextInput style={styles.input} value={placeLat} onChangeText={setPlaceLat} keyboardType="decimal-pad" placeholder="e.g. 32.3716" placeholderTextColor={theme.subtle} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Longitude</Text>
+              <TextInput style={styles.input} value={placeLng} onChangeText={setPlaceLng} keyboardType="decimal-pad" placeholder="e.g. 77.2466" placeholderTextColor={theme.subtle} />
+            </View>
+          </View>
+
+          <Text style={styles.fieldLabel}>Address / Landmark (optional)</Text>
+          <TextInput style={styles.input} value={placeAddress} onChangeText={setPlaceAddress} placeholder="e.g. Manali-Leh Highway, HP" placeholderTextColor={theme.subtle} />
+
+          <Text style={styles.fieldLabel}>Touring Notes (optional)</Text>
+          <TextInput style={styles.input} value={placeNotes} onChangeText={setPlaceNotes} placeholder="e.g. Reliable 24x7 fuel, clean washrooms, puncture repair" placeholderTextColor={theme.subtle} />
+
+          <TouchableOpacity disabled={savingPlace} style={styles.saveButton} onPress={() => void handleAddSavedPlace()}>
+            <Text style={styles.saveText}>{savingPlace ? 'Saving…' : 'Save destination'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setPlaceModalVisible(false)}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
         </ScrollView></View>
       </Modal>
     </ScrollView>

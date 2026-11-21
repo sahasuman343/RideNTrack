@@ -883,4 +883,103 @@ BEGIN
   PERFORM public.delete_trip(test_ride_id);
 END $$;
 
+-- RT-008: Phases 1 to 3: Saved Places, Capacity Limits, Ride Rules, Attendance, and Access Controls
+DO $$
+DECLARE
+  rider_a UUID := '11111111-1111-4111-8111-111111111111';
+  rider_b UUID := '22222222-2222-4222-8222-222222222222';
+  rider_c UUID := '33333333-3333-4333-8333-333333333333';
+  test_place_id UUID;
+  test_ride_id UUID;
+  v_code TEXT;
+  v_roster JSONB;
+  v_capacity_blocked BOOLEAN := false;
+BEGIN
+  -- 1. Saved Places CRUD
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  test_place_id := public.add_saved_place('Khardung La', 'pass', 34.2787, 77.6047, 'Leh Ladakh', 'Highest motorable pass');
+  IF test_place_id IS NULL THEN
+    RAISE EXCEPTION 'add_saved_place returned null id';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.get_user_saved_places() WHERE id = test_place_id AND name = 'Khardung La') THEN
+    RAISE EXCEPTION 'get_user_saved_places did not return newly created place';
+  END IF;
+
+  PERFORM public.delete_saved_place(test_place_id);
+  IF EXISTS (SELECT 1 FROM public.get_user_saved_places() WHERE id = test_place_id) THEN
+    RAISE EXCEPTION 'delete_saved_place failed to remove place';
+  END IF;
+
+  -- 2. Create Trip with Capacity and Rules
+  test_ride_id := public.create_trip_plan(
+    'Himalayan Odyssey', 'Adventure touring trip',
+    'Chandigarh', 'Manali',
+    ARRAY[76.7794, 30.7333]::double precision[],
+    ARRAY[77.1892, 32.2396]::double precision[],
+    NULL, 'touring', '2026-07-01'::date, '2026-07-07'::date,
+    300000, 28800, 'private'
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
+
+  -- Update access control to invite_only and set capacity to 2 riders
+  PERFORM public.update_trip_access_control(test_ride_id, 'invite_only');
+  PERFORM public.update_trip_capacity_and_rules(test_ride_id, 2, 'Full armor, boots, and 2-second spacing mandatory');
+
+  IF (SELECT visibility FROM public.rides WHERE id = test_ride_id) != 'invite_only' THEN
+    RAISE EXCEPTION 'update_trip_access_control failed to set visibility';
+  END IF;
+
+  IF (SELECT max_participants FROM public.rides WHERE id = test_ride_id) != 2 THEN
+    RAISE EXCEPTION 'update_trip_capacity_and_rules failed to set max_participants';
+  END IF;
+
+  -- Rider B joins via code (occupies 2nd of 2 spots)
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- Rider C attempts to join (should fail with capacity limit)
+  PERFORM set_config('request.jwt.claim.sub', rider_c::text, true);
+  BEGIN
+    PERFORM public.join_ride_by_code(v_code);
+  EXCEPTION WHEN OTHERS THEN
+    v_capacity_blocked := true;
+  END;
+
+  IF NOT v_capacity_blocked THEN
+    RAISE EXCEPTION 'join_ride_by_code failed to enforce max_participants capacity limit';
+  END IF;
+
+  -- 3. Attendance Status
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.update_participant_attendance(test_ride_id, 'tentative');
+  IF (SELECT attendance_status FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'tentative' THEN
+    RAISE EXCEPTION 'update_participant_attendance failed to set tentative status';
+  END IF;
+
+  -- Leader marks Rider B as attended
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  PERFORM public.update_participant_attendance(test_ride_id, 'attended', rider_b);
+  IF (SELECT attendance_status FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'attended' THEN
+    RAISE EXCEPTION 'leader update_participant_attendance failed to mark rider as attended';
+  END IF;
+
+  -- 4. Co-Captain Role & Regroup Point
+  PERFORM public.set_trip_participant_role(test_ride_id, rider_b, 'co-captain');
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'co-captain' THEN
+    RAISE EXCEPTION 'set_trip_participant_role failed to promote to co-captain';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.add_regroup_point(test_ride_id, 'Co-captain viewpoint', 31.5, 77.1, 1, NULL, 'Check tires');
+  IF NOT EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id = test_ride_id AND name = 'Co-captain viewpoint') THEN
+    RAISE EXCEPTION 'co-captain role was unable to add regroup point';
+  END IF;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
 RESET ROLE;

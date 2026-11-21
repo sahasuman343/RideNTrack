@@ -13,10 +13,12 @@ interface Params extends Context {
   onLocationUpdate?: (point: LocationUpdate) => void;
   publish?: (point: LocationUpdate) => Promise<void> | void;
   onError?: (message: string) => void;
+  onGpsRecovered?: () => void;
+  batterySaver?: boolean;
 }
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
-let generation = 0, lastSync = 0;
+let generation = 0, lastSync = 0, lastFixTimestamp = 0;
 const GPS_INTERVAL_MS = 5000;
 const GPS_DISTANCE_METERS = 15;
 const QUEUE_SYNC_INTERVAL_MS = 30000;
@@ -72,6 +74,11 @@ async function record(locations: Location.LocationObject[]) {
     }
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});
+    const nowMs = Date.now();
+    if (lastFixTimestamp > 0 && nowMs - lastFixTimestamp > 30000) {
+      context?.onGpsRecovered?.();
+    }
+    lastFixTimestamp = nowMs;
   }
   if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
@@ -115,13 +122,17 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
     fallback?.remove();
     fallback = null;
 
+    const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
+    const distance = params.batterySaver ? 25 : GPS_DISTANCE_METERS;
+    const accuracy = params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High;
+
     // Keep ride tracking useful while background permission is optional.
     // Background permission is requested only from an explicit user action.
     try {
       fallback = await Location.watchPositionAsync({
-        accuracy: Location.Accuracy.High,
-        timeInterval: GPS_INTERVAL_MS,
-        distanceInterval: GPS_DISTANCE_METERS,
+        accuracy,
+        timeInterval: interval,
+        distanceInterval: distance,
       }, location => {
         void record([location]).catch(e => params.onError?.(e instanceof Error ? e.message : 'GPS update failed.'));
       });
@@ -162,13 +173,17 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       return { isBackgroundEnabled: false, permissionGranted: background.status === 'granted' };
     }
 
+    const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
+    const distance = params.batterySaver ? 25 : GPS_DISTANCE_METERS;
+    const accuracy = params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High;
+
     try {
       const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
       if (!alreadyStarted) {
         await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-          accuracy: Location.Accuracy.High,
-          timeInterval: GPS_INTERVAL_MS,
-          distanceInterval: GPS_DISTANCE_METERS,
+          accuracy,
+          timeInterval: interval,
+          distanceInterval: distance,
           pausesUpdatesAutomatically: false,
           showsBackgroundLocationIndicator: true,
           foregroundService: {
@@ -194,9 +209,9 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       if (!fallback) {
         try {
           fallback = await Location.watchPositionAsync({
-            accuracy: Location.Accuracy.High,
-            timeInterval: GPS_INTERVAL_MS,
-            distanceInterval: GPS_DISTANCE_METERS,
+            accuracy,
+            timeInterval: interval,
+            distanceInterval: distance,
           }, location => {
             void record([location]).catch(error => params.onError?.(error instanceof Error ? error.message : 'GPS update failed.'));
           });

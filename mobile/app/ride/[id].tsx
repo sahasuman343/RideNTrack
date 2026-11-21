@@ -3,7 +3,22 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndi
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl, getRiderLiveStatus, type RiderLiveStatus, calculatePackFormation, type PackRiderProgress } from '@ridentrack/shared';
+import {
+  type Ride,
+  type LocationUpdate,
+  type AlertType,
+  ALERT_LABELS,
+  isStale,
+  distanceMeters,
+  distanceToRouteMeters,
+  buildGoogleMapsNavigationUrl,
+  getRiderLiveStatus,
+  type RiderLiveStatus,
+  calculatePackFormation,
+  type PackRiderProgress,
+  calculateLiveRideStats,
+  type LiveRideStats,
+} from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -78,6 +93,15 @@ export default function LiveRideScreen() {
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
+  const [statsModalVisible, setStatsModalVisible] = useState(false);
+  const [batterySaver, setBatterySaver] = useState(false);
+  const [gpsRecoveryStatus, setGpsRecoveryStatus] = useState<'normal' | 'recovered'>('normal');
+  const rideStartTimeMs = useRef<number | null>(null);
+  const accumulatedMovingMs = useRef<number>(0);
+  const lastCheckTimeMs = useRef<number>(Date.now());
+  const maxSpeedKmh = useRef<number>(0);
+  const currentAltitudeMeters = useRef<number | null>(null);
+  const elevationGainMeters = useRef<number>(0);
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
   const packFormation = useMemo(() => {
@@ -156,13 +180,24 @@ export default function LiveRideScreen() {
     }
     let cancelled = false;
     setTracking('waiting'); setGpsError(null);
-    void startBackgroundLocationUpdates({ rideId: id, userId, displayName: nameRef.current, publish,
+    void startBackgroundLocationUpdates({
+      rideId: id,
+      userId,
+      displayName: nameRef.current,
+      publish,
+      batterySaver,
       onLocationUpdate: p => { if (!cancelled) setPosition(p); },
       onError: e => { if (!cancelled) setGpsError(e); },
+      onGpsRecovered: () => {
+        if (!cancelled) {
+          setGpsRecoveryStatus('recovered');
+          setTimeout(() => setGpsRecoveryStatus('normal'), 6000);
+        }
+      },
     }).then(result => { if (!cancelled) setTracking(result.isBackgroundEnabled ? 'background' : 'foreground'); })
       .catch(e => { if (!cancelled) { setTracking('error'); setGpsError(e.message); } });
     return () => { cancelled = true; void stopBackgroundLocationUpdates().catch(() => {}); };
-  }, [id,userId,active,sharing,publish,gpsRetry]);
+  }, [id,userId,active,sharing,publish,gpsRetry,batterySaver]);
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
       if (typeof position.lng === 'number' && typeof position.lat === 'number' && Number.isFinite(position.lng) && Number.isFinite(position.lat)) {
@@ -295,6 +330,37 @@ export default function LiveRideScreen() {
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude]);
 
   const currentSpeedKmh = position?.speed ? Math.round(position.speed * 3.6) : 0;
+
+  useEffect(() => {
+    if (!position) return;
+    if (!rideStartTimeMs.current) rideStartTimeMs.current = Date.now();
+    const nowMs = Date.now();
+    const deltaMs = nowMs - lastCheckTimeMs.current;
+    lastCheckTimeMs.current = nowMs;
+    const speedKmh = (position.speed || 0) * 3.6;
+    if (speedKmh >= 5) {
+      accumulatedMovingMs.current += deltaMs;
+    }
+    if (speedKmh > maxSpeedKmh.current && speedKmh <= 220) {
+      maxSpeedKmh.current = Math.round(speedKmh * 10) / 10;
+    }
+  }, [position]);
+
+  const liveStats = useMemo(() => {
+    return calculateLiveRideStats({
+      rideStartTimeMs: rideStartTimeMs.current,
+      currentTimeMs: now,
+      accumulatedMovingMs: accumulatedMovingMs.current,
+      lastMovingCheckMs: lastCheckTimeMs.current,
+      currentSpeedMps: position?.speed,
+      distanceCoveredMeters,
+      maxSpeedKmh: maxSpeedKmh.current,
+      currentAltitudeMeters: currentAltitudeMeters.current,
+      elevationGainMeters: elevationGainMeters.current,
+      participants,
+      currentUserId: userId,
+    });
+  }, [now, position?.speed, distanceCoveredMeters, participants, userId]);
 
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
@@ -595,13 +661,16 @@ export default function LiveRideScreen() {
           <Text style={s.topBarIcon}>✎</Text>
         </TouchableOpacity>
       )}
+      <TouchableOpacity accessibilityLabel="Live Ride Statistics" style={s.square} onPress={() => setStatsModalVisible(true)}>
+        <Text style={s.topBarIcon}>📊</Text>
+      </TouchableOpacity>
       <TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}>
         <Text style={s.topBarIcon}>↗</Text>
       </TouchableOpacity>
     </View>
 
     {active && (
-      <View style={[s.hudContainer, { top: insets.top + 74 }]}>
+      <TouchableOpacity activeOpacity={0.85} onPress={() => setStatsModalVisible(true)} style={[s.hudContainer, { top: insets.top + 74 }]}>
         <View style={s.hudItem}>
           <Text style={s.hudValue}>{currentSpeedKmh}</Text>
           <Text style={s.hudLabel}>KM/H</Text>
@@ -626,6 +695,19 @@ export default function LiveRideScreen() {
           </Text>
           <Text style={s.hudLabel}>NEXT STOP</Text>
         </View>
+        <View style={s.hudDivider} />
+        <View style={s.hudItem}>
+          <Text style={[s.hudValue, { color: theme.accent }]}>📊</Text>
+          <Text style={s.hudLabel}>STATS</Text>
+        </View>
+      </TouchableOpacity>
+    )}
+
+    {gpsRecoveryStatus === 'recovered' && (
+      <View style={[s.arrivalToast, { backgroundColor: '#22c55e', top: insets.top + (active ? 186 : 124) }]}>
+        <Text style={s.arrivalToastText}>
+          🛰️ GPS signal restored! Tracking resumed smoothly.
+        </Text>
       </View>
     )}
 
@@ -948,6 +1030,112 @@ export default function LiveRideScreen() {
       </View>
     </Modal>
     <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+
+    {/* Live Ride Statistics Modal */}
+    <Modal visible={statsModalVisible} transparent animationType="slide" onRequestClose={() => setStatsModalVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={s.heading}>📊 Live Ride Telemetry & Statistics</Text>
+              <TouchableOpacity onPress={() => setStatsModalVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Real-time speed, pace, moving time, and pack spread statistics.</Text>
+
+            {/* Time Stats */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⏱️ TIME & DURATION</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.elapsedTime}</Text>
+                  <Text style={s.statsLabel}>ELAPSED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.green }]}>{liveStats.formatted.movingTime}</Text>
+                  <Text style={s.statsLabel}>MOVING TIME</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.stoppedTime}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Speed Stats */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⚡ SPEED & DISTANCE</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.currentSpeed}</Text>
+                  <Text style={s.statsLabel}>CURRENT</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.avgSpeed}</Text>
+                  <Text style={s.statsLabel}>AVG MOVING</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.maxSpeed}</Text>
+                  <Text style={s.statsLabel}>TOP SPEED</Text>
+                </View>
+              </View>
+              <View style={[s.statsGrid, { marginTop: 10 }]}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.distance}</Text>
+                  <Text style={s.statsLabel}>RECORDED TRAIL</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.altitude}</Text>
+                  <Text style={s.statsLabel}>ALTITUDE</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.elevationGainMeters} m</Text>
+                  <Text style={s.statsLabel}>ASCENT GAIN</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Pack Telemetry */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>🏍️ PACK FORMATION & TELEMETRY</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.packSpread}</Text>
+                  <Text style={s.statsLabel}>LEAD-TO-SWEEP SPREAD</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.ridingCount}</Text>
+                  <Text style={s.statsLabel}>RIDING NOW</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.stoppedCount}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Battery Saver Option */}
+            <View style={[s.statsCard, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[s.statsCardHeader, { marginBottom: 2 }]}>🔋 TOURING BATTERY SAVER</Text>
+                <Text style={s.muted}>Adapts GPS interval (15s/25m) for all-day tours to conserve phone battery.</Text>
+              </View>
+              <TouchableOpacity
+                style={[s.control, batterySaver && s.selected]}
+                onPress={() => setBatterySaver(v => !v)}
+              >
+                <Text style={[s.controlText, batterySaver && s.selectedText]}>{batterySaver ? 'ON' : 'OFF'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setStatsModalVisible(false)}>
+              <Text style={s.text}>Close Statistics</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   </View>;
 }
 const makeStyles = (c: RidePalette) => StyleSheet.create({
@@ -1056,4 +1244,10 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   confirmRegroupText:{color:c.text,fontSize:12,fontWeight:'800'},
   sosEmergencyOption:{padding:16,borderRadius:10,backgroundColor:c.danger,alignItems:'center'},
   sosEmergencyText:{color:'#fff',fontSize:15,fontWeight:'800'},
+  statsCard:{backgroundColor:c.surfaceRaised,borderRadius:12,padding:12,marginBottom:10,borderWidth:1,borderColor:c.border},
+  statsCardHeader:{color:c.muted,fontSize:10,fontWeight:'800',letterSpacing:0.5,marginBottom:8},
+  statsGrid:{flexDirection:'row',justifyContent:'space-around'},
+  statsGridItem:{alignItems:'center',flex:1},
+  statsValue:{color:c.text,fontSize:16,fontWeight:'800'},
+  statsLabel:{color:c.muted,fontSize:9,fontWeight:'700',letterSpacing:0.3,marginTop:2},
 });

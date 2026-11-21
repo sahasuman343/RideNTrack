@@ -37,6 +37,32 @@ export interface Ride {
   estimated_duration_seconds?: number | null;
   route_deviation_threshold_meters?: number;
   rider_behind_threshold_meters?: number;
+  max_participants?: number | null;
+  ride_rules?: string | null;
+  created_at: string;
+}
+
+export type SavedPlaceCategory = 'viewpoint' | 'pass' | 'fuel' | 'food' | 'stay' | 'repair' | 'other';
+
+export const SAVED_PLACE_CATEGORIES: Record<SavedPlaceCategory, { label: string; icon: string }> = {
+  viewpoint: { label: 'Scenic Viewpoint', icon: '🌄' },
+  pass: { label: 'Mountain Pass', icon: '⛰️' },
+  fuel: { label: 'Fuel Bunk', icon: '⛽' },
+  food: { label: 'Dhaba & Food', icon: '🍲' },
+  stay: { label: 'Stay / Camp', icon: '🏕️' },
+  repair: { label: 'Mechanic / Spares', icon: '🔧' },
+  other: { label: 'Point of Interest', icon: '📍' },
+};
+
+export interface UserSavedPlace {
+  id: string;
+  user_id: string;
+  name: string;
+  category: SavedPlaceCategory;
+  address?: string | null;
+  latitude: number;
+  longitude: number;
+  notes?: string | null;
   created_at: string;
 }
 
@@ -143,6 +169,15 @@ export interface TripChecklistItem {
   completed_count: number;
 }
 
+export type AttendanceStatus = 'confirmed' | 'tentative' | 'declined' | 'attended';
+
+export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, { label: string; icon: string; color: string }> = {
+  confirmed: { label: 'Going', icon: '✅', color: '#22c55e' },
+  tentative: { label: 'Maybe', icon: '🤔', color: '#f59e0b' },
+  declined: { label: 'Cannot Go', icon: '❌', color: '#ef4444' },
+  attended: { label: 'Attended', icon: '🏁', color: '#3b82f6' },
+};
+
 export interface RideParticipant {
   id: string;
   ride_id: string;
@@ -153,6 +188,7 @@ export interface RideParticipant {
   joined_at: string;
   last_seen?: string | null;
   connection_status?: RiderConnectionStatus;
+  attendance_status?: AttendanceStatus;
 }
 
 export interface LocationUpdate {
@@ -302,6 +338,7 @@ export * from './journal';
 export * from './premium';
 export * from './gpx';
 export * from './expenses';
+export * from './stats';
 
 
 

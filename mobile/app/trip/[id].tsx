@@ -24,6 +24,8 @@ import {
   type TripExpenseCategory,
   type TripExpenseSummary,
   type SettlementTransaction,
+  type AttendanceStatus,
+  ATTENDANCE_STATUS_LABELS,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -37,11 +39,14 @@ type Trip = {
   status: string; trip_type?: string; start_date?: string | null; end_date?: string | null;
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
   ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
+  visibility?: 'private' | 'invite_only' | 'public';
+  max_participants?: number | null;
+  ride_rules?: string | null;
 };
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; provider_place_id?: string | null; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
 type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
-type Rider = { user_id: string; display_name: string; role: RideParticipantRole; is_active: boolean; last_seen: string | null };
+type Rider = { user_id: string; display_name: string; role: RideParticipantRole; is_active: boolean; last_seen: string | null; attendance_status?: AttendanceStatus };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; price_currency: string; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
@@ -80,6 +85,9 @@ export default function TripWorkspaceScreen() {
   const [editTripVisible, setEditTripVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editVisibility, setEditVisibility] = useState<'private' | 'invite_only' | 'public'>('invite_only');
+  const [editMaxParticipants, setEditMaxParticipants] = useState('');
+  const [editRideRules, setEditRideRules] = useState('');
 
   // Stage modal state
   const [stageModalVisible, setStageModalVisible] = useState(false);
@@ -348,23 +356,53 @@ export default function TripWorkspaceScreen() {
     if (!trip) return;
     setEditName(trip.name || '');
     setEditDescription(trip.description || '');
+    setEditVisibility(trip.visibility || 'invite_only');
+    setEditMaxParticipants(trip.max_participants ? String(trip.max_participants) : '');
+    setEditRideRules(trip.ride_rules || '');
     setEditTripVisible(true);
   }
 
   async function saveTripDetails() {
     if (!editName.trim()) { Alert.alert('Trip name required', 'Enter a name for this trip.'); return; }
+    const maxPartNum = editMaxParticipants.trim() ? Number(editMaxParticipants) : null;
+    if (maxPartNum != null && (!Number.isFinite(maxPartNum) || maxPartNum < 2 || maxPartNum > 500)) {
+      Alert.alert('Invalid pack capacity', 'Pack size must be between 2 and 500 riders.'); return;
+    }
     setSaving(true); setError('');
     try {
       const { error: updateError } = await supabase.from('rides').update({
-        name: editName.trim(), description: editDescription.trim() || null,
+        name: editName.trim(),
+        description: editDescription.trim() || null,
+        visibility: editVisibility,
+        max_participants: maxPartNum,
+        ride_rules: editRideRules.trim() || null,
       }).eq('id', id);
       if (updateError) throw updateError;
       setEditTripVisible(false);
       await load();
-      Alert.alert('Trip updated', 'Your trip details have been saved.');
+      Alert.alert('Trip updated', 'Your trip settings, capacity, and rules have been saved.');
     } catch (e: any) {
       setError(e?.message || 'Could not update trip details.');
     } finally { setSaving(false); }
+  }
+
+  async function handleUpdateAttendance(status: AttendanceStatus, targetUserId?: string) {
+    try {
+      const { error: attError } = await supabase.rpc('update_participant_attendance', {
+        p_ride_id: id,
+        p_status: status,
+        p_target_user_id: targetUserId || null,
+      });
+      if (attError) throw attError;
+      setRoster(prev => prev.map(r => {
+        if (targetUserId ? r.user_id === targetUserId : r.user_id === user?.id) {
+          return { ...r, attendance_status: status };
+        }
+        return r;
+      }));
+    } catch (e: any) {
+      Alert.alert('Could not update attendance', e?.message || 'Please try again.');
+    }
   }
 
   function confirmDeleteTrip() {
@@ -1312,18 +1350,92 @@ export default function TripWorkspaceScreen() {
         </>}
       </View>
 
+      {/* Ride Rules & Guidelines */}
+      {!!trip.ride_rules && (
+        <View style={styles.card}>
+          <Text style={styles.section}>⚠️ Group Ride Rules & Safety Guidelines</Text>
+          <Text style={[styles.note, { color: theme.text, fontSize: 13, lineHeight: 20 }]}>{trip.ride_rules}</Text>
+        </View>
+      )}
+
+      {/* Share Group Ride & Ride Code */}
       <View style={styles.card}>
-        <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
+        <Text style={styles.section}>Share Group Ride & Access</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.surfaceRaised, padding: 12, borderRadius: 10 }}>
+          <View>
+            <Text style={styles.mutedSmall}>RIDE CODE</Text>
+            <Text style={{ color: theme.accent, fontSize: 22, fontWeight: '800', letterSpacing: 2 }}>{trip.ride_code}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.primary}
+            onPress={() => {
+              void Share.share({
+                message: `Join our motorcycle trip "${trip.name}" on RideNTrack!\nRide Code: ${trip.ride_code}\nRoute: ${trip.origin} → ${trip.destination}\nOpen RideNTrack → Join a Group Ride.`,
+              });
+            }}
+          >
+            <Text style={styles.primaryText}>Share Code 📲</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={[styles.mutedSmall, { marginTop: 8 }]}>
+          Access Mode: {trip.visibility?.toUpperCase() || 'INVITE_ONLY'} · {trip.visibility === 'public' ? '🌍 Public (Community Touring Feed)' : trip.visibility === 'private' ? '🔒 Private (Invited Members Only)' : '🔑 Invite Only (Requires Ride Code)'}
+        </Text>
+      </View>
+
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
+          <Text style={[styles.statValue, { fontSize: 13 }]}>
+            {roster.filter(r => r.is_active).length} / {trip.max_participants ? `${trip.max_participants} bikes` : '∞'}
+          </Text>
+        </View>
+
+        {/* Capacity Limit Alert if full */}
+        {trip.max_participants != null && roster.filter(r => r.is_active).length >= trip.max_participants && (
+          <View style={[styles.note, { backgroundColor: '#FF572222', borderColor: '#FF5722', borderWidth: 1, borderRadius: 8, padding: 8, marginVertical: 6 }]}>
+            <Text style={{ color: '#FF5722', fontWeight: '700', fontSize: 12 }}>⚠️ Pack has reached maximum capacity ({trip.max_participants} riders).</Text>
+          </View>
+        )}
+
+        {/* Current User Attendance RSVP Selector */}
+        {roster.some(r => r.user_id === user?.id && r.is_active) && (
+          <View style={{ marginVertical: 10, padding: 10, backgroundColor: theme.surfaceRaised, borderRadius: 10 }}>
+            <Text style={styles.label}>Your Attendance RSVP</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+              {(['confirmed', 'tentative', 'declined'] as const).map(status => {
+                const myRider = roster.find(r => r.user_id === user?.id);
+                const isSelected = (myRider?.attendance_status || 'confirmed') === status;
+                const meta = ATTENDANCE_STATUS_LABELS[status];
+                return (
+                  <TouchableOpacity
+                    key={status}
+                    style={[styles.smallButton, { flex: 1, alignItems: 'center' }, isSelected && styles.roleSelected]}
+                    onPress={() => void handleUpdateAttendance(status)}
+                  >
+                    <Text style={[styles.smallButtonText, isSelected && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {roster.map(rider => {
           const age = rider.last_seen ? now - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
           const status = !rider.last_seen ? 'OFFLINE' : age > 120000 ? 'OFFLINE' : age > 30000 ? 'STALE' : 'LIVE';
           const roleInfo = ROLE_LABELS[rider.role] || { title: rider.role, icon: '🏍️' };
+          const attMeta = rider.attendance_status ? ATTENDANCE_STATUS_LABELS[rider.attendance_status] : null;
           return (
             <View key={rider.user_id} style={styles.riderRow}>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ fontSize: 13 }}>{roleInfo.icon}</Text>
                   <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
+                  {attMeta && (
+                    <Text style={{ fontSize: 11, color: attMeta.color, fontWeight: '700' }}>
+                      {attMeta.icon} {attMeta.label}
+                    </Text>
+                  )}
                 </View>
                 <Text style={styles.mutedSmall}>{roleInfo.title.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
               </View>
@@ -1602,6 +1714,43 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Trip name" placeholderTextColor={theme.subtle} />
             <Text style={styles.label}>Description</Text>
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
+
+            <Text style={styles.label}>Access & Visibility</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
+              {[
+                { key: 'private', label: '🔒 Private' },
+                { key: 'invite_only', label: '🔑 Invite Only' },
+                { key: 'public', label: '🌍 Public Community' },
+              ].map(v => (
+                <TouchableOpacity
+                  key={v.key}
+                  style={[styles.smallButton, editVisibility === v.key && styles.roleSelected]}
+                  onPress={() => setEditVisibility(v.key as any)}
+                >
+                  <Text style={[styles.smallButtonText, editVisibility === v.key && { color: '#fff' }]}>{v.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Maximum Pack Capacity (riders)</Text>
+            <TextInput
+              style={styles.input}
+              value={editMaxParticipants}
+              onChangeText={setEditMaxParticipants}
+              keyboardType="number-pad"
+              placeholder="e.g. 15 (leave blank for unlimited)"
+              placeholderTextColor={theme.subtle}
+            />
+
+            <Text style={styles.label}>Group Ride Rules & Safety Guidelines</Text>
+            <TextInput
+              style={[styles.input, { height: 80 }]}
+              value={editRideRules}
+              onChangeText={setEditRideRules}
+              placeholder="e.g. Full riding gear mandatory, headlights ON, staggered formation, no overtaking leader or sweep"
+              placeholderTextColor={theme.subtle}
+              multiline
+            />
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
           </ScrollView>
@@ -1687,6 +1836,26 @@ export default function TripWorkspaceScreen() {
                       </View>
                     </TouchableOpacity>
                   ))}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 10 }]}>Update Attendance Status</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
+                  {(['confirmed', 'tentative', 'declined', 'attended'] as const).map(att => {
+                    const isSel = (selectedRider.attendance_status || 'confirmed') === att;
+                    const meta = ATTENDANCE_STATUS_LABELS[att];
+                    return (
+                      <TouchableOpacity
+                        key={att}
+                        style={[styles.smallButton, isSel && styles.roleSelected]}
+                        onPress={async () => {
+                          await handleUpdateAttendance(att, selectedRider.user_id);
+                          setSelectedRider(prev => prev ? { ...prev, attendance_status: att } : null);
+                        }}
+                      >
+                        <Text style={[styles.smallButtonText, isSel && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
                 <TouchableOpacity

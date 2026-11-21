@@ -1273,6 +1273,110 @@ test('phase 0 stabilization and hardening migration addresses RLS leaks and role
   assert.match(migration, /trip_expense_splits_user_id_fkey/);
 });
 
+test('live ride statistics calculates duration, moving time, average speed, max speed, and pack spread', () => {
+  const shared = loader({})('shared/types.ts');
+  const now = 1700000000000;
+  const startTime = now - 3600000; // 1 hour ago
+  const movingMs = 2700000; // 45 minutes moving
+
+  const participants = [
+    { user_id: 'lead', display_name: 'Lead', lat: 32.0, lng: 77.0, speed: 15, heading: 90, timestamp: new Date(now).toISOString() },
+    { user_id: 'mid', display_name: 'Mid', lat: 32.01, lng: 77.01, speed: 0, heading: 90, timestamp: new Date(now).toISOString() },
+    { user_id: 'tail', display_name: 'Tail', lat: 32.02, lng: 77.02, speed: 10, heading: 90, timestamp: new Date(now - 180000).toISOString() }, // disconnected (>2 min)
+  ];
+
+  const stats = shared.calculateLiveRideStats({
+    rideStartTimeMs: startTime,
+    currentTimeMs: now,
+    accumulatedMovingMs: movingMs,
+    lastMovingCheckMs: now,
+    currentSpeedMps: 16.67, // ~60 km/h
+    distanceCoveredMeters: 45000, // 45 km
+    maxSpeedKmh: 85,
+    currentAltitudeMeters: 2050,
+    elevationGainMeters: 650,
+    participants,
+    currentUserId: 'lead',
+  });
+
+  assert.equal(stats.formatted.elapsedTime, '1h 0m');
+  assert.equal(stats.formatted.movingTime, '45m');
+  assert.equal(stats.formatted.stoppedTime, '15m');
+  assert.equal(stats.currentSpeedKmh, 60);
+  assert.equal(stats.avgMovingSpeedKmh, 60);
+  assert.equal(stats.maxSpeedKmh, 85);
+  assert.equal(stats.formatted.altitude, '2050 m');
+  assert.equal(stats.elevationGainMeters, 650);
+  assert.equal(stats.packSummary.totalRiders, 3);
+  assert.equal(stats.packSummary.ridingCount, 1);
+  assert.equal(stats.packSummary.stoppedCount, 1);
+  assert.equal(stats.packSummary.disconnectedCount, 1);
+  assert.ok(stats.packSummary.packSpreadMeters > 0);
+
+  // Speed clamping
+  assert.equal(shared.filterPlausibleSpeed(null), 0);
+  assert.equal(shared.filterPlausibleSpeed(-10), 0);
+  assert.equal(shared.filterPlausibleSpeed(100), 220); // clamped at 220 km/h
+
+  // Formatters
+  assert.equal(shared.formatDuration(0), '0m');
+  assert.equal(shared.formatDuration(45000), '45s');
+  assert.equal(shared.formatDuration(3665000), '1h 1m');
+  assert.equal(shared.formatDistanceMeters(850), '850 m');
+  assert.equal(shared.formatDistanceMeters(12500), '12.5 km');
+});
+
+test('phases 1 to 3 migration defines saved places, pack capacity, ride rules, attendance, and access control', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/023_phase1_to_phase3_touring_features.sql'), 'utf8');
+  assert.match(migration, /public\.user_saved_places/);
+  assert.match(migration, /max_participants INTEGER/);
+  assert.match(migration, /ride_rules TEXT/);
+  assert.match(migration, /attendance_status TEXT/);
+  assert.match(migration, /add_saved_place/);
+  assert.match(migration, /delete_saved_place/);
+  assert.match(migration, /get_user_saved_places/);
+  assert.match(migration, /update_trip_access_control/);
+  assert.match(migration, /update_trip_capacity_and_rules/);
+  assert.match(migration, /update_participant_attendance/);
+  assert.match(migration, /Group ride has reached maximum capacity/);
+  assert.match(migration, /rp\.role IN \('captain', 'co-captain', 'leader'\)/);
+  assert.match(migration, /get_trip_roster/);
+});
+
+test('profile screen integrates saved places and touring destination bookmarking', () => {
+  const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
+  assert.match(profileSource, /savedPlaces/);
+  assert.match(profileSource, /Saved Places & Destinations/);
+  assert.match(profileSource, /SAVED_PLACE_CATEGORIES/);
+  assert.match(profileSource, /get_user_saved_places/);
+  assert.match(profileSource, /add_saved_place/);
+  assert.match(profileSource, /delete_saved_place/);
+  assert.match(profileSource, /Bookmark Saved Place/);
+});
+
+test('trip workspace integrates trip sharing, pack capacity, ride rules, and rider attendance', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /editVisibility/);
+  assert.match(tripSource, /editMaxParticipants/);
+  assert.match(tripSource, /editRideRules/);
+  assert.match(tripSource, /update_participant_attendance/);
+  assert.match(tripSource, /Share Code 📲/);
+  assert.match(tripSource, /Your Attendance RSVP/);
+  assert.match(tripSource, /ATTENDANCE_STATUS_LABELS/);
+  assert.match(tripSource, /Group Ride Rules & Safety Guidelines/);
+});
+
+test('live ride screen integrates complete live ride statistics and touring battery saver', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /calculateLiveRideStats/);
+  assert.match(rideSource, /liveStats/);
+  assert.match(rideSource, /statsModalVisible/);
+  assert.match(rideSource, /batterySaver/);
+  assert.match(rideSource, /Live Ride Telemetry & Statistics/);
+  assert.match(rideSource, /TOURING BATTERY SAVER/);
+  assert.match(rideSource, /GPS signal restored/);
+});
+
 
 
 
