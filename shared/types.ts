@@ -238,6 +238,42 @@ export interface BufferedAlert {
 
 export type AlertType = Alert['type'];
 
+export type MechanicalIssueType = 'puncture' | 'clutch_cable' | 'battery' | 'chain' | 'engine' | 'fuel_empty' | 'accident' | 'other';
+
+export const MECHANICAL_ISSUE_LABELS: Record<MechanicalIssueType, { label: string; icon: string }> = {
+  puncture: { label: 'Tire Puncture', icon: '🛞' },
+  clutch_cable: { label: 'Clutch / Throttle Cable', icon: '🏍️' },
+  chain: { label: 'Chain / Sprocket Problem', icon: '⛓️' },
+  battery: { label: 'Battery / Electrical Failure', icon: '🔋' },
+  fuel_empty: { label: 'Out of Fuel', icon: '⛽' },
+  engine: { label: 'Engine Overheating / Oil Leak', icon: '🔧' },
+  accident: { label: 'Minor Fall / Crash', icon: '⚠️' },
+  other: { label: 'General Breakdown', icon: '🛠️' },
+};
+
+export interface AlertAcknowledgement {
+  id: string;
+  alert_id: string;
+  user_id: string;
+  display_name: string;
+  acknowledged_at: string;
+}
+
+export interface RegroupPoint {
+  id: string;
+  ride_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  sequence: number;
+  target_arrival?: string | null;
+  notes?: string | null;
+  status: 'open' | 'closed';
+  closed_at?: string | null;
+  arrived_count: number;
+  my_arrived: boolean;
+}
+
 export const ALERT_LABELS: Record<AlertType, string> = {
   emergency: '🚨 Emergency',
   break: '☕ Break',
@@ -339,6 +375,7 @@ export * from './premium';
 export * from './gpx';
 export * from './expenses';
 export * from './stats';
+export * from './safety';
 
 
 

@@ -18,6 +18,14 @@ import {
   type PackRiderProgress,
   calculateLiveRideStats,
   type LiveRideStats,
+  type MechanicalIssueType,
+  MECHANICAL_ISSUE_LABELS,
+  type AlertAcknowledgement,
+  formatEmergencySms,
+  formatMechanicalBreakdownMessage,
+  NATIONAL_EMERGENCY_HELPLINES,
+  SEEDED_BREAKDOWN_DIRECTORY,
+  type VerifiedBreakdownService,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -85,11 +93,19 @@ export default function LiveRideScreen() {
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
   const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
   const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
-  const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean }>>([]);
+  const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean; status?: string; closed_at?: string; total_arrived?: number; total_riders?: number }>>([]);
   const [arrivingRegroupPoint, setArrivingRegroupPoint] = useState<{ id: string; name: string } | null>(null);
   const [sosModal, setSosModal] = useState(false);
   const [announcementModal, setAnnouncementModal] = useState(false);
   const [customAnnouncement, setCustomAnnouncement] = useState('');
+  const [captainDashboardVisible, setCaptainDashboardVisible] = useState(false);
+  const [mechanicalModalVisible, setMechanicalModalVisible] = useState(false);
+  const [selectedMechanicalIssue, setSelectedMechanicalIssue] = useState<MechanicalIssueType>('puncture');
+  const [mechanicalDetails, setMechanicalDetails] = useState('');
+  const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
+  const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
+  const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
+  const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
@@ -246,7 +262,7 @@ export default function LiveRideScreen() {
       setArrivingRegroupPoint(null);
       return;
     }
-    const nearest = regroupPoints.find(rp => !rp.my_arrived && distanceMeters(position, { lat: rp.latitude, lng: rp.longitude }) < 300);
+    const nearest = regroupPoints.find(rp => (!rp.status || rp.status === 'open') && !rp.my_arrived && distanceMeters(position, { lat: rp.latitude, lng: rp.longitude }) < 300);
     setArrivingRegroupPoint(nearest ? { id: nearest.id, name: nearest.name } : null);
   }, [position?.lat, position?.lng, regroupPoints]);
 
@@ -483,6 +499,127 @@ export default function LiveRideScreen() {
     }
   }
 
+  async function acknowledgeAnnouncement(alertId: string) {
+    if (!alertId) return;
+    setAcknowledgedAlertIds(prev => prev.includes(alertId) ? prev : [...prev, alertId]);
+    try {
+      await supabase.rpc('acknowledge_alert', { p_alert_id: alertId });
+      setMessage('👍 Acknowledged announcement');
+    } catch {
+      // Offline fallback: keep local state
+    }
+  }
+
+  async function fetchAcknowledgements(alertId: string) {
+    try {
+      const { data, error } = await supabase.rpc('get_alert_acknowledgements', { p_alert_id: alertId });
+      if (!error && Array.isArray(data)) {
+        setAcknowledgementMap(prev => ({
+          ...prev,
+          [alertId]: {
+            count: data.length,
+            riders: data.map((d: any) => d.display_name || 'Rider'),
+          },
+        }));
+      }
+    } catch {
+      // Offline fallback
+    }
+  }
+
+  async function handleCloseRegroup(pointId: string) {
+    setBusy(true);
+    try {
+      const { error: closeErr } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
+      if (closeErr) throw closeErr;
+      setRegroupPoints(prev => prev.map(p => p.id === pointId ? { ...p, status: 'closed', closed_at: new Date().toISOString() } : p));
+      if (arrivingRegroupPoint?.id === pointId) {
+        setArrivingRegroupPoint(null);
+      }
+      await broadcastAnnouncement('🏁 Regroup point completed. Pack is resuming ride!');
+    } catch (e: any) {
+      setMessage(e?.message || 'Could not close regroup point.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function broadcastPaceAdvisory(paceKmh: number, label: string) {
+    await broadcastAnnouncement(`⚡ Pace Advisory: Target ${paceKmh} km/h (${label})`);
+  }
+
+  async function sendMechanicalBreakdownAlert() {
+    if (!position || !userId) {
+      setMessage('Wait for GPS fix before sending alert.');
+      return;
+    }
+    const msg = formatMechanicalBreakdownMessage({
+      issueType: selectedMechanicalIssue,
+      riderName: nameRef.current,
+      latitude: position.lat,
+      longitude: position.lng,
+      details: mechanicalDetails.trim() || undefined,
+    });
+    setMechanicalModalVisible(false);
+    setMechanicalDetails('');
+    await sendAlert('mechanical', msg);
+    setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
+    Dialog.alert(
+      'Mechanical Assistance',
+      'Alert broadcast to your pack with your live GPS location. Would you like to view roadside assistance & breakdown helplines?',
+      [
+        { text: 'Later', style: 'cancel' },
+        { text: 'View Directory', onPress: () => void loadBreakdownDirectory() },
+      ]
+    );
+  }
+
+  async function loadBreakdownDirectory() {
+    setBreakdownDirectoryVisible(true);
+    try {
+      const { data, error } = await supabase.rpc('get_breakdown_assistance_directory');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        setBreakdownServices(data as VerifiedBreakdownService[]);
+      }
+    } catch {
+      // Fallback already set to SEEDED_BREAKDOWN_DIRECTORY
+    }
+  }
+
+  async function escalateEmergency(alertId?: string) {
+    if (alertId) {
+      try {
+        await supabase.rpc('escalate_emergency_alert', {
+          p_alert_id: alertId,
+          p_notes: 'Rider or Captain requested emergency service escalation',
+        });
+      } catch {
+        // offline fallback
+      }
+    }
+    Dialog.alert(
+      '🚨 Escalate Emergency (112)',
+      'Direct dial National Emergency Helpline 112 immediately?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Call 112', style: 'destructive', onPress: () => void Linking.openURL('tel:112') },
+      ]
+    );
+  }
+
+  useEffect(() => {
+    if (captainDashboardVisible) {
+      const announcements = alerts.filter(a => a.type === 'announcement');
+      for (const a of announcements) {
+        void fetchAcknowledgements(a.id);
+      }
+      void supabase.rpc('get_regroup_points', { p_ride_id: id })
+        .then(({ data, error }) => {
+          if (!error && Array.isArray(data)) setRegroupPoints(data as any);
+        });
+    }
+  }, [captainDashboardVisible, alerts, id]);
+
   function triggerSosWorkflow() {
     setModal(false);
     setSosModal(true);
@@ -656,6 +793,11 @@ export default function LiveRideScreen() {
       <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
         <Text style={s.sosTopButtonText}>SOS</Text>
       </TouchableOpacity>
+      {admin && (
+        <TouchableOpacity accessibilityLabel="Captain Dashboard" style={[s.square, { borderColor: theme.accent }]} onPress={() => setCaptainDashboardVisible(true)}>
+          <Text style={[s.topBarIcon, { color: theme.accent }]}>👑</Text>
+        </TouchableOpacity>
+      )}
       {(admin || ride?.status === 'completed') && (
         <TouchableOpacity accessibilityLabel="Trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
           <Text style={s.topBarIcon}>✎</Text>
@@ -777,7 +919,55 @@ export default function LiveRideScreen() {
           </View>
         </View>
       </TouchableOpacity>
-      {newest && <TouchableOpacity style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}{newest.message ? `: "${newest.message}"` : ''} · tap to dismiss</Text></TouchableOpacity>}
+      {newest && (
+        <View style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>
+                {(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}
+                {newest.message ? `: "${newest.message}"` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setDismissed(ids => [...ids, newest.id])}>
+              <Text style={{ color: theme.muted, fontSize: 16, fontWeight: '700', padding: 4 }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          {newest.type === 'announcement' && (
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              {acknowledgedAlertIds.includes(newest.id) ? (
+                <View style={s.acknowledgedBadge}>
+                  <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={s.acknowledgeButton}
+                  onPress={() => void acknowledgeAnnouncement(newest.id)}
+                >
+                  <Text style={s.acknowledgeButtonText}>👍 Acknowledge</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+          {newest.type === 'emergency' && (
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <TouchableOpacity
+                style={[s.acknowledgeButton, { backgroundColor: theme.danger }]}
+                onPress={() => void escalateEmergency(newest.id)}
+              >
+                <Text style={s.acknowledgeButtonText}>🚨 Escalate / Call 112</Text>
+              </TouchableOpacity>
+              {newest.lat && newest.lng && (
+                <TouchableOpacity
+                  style={[s.acknowledgeButton, { backgroundColor: theme.accent }]}
+                  onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
+                >
+                  <Text style={s.acknowledgeButtonText}>📍 Open Location</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+      )}
       {packFormation.length > 1 && (
         <View style={s.formationContainer}>
           <View style={s.formationHeader}>
@@ -976,11 +1166,24 @@ export default function LiveRideScreen() {
               <Text style={[s.text, { color: theme.accent }]}>📢 Captain Announcement...</Text>
             </TouchableOpacity>
           )}
-          {(Object.keys(ALERT_LABELS) as AlertType[]).filter(t => t !== 'announcement').map(type => (
+          <TouchableOpacity
+            style={[s.alertOption, { backgroundColor: theme.surfaceRaised, borderColor: '#F59E0B', borderWidth: 1 }]}
+            disabled={busy}
+            onPress={() => { setModal(false); setMechanicalModalVisible(true); }}
+          >
+            <Text style={[s.text, { color: '#D97706' }]}>🔧 Mechanical Breakdown...</Text>
+          </TouchableOpacity>
+          {(Object.keys(ALERT_LABELS) as AlertType[]).filter(t => t !== 'announcement' && t !== 'mechanical').map(type => (
             <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}>
               <Text style={s.text}>{ALERT_LABELS[type]}</Text>
             </TouchableOpacity>
           ))}
+          <TouchableOpacity
+            style={[s.alertOption, { borderColor: theme.border, borderWidth: 1 }]}
+            onPress={() => { setModal(false); void loadBreakdownDirectory(); }}
+          >
+            <Text style={s.text}>🛠️ Breakdown Assistance Directory (1033 / RSA)</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
             <Text style={s.text}>Cancel</Text>
           </TouchableOpacity>
@@ -1029,7 +1232,29 @@ export default function LiveRideScreen() {
         </View>
       </View>
     </Modal>
-    <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+    <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}>
+          <Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text>
+          <Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text>
+          <TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}>
+            <Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
+            <Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}>
+            <Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1 }]} onPress={() => { setSosModal(false); void loadBreakdownDirectory(); }}>
+            <Text style={[s.text, { color: theme.accent }]}>🛠️ Highway Assistance & RSA Directory (1033 / 112)</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
 
     {/* Live Ride Statistics Modal */}
     <Modal visible={statsModalVisible} transparent animationType="slide" onRequestClose={() => setStatsModalVisible(false)}>
@@ -1131,6 +1356,277 @@ export default function LiveRideScreen() {
 
             <TouchableOpacity style={s.secondary} onPress={() => setStatsModalVisible(false)}>
               <Text style={s.text}>Close Statistics</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Captain Command Dashboard Modal */}
+    <Modal visible={captainDashboardVisible} transparent animationType="slide" onRequestClose={() => setCaptainDashboardVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: theme.accent }]}>👑 Captain Command Dashboard</Text>
+              <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Lead controls, pack spacing overview, speed advisories, and regroup coordination.</Text>
+
+            {/* Pack Overview Card */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>🏍️ PACK STATUS & SPREAD</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.green }]}>{liveStats.packSummary.ridingCount}</Text>
+                  <Text style={s.statsLabel}>RIDING</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.stoppedCount}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, packFormation.some(p => p.isSeparated) ? { color: theme.danger } : null]}>
+                    {packFormation.filter(p => p.isSeparated).length}
+                  </Text>
+                  <Text style={s.statsLabel}>SEPARATED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.packSpread}</Text>
+                  <Text style={s.statsLabel}>SPREAD</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Pace Advisory Actions */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⚡ BROADCAST PACE ADVISORY</Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(40, 'Curves / Ghats')}>
+                  <Text style={s.paceButtonText}>🏔️ 40 km/h (Ghats)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(60, 'Cruising')}>
+                  <Text style={s.paceButtonText}>🏍️ 60 km/h (Cruising)</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(80, 'Highway')}>
+                  <Text style={s.paceButtonText}>🛣️ 80 km/h (Highway)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(30, 'Wet Road / Rain')}>
+                  <Text style={s.paceButtonText}>🌧️ 30 km/h (Rain)</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Active Regroup Points Coordination */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>📍 REGROUP POINTS COORDINATION</Text>
+              {regroupPoints.length === 0 ? (
+                <Text style={s.muted}>No regroup points set for this ride. Add them in Trip Workspace.</Text>
+              ) : (
+                regroupPoints.map(point => {
+                  const isClosed = point.status === 'closed';
+                  return (
+                    <View key={point.id} style={s.regroupActionItem}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={s.text}>#{point.sequence} {point.name}</Text>
+                        <Text style={s.muted}>
+                          {isClosed ? 'Closed & completed' : `${point.total_arrived || 0}/${participants.length} arrived`}
+                        </Text>
+                      </View>
+                      {isClosed ? (
+                        <View style={s.acknowledgedBadge}>
+                          <Text style={s.acknowledgedText}>Closed</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={s.regroupCloseBtn}
+                          disabled={busy}
+                          onPress={() => void handleCloseRegroup(point.id)}
+                        >
+                          <Text style={s.regroupCloseBtnText}>Close & Resume</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+
+            {/* Announcements & Acknowledgements Monitor */}
+            <View style={s.statsCard}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={s.statsCardHeader}>📢 ANNOUNCEMENT ACKNOWLEDGEMENTS</Text>
+                <TouchableOpacity
+                  style={{ backgroundColor: theme.accentSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
+                  onPress={() => { setCaptainDashboardVisible(false); setAnnouncementModal(true); }}
+                >
+                  <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '800' }}>+ New Broadcast</Text>
+                </TouchableOpacity>
+              </View>
+              {alerts.filter(a => a.type === 'announcement').length === 0 ? (
+                <Text style={s.muted}>No announcements broadcast yet.</Text>
+              ) : (
+                alerts.filter(a => a.type === 'announcement').slice(0, 5).map(alertItem => {
+                  const ack = acknowledgementMap[alertItem.id];
+                  return (
+                    <View key={alertItem.id} style={{ backgroundColor: theme.surface, padding: 10, borderRadius: 8, marginBottom: 6, borderWidth: 1, borderColor: theme.border }}>
+                      <Text style={[s.text, { fontSize: 13 }]}>"{alertItem.message}"</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                        <Text style={s.muted}>{new Date(alertItem.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                        <Text style={[s.statsValue, { fontSize: 12, color: theme.accent }]}>
+                          {ack ? `${ack.count}/${participants.length} acknowledged` : 'Checking...'}
+                        </Text>
+                      </View>
+                      {ack && ack.riders.length > 0 && (
+                        <Text style={[s.muted, { fontSize: 10, marginTop: 2 }]}>
+                          ✓ {ack.riders.join(', ')}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+
+            {/* Quick Link to Breakdown Directory */}
+            <TouchableOpacity
+              style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12 }]}
+              onPress={() => { setCaptainDashboardVisible(false); void loadBreakdownDirectory(); }}
+            >
+              <Text style={[s.text, { color: theme.accent, textAlign: 'center' }]}>
+                🛠️ Open Roadside Breakdown Directory
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setCaptainDashboardVisible(false)}>
+              <Text style={s.text}>Close Dashboard</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Mechanical Breakdown Modal */}
+    <Modal visible={mechanicalModalVisible} transparent animationType="slide" onRequestClose={() => setMechanicalModalVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: '#D97706' }]}>🔧 Mechanical Breakdown Alert</Text>
+              <TouchableOpacity onPress={() => setMechanicalModalVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Notify your pack of bike issues and attach your exact live location so sweep and teammates can assist.</Text>
+
+            <Text style={[s.statsCardHeader, { marginBottom: 8 }]}>SELECT ISSUE TYPE</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+              {(Object.keys(MECHANICAL_ISSUE_LABELS) as MechanicalIssueType[]).map(issue => (
+                <TouchableOpacity
+                  key={issue}
+                  style={[s.issueChip, selectedMechanicalIssue === issue && s.issueChipSelected]}
+                  onPress={() => setSelectedMechanicalIssue(issue)}
+                >
+                  <Text style={[s.issueChipText, selectedMechanicalIssue === issue && s.issueChipTextSelected]}>
+                    {MECHANICAL_ISSUE_LABELS[issue].icon} {MECHANICAL_ISSUE_LABELS[issue].label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[s.statsCardHeader, { marginBottom: 6 }]}>ADDITIONAL DETAILS (OPTIONAL)</Text>
+            <TextInput
+              style={[s.announcementInput, { marginBottom: 14, minHeight: 44 }]}
+              placeholder="e.g. Rear tire flat, need pump or patch kit..."
+              placeholderTextColor={theme.muted}
+              value={mechanicalDetails}
+              onChangeText={setMechanicalDetails}
+              maxLength={140}
+            />
+
+            <TouchableOpacity
+              style={[s.primary, { backgroundColor: '#D97706', marginBottom: 10 }]}
+              disabled={busy}
+              onPress={() => void sendMechanicalBreakdownAlert()}
+            >
+              <Text style={[s.buttonText, { color: '#FFFFFF' }]}>Broadcast Breakdown Alert</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.alertOption, { borderColor: theme.border, borderWidth: 1, marginBottom: 10 }]}
+              onPress={() => { setMechanicalModalVisible(false); void loadBreakdownDirectory(); }}
+            >
+              <Text style={[s.text, { textAlign: 'center' }]}>🛠️ View Roadside Assistance Numbers</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setMechanicalModalVisible(false)}>
+              <Text style={s.text}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Breakdown Directory Modal */}
+    <Modal visible={breakdownDirectoryVisible} transparent animationType="slide" onRequestClose={() => setBreakdownDirectoryVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: theme.accent }]}>🛠️ Roadside Breakdown Directory</Text>
+              <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>24x7 verified highway helplines, motorcycle roadside recovery, and emergency towing.</Text>
+
+            {/* National Helplines */}
+            <Text style={s.statsCardHeader}>🚨 24X7 NATIONAL HELPLINES</Text>
+            {NATIONAL_EMERGENCY_HELPLINES.map((helpline, idx) => (
+              <View key={idx} style={s.directoryCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={s.directoryName}>{helpline.icon} {helpline.name}</Text>
+                    <Text style={s.directoryCoverage}>{helpline.purpose}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={s.callButton}
+                    onPress={() => void Linking.openURL('tel:' + helpline.number)}
+                  >
+                    <Text style={s.callButtonText}>📞 {helpline.number}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            {/* Verified Breakdown Services */}
+            <Text style={[s.statsCardHeader, { marginTop: 10 }]}>🏍️ MOTORCYCLE RSA & TOWING SERVICES</Text>
+            {breakdownServices.map((service, idx) => (
+              <View key={service.id || idx} style={s.directoryCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={s.directoryName}>{service.name}</Text>
+                    <Text style={s.directoryCoverage}>📍 {service.region} · {service.category}</Text>
+                    {(service.notes || service.description) && (
+                      <Text style={s.directoryPhone}>{service.notes || service.description}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={s.callButton}
+                    onPress={() => void Linking.openURL('tel:' + service.phone)}
+                  >
+                    <Text style={s.callButtonText}>📞 Call</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity style={[s.secondary, { marginTop: 8 }]} onPress={() => setBreakdownDirectoryVisible(false)}>
+              <Text style={s.text}>Close Directory</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -1250,4 +1746,23 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   statsGridItem:{alignItems:'center',flex:1},
   statsValue:{color:c.text,fontSize:16,fontWeight:'800'},
   statsLabel:{color:c.muted,fontSize:9,fontWeight:'700',letterSpacing:0.3,marginTop:2},
+  acknowledgeButton: { backgroundColor: c.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  acknowledgeButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  acknowledgedBadge: { backgroundColor: c.greenSoft, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  acknowledgedText: { color: c.green, fontSize: 12, fontWeight: '800' },
+  regroupActionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.surface, padding: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  regroupCloseBtn: { backgroundColor: c.green, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  regroupCloseBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  paceButton: { flex: 1, backgroundColor: c.surfaceRaised, padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  paceButtonText: { color: c.text, fontSize: 11, fontWeight: '700' },
+  issueChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: 6 },
+  issueChipSelected: { backgroundColor: c.accentSoft, borderColor: c.accent },
+  issueChipText: { color: c.text, fontSize: 12, fontWeight: '600' },
+  issueChipTextSelected: { color: c.accent, fontWeight: '800' },
+  directoryCard: { backgroundColor: c.surfaceRaised, padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  directoryName: { color: c.text, fontSize: 14, fontWeight: '800' },
+  directoryCoverage: { color: c.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  directoryPhone: { color: c.muted, fontSize: 12, marginTop: 2 },
+  callButton: { backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  callButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
 });

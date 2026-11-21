@@ -982,4 +982,109 @@ BEGIN
   PERFORM public.delete_trip(test_ride_id);
 END $$;
 
+-- RT-009: Phase 4 & Phase 5 - Regroup point closure, announcement acknowledgement, emergency escalation, and breakdown assistance directory
+DO $$
+DECLARE
+  rider_lead UUID := '00000000-0000-0000-0000-000000000091';
+  rider_tail UUID := '00000000-0000-0000-0000-000000000092';
+  test_ride_id UUID;
+  test_point_id UUID;
+  test_alert_id UUID;
+  test_emerg_id UUID;
+  v_code TEXT;
+  v_ack_count INT;
+  v_dir_count INT;
+BEGIN
+  -- Setup riders
+  INSERT INTO public.profiles (id, username, display_name)
+  VALUES
+    (rider_lead, 'lead_captain_91', 'Lead Captain 91'),
+    (rider_tail, 'tail_sweep_92', 'Tail Sweep 92')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 1. Create Trip & Regroup Point
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  test_ride_id := public.create_trip_plan(
+    'Western Ghats Tour', 'Monsoon expedition',
+    'Bangalore', 'Chikmagalur',
+    ARRAY[77.5946, 12.9716]::double precision[],
+    ARRAY[75.7720, 13.3161]::double precision[],
+    NULL, 'touring', '2026-08-10'::date, '2026-08-12'::date,
+    250000, 18000, 'invite_only'
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
+
+  test_point_id := public.add_regroup_point(test_ride_id, 'Hassan Bypass Junction', 13.0068, 76.1004, 1, NULL, 'Refuel & chai');
+  IF test_point_id IS NULL THEN
+    RAISE EXCEPTION 'add_regroup_point failed to return point id';
+  END IF;
+
+  -- 2. Tail Sweep Joins Ride
+  PERFORM set_config('request.jwt.claim.sub', rider_tail::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- Tail confirms arrival
+  PERFORM public.confirm_regroup_arrival(test_point_id);
+
+  -- 3. Leader closes regroup point
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  PERFORM public.close_regroup_point(test_point_id);
+
+  IF (SELECT status FROM public.trip_regroup_points WHERE id = test_point_id) != 'closed' THEN
+    RAISE EXCEPTION 'close_regroup_point failed to mark status as closed';
+  END IF;
+
+  IF (SELECT closed_at FROM public.trip_regroup_points WHERE id = test_point_id) IS NULL THEN
+    RAISE EXCEPTION 'close_regroup_point failed to set closed_at timestamp';
+  END IF;
+
+  -- 4. Captain broadcasts announcement alert
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (test_ride_id, rider_lead, 'announcement', 'Rain on Charmadi Ghat — drop pace to 35 km/h', 13.05, 75.85)
+  RETURNING id INTO test_alert_id;
+
+  -- Tail acknowledges announcement
+  PERFORM set_config('request.jwt.claim.sub', rider_tail::text, true);
+  PERFORM public.acknowledge_alert(test_alert_id);
+
+  SELECT count(*) INTO v_ack_count
+  FROM public.get_alert_acknowledgements(test_alert_id);
+
+  IF v_ack_count != 1 THEN
+    RAISE EXCEPTION 'get_alert_acknowledgements failed to return tail rider acknowledgement';
+  END IF;
+
+  -- Duplicate acknowledgement is idempotent
+  PERFORM public.acknowledge_alert(test_alert_id);
+  SELECT count(*) INTO v_ack_count
+  FROM public.get_alert_acknowledgements(test_alert_id);
+  IF v_ack_count != 1 THEN
+    RAISE EXCEPTION 'duplicate acknowledge_alert created duplicate row instead of ON CONFLICT DO NOTHING';
+  END IF;
+
+  -- 5. Emergency escalation
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (test_ride_id, rider_tail, 'emergency', 'Fallen tree on turn 14 — medical required', 13.06, 75.86)
+  RETURNING id INTO test_emerg_id;
+
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  PERFORM public.escalate_emergency_alert(test_emerg_id, 'Escalated to local 108 ambulance and forest dept');
+
+  IF (SELECT is_escalated FROM public.alerts WHERE id = test_emerg_id) != true THEN
+    RAISE EXCEPTION 'escalate_emergency_alert failed to set is_escalated';
+  END IF;
+
+  -- 6. Breakdown assistance directory query
+  SELECT count(*) INTO v_dir_count
+  FROM public.get_breakdown_assistance_directory();
+
+  IF v_dir_count < 3 THEN
+    RAISE EXCEPTION 'get_breakdown_assistance_directory failed to return seeded breakdown services';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
 RESET ROLE;

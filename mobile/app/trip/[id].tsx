@@ -45,7 +45,7 @@ type Trip = {
 };
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; provider_place_id?: string | null; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
-type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
+type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean; status?: string; closed_at?: string | null };
 type Rider = { user_id: string; display_name: string; role: RideParticipantRole; is_active: boolean; last_seen: string | null; attendance_status?: AttendanceStatus };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; price_currency: string; trip_day_id?: string | null };
 
@@ -952,6 +952,16 @@ export default function TripWorkspaceScreen() {
     } catch (e: any) { setError(e?.message || 'Could not confirm arrival.'); }
     finally { setSaving(false); }
   }
+  async function closeRegroupPoint(pointId: string) {
+    setSaving(true); setError('');
+    try {
+      const { error: closeError } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
+      if (closeError) throw closeError;
+      await load();
+      Alert.alert('Regroup Point Closed', 'The regroup point has been closed and the pack notified.');
+    } catch (e: any) { setError(e?.message || 'Could not close regroup point.'); }
+    finally { setSaving(false); }
+  }
   async function inviteRider() {
     setSaving(true); setError('');
     try {
@@ -1325,15 +1335,34 @@ export default function TripWorkspaceScreen() {
 
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
-        {regroupPoints.map(point => <View key={point.id} style={styles.riderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.pointName}>{point.name}</Text>
-            <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
-          </View>
-          <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
-            <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
-          </TouchableOpacity>
-        </View>)}
+        {regroupPoints.map(point => {
+          const isClosed = point.status === 'closed';
+          return (
+            <View key={point.id} style={styles.riderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.pointName}>{point.name}</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: isClosed ? theme.muted : theme.green }}>
+                    {isClosed ? 'CLOSED ✓' : 'OPEN'}
+                  </Text>
+                </View>
+                <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {!isClosed && (
+                  <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
+                    <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
+                  </TouchableOpacity>
+                )}
+                {isAdmin && !isClosed && (
+                  <TouchableOpacity style={[styles.smallButton, { borderColor: '#10B981' }]} disabled={saving} onPress={() => void closeRegroupPoint(point.id)}>
+                    <Text style={[styles.smallButtonText, { color: '#10B981' }]}>Close Point</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })}
         {isAdmin && <>
           <Text style={styles.label}>Add regroup point (coordinates)</Text>
           <TextInput style={styles.input} value={regroupName} onChangeText={setRegroupName} placeholder="Meetup / regroup location" placeholderTextColor="#77809a" />

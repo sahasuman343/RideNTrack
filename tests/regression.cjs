@@ -1377,6 +1377,114 @@ test('live ride screen integrates complete live ride statistics and touring batt
   assert.match(rideSource, /GPS signal restored/);
 });
 
+test('phase 4 & 5 safety and emergency pure functions format messages and calculate crash signatures', () => {
+  // 1. Emergency SMS formatting
+  const sms = shared.formatEmergencySms({
+    riderName: 'Vikram',
+    motorcycleModel: 'Himalayan 450',
+    rideName: 'Spiti Expedition',
+    latitude: 32.2461,
+    longitude: 78.0349,
+    emergencyNote: 'Hit gravel on descent, dislocated shoulder',
+  });
+  assert.match(sms, /EMERGENCY ALERT: Vikram riding Himalayan 450 on trip "Spiti Expedition"/);
+  assert.match(sms, /Note: "Hit gravel on descent, dislocated shoulder"/);
+  assert.match(sms, /32\.24610, 78\.03490/);
+  assert.match(sms, /https:\/\/maps\.google\.com\/\?q=32\.24610,78\.03490/);
+
+  // 2. Mechanical Breakdown formatting
+  const mechPuncture = shared.formatMechanicalBreakdownMessage({
+    riderName: 'Pooja',
+    issueType: 'puncture',
+    latitude: 12.9716,
+    longitude: 77.5946,
+    details: 'Rear tubeless tire flat near toll gate',
+  });
+  assert.match(mechPuncture, /Mechanical Issue: 🛞 Tire Puncture/);
+  assert.match(mechPuncture, /Rear tubeless tire flat near toll gate/);
+  assert.match(mechPuncture, /\(Pooja\)/);
+
+  const mechChain = shared.formatMechanicalBreakdownMessage({
+    riderName: 'Arjun',
+    issueType: 'chain',
+    latitude: 13.0,
+    longitude: 77.5,
+  });
+  assert.match(mechChain, /Mechanical Issue: ⛓️ Chain \/ Sprocket Problem \(Arjun\)/);
+
+  // 3. Crash detection heuristic (future research telemetry evaluator)
+  const severeCrash = shared.evaluateCrashSignature({
+    accelerationG: 5.8, // severe impact
+    gyroAngularVelocityDegPerSec: 420, // rapid spin
+    postImpactSpeedKmh: 0.5, // stopped
+    bikeLeanAngleDeg: 82, // bike flat on side
+  });
+  assert.equal(severeCrash.isCandidate, true);
+  assert.equal(severeCrash.confidence, 'high');
+  assert.equal(severeCrash.reasons.length, 4);
+
+  const normalRiding = shared.evaluateCrashSignature({
+    accelerationG: 1.2,
+    gyroAngularVelocityDegPerSec: 45,
+    postImpactSpeedKmh: 65,
+    bikeLeanAngleDeg: 22,
+  });
+  assert.equal(normalRiding.isCandidate, false);
+  assert.equal(normalRiding.confidence, 'none');
+  assert.equal(normalRiding.reasons.length, 0);
+
+  // 4. Directory constants
+  assert.ok(Array.isArray(shared.NATIONAL_EMERGENCY_HELPLINES));
+  assert.ok(shared.NATIONAL_EMERGENCY_HELPLINES.some(h => h.number === '112'));
+  assert.ok(shared.NATIONAL_EMERGENCY_HELPLINES.some(h => h.number === '1033'));
+
+  assert.ok(Array.isArray(shared.SEEDED_BREAKDOWN_DIRECTORY));
+  assert.ok(shared.SEEDED_BREAKDOWN_DIRECTORY.some(s => s.phone === '1033'));
+  assert.ok(shared.SEEDED_BREAKDOWN_DIRECTORY.some(s => s.name.includes('Royal Enfield')));
+});
+
+test('phase 4 & 5 migration defines regroup closure, acknowledgements, escalation, and breakdown directory', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/024_phase4_and_phase5_smart_coordination_and_safety.sql'), 'utf8');
+  assert.match(migration, /public\.alert_acknowledgements/);
+  assert.match(migration, /public\.breakdown_assistance_directory/);
+  assert.match(migration, /is_escalated BOOLEAN NOT NULL DEFAULT false/);
+  assert.match(migration, /escalated_at TIMESTAMPTZ DEFAULT NULL/);
+  assert.match(migration, /close_regroup_point/);
+  assert.match(migration, /acknowledge_alert/);
+  assert.match(migration, /get_alert_acknowledgements/);
+  assert.match(migration, /escalate_emergency_alert/);
+  assert.match(migration, /get_breakdown_assistance_directory/);
+  assert.match(migration, /NHAI 24x7 Highway Emergency Towing/);
+});
+
+test('trip workspace exposes regroup point closure controls for trip captains', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  assert.match(tripSource, /closeRegroupPoint/);
+  assert.match(tripSource, /close_regroup_point/);
+  assert.match(tripSource, /Close Point/);
+  assert.match(tripSource, /point\.status === 'closed'/);
+});
+
+test('live ride screen integrates Captain Dashboard, announcement acknowledgements, mechanical alerts, and breakdown directory', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /captainDashboardVisible/);
+  assert.match(rideSource, /Captain Command Dashboard/);
+  assert.match(rideSource, /acknowledgeAnnouncement/);
+  assert.match(rideSource, /acknowledge_alert/);
+  assert.match(rideSource, /👍 Acknowledge/);
+  assert.match(rideSource, /✓ Acknowledged/);
+  assert.match(rideSource, /handleCloseRegroup/);
+  assert.match(rideSource, /close_regroup_point/);
+  assert.match(rideSource, /broadcastPaceAdvisory/);
+  assert.match(rideSource, /sendMechanicalBreakdownAlert/);
+  assert.match(rideSource, /Mechanical Breakdown Alert/);
+  assert.match(rideSource, /breakdownDirectoryVisible/);
+  assert.match(rideSource, /Roadside Breakdown Directory/);
+  assert.match(rideSource, /escalateEmergency/);
+  assert.match(rideSource, /escalate_emergency_alert/);
+});
+
+
 
 
 
