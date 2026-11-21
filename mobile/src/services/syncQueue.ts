@@ -55,7 +55,31 @@ async function flush() {
     const { data, error } = await supabase.rpc('bulk_insert_location_updates', {
       updates: batch.map(({ id, ...item }) => ({ ...item, client_id: id })),
     });
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (error.message?.includes('Invalid or unauthorized')) {
+        let hasRemainingErrors = false;
+        for (const item of batch) {
+          const res = await supabase.rpc('bulk_insert_location_updates', {
+            updates: [{ ...item, client_id: item.id }],
+          });
+          if (!res.error && res.data === 1) {
+            await clearQueuedItems(userId, [item.id!]);
+          } else if (res.error?.message?.includes('Invalid or unauthorized')) {
+            const currentSession = (await supabase.auth.getSession().catch(() => null))?.data?.session;
+            if (currentSession?.user?.id === userId) {
+              await clearQueuedItems(userId, [item.id!]);
+            } else {
+              hasRemainingErrors = true;
+            }
+          } else {
+            hasRemainingErrors = true;
+          }
+        }
+        if (hasRemainingErrors) throw new Error(error.message);
+        continue;
+      }
+      throw new Error(error.message);
+    }
     if (data !== batch.length) throw new Error('Incomplete server acknowledgement. GPS data kept locally.');
     await clearQueuedItems(userId, batch.map(item => item.id!));
   }

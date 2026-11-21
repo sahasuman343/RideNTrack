@@ -27,7 +27,7 @@ export interface Ride {
   origin_coords: [number, number]; // [lng, lat]
   destination_coords: [number, number];
   route_geometry?: { type: 'Feature'; geometry: { type: 'LineString'; coordinates: number[][] }; properties: Record<string, unknown> }; // GeoJSON LineString
-  status: 'planned' | 'active' | 'completed';
+  status: 'planned' | 'active' | 'completed' | 'archived';
   description?: string | null;
   trip_type?: 'solo' | 'group' | 'weekend' | 'touring' | 'expedition';
   visibility?: 'private' | 'invite_only' | 'public';
@@ -37,6 +37,32 @@ export interface Ride {
   estimated_duration_seconds?: number | null;
   route_deviation_threshold_meters?: number;
   rider_behind_threshold_meters?: number;
+  max_participants?: number | null;
+  ride_rules?: string | null;
+  created_at: string;
+}
+
+export type SavedPlaceCategory = 'viewpoint' | 'pass' | 'fuel' | 'food' | 'stay' | 'repair' | 'other';
+
+export const SAVED_PLACE_CATEGORIES: Record<SavedPlaceCategory, { label: string; icon: string }> = {
+  viewpoint: { label: 'Scenic Viewpoint', icon: '🌄' },
+  pass: { label: 'Mountain Pass', icon: '⛰️' },
+  fuel: { label: 'Fuel Bunk', icon: '⛽' },
+  food: { label: 'Dhaba & Food', icon: '🍲' },
+  stay: { label: 'Stay / Camp', icon: '🏕️' },
+  repair: { label: 'Mechanic / Spares', icon: '🔧' },
+  other: { label: 'Point of Interest', icon: '📍' },
+};
+
+export interface UserSavedPlace {
+  id: string;
+  user_id: string;
+  name: string;
+  category: SavedPlaceCategory;
+  address?: string | null;
+  latitude: number;
+  longitude: number;
+  notes?: string | null;
   created_at: string;
 }
 
@@ -108,8 +134,49 @@ export interface TripStay {
   notes?: string | null;
 }
 
-export type RideParticipantRole = 'leader' | 'sweep' | 'rider';
+export type RideParticipantRole = 'captain' | 'co-captain' | 'marshal' | 'sweeper' | 'member' | 'leader' | 'sweep' | 'rider';
 export type RiderConnectionStatus = 'live' | 'stale' | 'offline';
+
+export const ROLE_LABELS: Record<RideParticipantRole, { title: string; icon: string }> = {
+  captain: { title: 'Captain', icon: '👑' },
+  'co-captain': { title: 'Co-Captain', icon: '🧭' },
+  marshal: { title: 'Marshal', icon: '🛡️' },
+  sweeper: { title: 'Sweeper', icon: '🧹' },
+  member: { title: 'Member', icon: '🏍️' },
+  leader: { title: 'Captain', icon: '👑' },
+  sweep: { title: 'Sweeper', icon: '🧹' },
+  rider: { title: 'Member', icon: '🏍️' },
+};
+
+export type TripChecklistCategory = 'bike_inspection' | 'riding_gear' | 'documents' | 'emergency_kit' | 'fuel_tires';
+
+export const CHECKLIST_CATEGORY_LABELS: Record<TripChecklistCategory, { title: string; icon: string }> = {
+  fuel_tires: { title: 'Fuel & Tires', icon: '⛽' },
+  bike_inspection: { title: 'Motorcycle Inspection', icon: '🔧' },
+  riding_gear: { title: 'Riding Gear & Safety', icon: '🪖' },
+  documents: { title: 'Essential Documents', icon: '📄' },
+  emergency_kit: { title: 'Emergency & Spares', icon: '🩹' },
+};
+
+export interface TripChecklistItem {
+  id: string;
+  category: TripChecklistCategory;
+  title: string;
+  description?: string | null;
+  is_mandatory: boolean;
+  sequence: number;
+  my_completed: boolean;
+  completed_count: number;
+}
+
+export type AttendanceStatus = 'confirmed' | 'tentative' | 'declined' | 'attended';
+
+export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, { label: string; icon: string; color: string }> = {
+  confirmed: { label: 'Going', icon: '✅', color: '#22c55e' },
+  tentative: { label: 'Maybe', icon: '🤔', color: '#f59e0b' },
+  declined: { label: 'Cannot Go', icon: '❌', color: '#ef4444' },
+  attended: { label: 'Attended', icon: '🏁', color: '#3b82f6' },
+};
 
 export interface RideParticipant {
   id: string;
@@ -121,6 +188,7 @@ export interface RideParticipant {
   joined_at: string;
   last_seen?: string | null;
   connection_status?: RiderConnectionStatus;
+  attendance_status?: AttendanceStatus;
 }
 
 export interface LocationUpdate {
@@ -149,7 +217,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement';
   message?: string;
   lat: number;
   lng: number;
@@ -170,6 +238,42 @@ export interface BufferedAlert {
 
 export type AlertType = Alert['type'];
 
+export type MechanicalIssueType = 'puncture' | 'clutch_cable' | 'battery' | 'chain' | 'engine' | 'fuel_empty' | 'accident' | 'other';
+
+export const MECHANICAL_ISSUE_LABELS: Record<MechanicalIssueType, { label: string; icon: string }> = {
+  puncture: { label: 'Tire Puncture', icon: '🛞' },
+  clutch_cable: { label: 'Clutch / Throttle Cable', icon: '🏍️' },
+  chain: { label: 'Chain / Sprocket Problem', icon: '⛓️' },
+  battery: { label: 'Battery / Electrical Failure', icon: '🔋' },
+  fuel_empty: { label: 'Out of Fuel', icon: '⛽' },
+  engine: { label: 'Engine Overheating / Oil Leak', icon: '🔧' },
+  accident: { label: 'Minor Fall / Crash', icon: '⚠️' },
+  other: { label: 'General Breakdown', icon: '🛠️' },
+};
+
+export interface AlertAcknowledgement {
+  id: string;
+  alert_id: string;
+  user_id: string;
+  display_name: string;
+  acknowledged_at: string;
+}
+
+export interface RegroupPoint {
+  id: string;
+  ride_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  sequence: number;
+  target_arrival?: string | null;
+  notes?: string | null;
+  status: 'open' | 'closed';
+  closed_at?: string | null;
+  arrived_count: number;
+  my_arrived: boolean;
+}
+
 export const ALERT_LABELS: Record<AlertType, string> = {
   emergency: '🚨 Emergency',
   break: '☕ Break',
@@ -178,6 +282,7 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   route_deviation: '🧭 Route Deviation',
   rider_behind: '🏍️ Rider Behind',
   regroup: '📢 Regroup Now',
+  announcement: '📢 Captain Announcement',
 };
 
 export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
@@ -267,6 +372,10 @@ export function buildGoogleMapsNavigationUrl(destination: {
 export * from './touring';
 export * from './journal';
 export * from './premium';
+export * from './gpx';
+export * from './expenses';
+export * from './stats';
+export * from './safety';
 
 
 
