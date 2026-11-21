@@ -1087,4 +1087,144 @@ BEGIN
   PERFORM public.delete_trip(test_ride_id);
 END $$;
 
+-- RT-010: CodeRabbit Security and Data Integrity Regression Checks (PR #7)
+DO $$
+DECLARE
+  v_admin UUID := '00000000-0000-0000-0000-000000000101';
+  v_member UUID := '00000000-0000-0000-0000-000000000102';
+  v_outsider UUID := '00000000-0000-0000-0000-000000000103';
+  v_trip_id UUID;
+  v_code TEXT;
+  v_spoof_blocked BOOLEAN := false;
+  v_seed_blocked BOOLEAN := false;
+  v_split_blocked BOOLEAN := false;
+  v_self_transfer_blocked BOOLEAN := false;
+  v_summary JSONB;
+  v_dup_trip_id UUID;
+  v_sanitized_stay public.trip_stays%ROWTYPE;
+BEGIN
+  -- Setup test users
+  INSERT INTO public.profiles (id, username, display_name) VALUES
+    (v_admin, 'admin_user_101', 'Admin 101'),
+    (v_member, 'member_user_102', 'Member 102'),
+    (v_outsider, 'outsider_user_103', 'Outsider 103')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 1. Create Trip & Member
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_trip_id := public.create_trip_plan(
+    'CR Test Trip', 'Audit fixes trip',
+    'Bangalore', 'Mysore',
+    ARRAY[77.5946, 12.9716]::double precision[],
+    ARRAY[76.6394, 12.2958]::double precision[],
+    NULL, 'touring', '2026-09-01'::date, '2026-09-02'::date,
+    150000, 10800, 'public'
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = v_trip_id;
+
+  -- Add a stay with sensitive booking info
+  PERFORM public.add_trip_stay(
+    v_trip_id,
+    '{"name":"Grand Palace Stay","stay_type":"hotel","price_amount":3500,"booking_reference":"SECRET-PNR-999","contact_phone":"+919999911111","notes":"Private gate passcode: 1234"}'::jsonb
+  );
+
+  -- Member joins
+  PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- 2. Test Announcement Spoofing: Member attempts to insert 'announcement' alert
+  BEGIN
+    INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+    VALUES (v_trip_id, v_member, 'announcement', 'Spoofed captain alert', 12.5, 77.0);
+  EXCEPTION WHEN OTHERS THEN
+    v_spoof_blocked := true;
+  END;
+
+  IF NOT v_spoof_blocked THEN
+    RAISE EXCEPTION 'Non-admin member was able to insert announcement alert';
+  END IF;
+
+  -- Admin CAN insert announcement alert
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (v_trip_id, v_admin, 'announcement', 'Legitimate captain alert', 12.5, 77.0);
+
+  -- 3. Checklist Authorization: Outsider cannot seed checklists
+  PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
+  BEGIN
+    PERFORM public.seed_default_trip_checklists(v_trip_id);
+  EXCEPTION WHEN OTHERS THEN
+    v_seed_blocked := true;
+  END;
+
+  IF NOT v_seed_blocked THEN
+    RAISE EXCEPTION 'Outsider was able to seed checklists into another trip';
+  END IF;
+
+  -- Admin can seed checklists
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  PERFORM public.seed_default_trip_checklists(v_trip_id);
+
+  -- 4. Self-transfer Leadership is blocked
+  BEGIN
+    PERFORM public.transfer_trip_leadership(v_trip_id, v_admin);
+  EXCEPTION WHEN OTHERS THEN
+    v_self_transfer_blocked := true;
+  END;
+
+  IF NOT v_self_transfer_blocked THEN
+    RAISE EXCEPTION 'transfer_trip_leadership permitted transfer to self';
+  END IF;
+
+  -- 5. Ineligible split user in add_trip_expense is rejected
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  BEGIN
+    PERFORM public.add_trip_expense(
+      v_trip_id, 'Dinner', 1000, 'food',
+      ARRAY[v_admin, v_outsider]::uuid[], 'Dinner split'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    v_split_blocked := true;
+  END;
+
+  IF NOT v_split_blocked THEN
+    RAISE EXCEPTION 'add_trip_expense accepted non-member outsider in split';
+  END IF;
+
+  -- Valid split works
+  PERFORM public.add_trip_expense(
+    v_trip_id, 'Highway Toll', 200, 'toll',
+    ARRAY[v_admin, v_member]::uuid[], 'Fastag toll'
+  );
+
+  -- Member deactivates / leaves trip
+  PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+  PERFORM public.leave_ride(v_trip_id);
+
+  -- Summary still retains member balance
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_summary := public.get_trip_expense_summary(v_trip_id);
+  IF NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(v_summary->'participant_balances') elem
+    WHERE elem->>'user_id' = v_member::text AND (elem->>'share')::numeric = 100
+  ) THEN
+    RAISE EXCEPTION 'get_trip_expense_summary excluded former participant with pending balance';
+  END IF;
+
+  -- 6. Privacy: Outsider duplicates public trip -> Stay booking details are sanitized
+  PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
+  v_dup_trip_id := public.duplicate_trip(v_trip_id, 'Outsider Clone Trip');
+
+  SELECT * INTO v_sanitized_stay FROM public.trip_stays WHERE ride_id = v_dup_trip_id;
+  IF v_sanitized_stay.booking_reference IS NOT NULL OR v_sanitized_stay.contact_phone IS NOT NULL OR v_sanitized_stay.notes IS NOT NULL THEN
+    RAISE EXCEPTION 'duplicate_trip leaked private stay booking details to non-member cloner';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(v_dup_trip_id);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  PERFORM public.delete_trip(v_trip_id);
+END $$;
+
 RESET ROLE;

@@ -466,22 +466,36 @@ export default function LiveRideScreen() {
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not update ride.'); }
     finally { setBusy(false); }
   }
-  async function sendAlert(type: AlertType, customMessage?: string) {
-    if (!position || !userId || isStale(position.timestamp)) { setMessage('Wait for a fresh GPS fix before sending an alert.'); return; }
+  async function sendAlert(type: AlertType, customMessage?: string): Promise<boolean> {
+    if (!position || !userId || isStale(position.timestamp)) {
+      setMessage('Wait for a fresh GPS fix before sending an alert.');
+      return false;
+    }
     setBusy(true);
     try {
       await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
-      setModal(false); await sync.flushQueue(); await refresh();
-    } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not save alert.'); }
-    finally { setBusy(false); }
+      setModal(false);
+      await sync.flushQueue();
+      await refresh();
+      return true;
+    } catch(e) {
+      setMessage(e instanceof Error ? e.message : 'Could not save alert.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function broadcastAnnouncement(msg: string) {
-    if (!msg || !msg.trim()) return;
-    setAnnouncementModal(false);
-    setCustomAnnouncement('');
-    await sendAlert('announcement', msg.trim());
-    setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
+  async function broadcastAnnouncement(msg: string): Promise<boolean> {
+    if (!msg || !msg.trim()) return false;
+    const ok = await sendAlert('announcement', msg.trim());
+    if (ok) {
+      setAnnouncementModal(false);
+      setCustomAnnouncement('');
+      setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
+      return true;
+    }
+    return false;
   }
 
   async function confirmArrival(regroupPointId: string) {

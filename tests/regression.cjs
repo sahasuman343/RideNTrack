@@ -382,6 +382,7 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
     react,
     '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
     '../lib/offlineQueue': { clearQueuedItemsForUser: async () => {} },
+    '../lib/tripCache': { clearAllCachedTripsForUser: async () => {} },
     '../lib/supabase': { supabase: {
       auth: {
         getSession: () => new Promise(resolve => { resolveStartup = resolve; }),
@@ -1482,6 +1483,170 @@ test('live ride screen integrates Captain Dashboard, announcement acknowledgemen
   assert.match(rideSource, /Roadside Breakdown Directory/);
   assert.match(rideSource, /escalateEmergency/);
   assert.match(rideSource, /escalate_emergency_alert/);
+});
+
+test('migration 025 addresses all CodeRabbit security, concurrency, and integrity findings', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/025_coderabbit_review_fixes.sql'), 'utf8');
+
+  // 1. Alert type spoofing restriction on INSERT policy
+  assert.match(migration, /DROP POLICY IF EXISTS "Members insert own alerts" ON public\.alerts;/);
+  assert.match(migration, /CREATE POLICY "Members insert own alerts" ON public\.alerts/);
+  assert.match(migration, /type IS DISTINCT FROM 'announcement'\s+OR EXISTS/);
+
+  // 2. Checklist initialization caller authorization
+  assert.match(migration, /seed_default_trip_checklists/);
+  assert.match(migration, /Only trip captain can seed checklists/);
+
+  // 3. Leadership transfer & member removal concurrency locking and self-transfer guard
+  assert.match(migration, /transfer_trip_leadership/);
+  assert.match(migration, /FOR UPDATE/);
+  assert.match(migration, /Cannot transfer leadership to yourself/);
+  assert.match(migration, /remove_trip_participant/);
+
+  // 4. Invitation rejection recipient validation
+  assert.match(migration, /reject_trip_invitation/);
+  assert.match(migration, /lower\(u\.email\)\s+INTO v_email\s+FROM auth\.users u\s+WHERE u\.id = auth\.uid\(\)/);
+
+  // 5. Duplicate trip sanitization for non-members
+  assert.match(migration, /duplicate_trip/);
+  assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.booking_reference ELSE NULL END/);
+  assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.contact_phone ELSE NULL END/);
+  assert.match(migration, /CASE WHEN v_is_member THEN v_stay_record\.notes ELSE NULL END/);
+
+  // 6. Expense split validation for active trip participants
+  assert.match(migration, /add_trip_expense/);
+  assert.match(migration, /All split participants must be active members of this trip/);
+
+  // 7. Retention of inactive debtors and payers in expense summary
+  assert.match(migration, /get_trip_expense_summary/);
+  assert.match(migration, /SELECT e\.payer_id AS user_id FROM public\.trip_expenses e/);
+  assert.match(migration, /SELECT s\.user_id FROM public\.trip_expense_splits s/);
+
+  // 8. Delete user account caller validation
+  assert.match(migration, /delete_user_account/);
+  assert.match(migration, /p_expected_user_id uuid DEFAULT NULL/i);
+  assert.match(migration, /Target user ID does not match authenticated identity/);
+});
+
+test('trip cache scopes stored itineraries by user ID to prevent cross-account leaks on shared devices', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  const adapter = {
+    execAsync: async sql => sqlite.exec(sql),
+    runAsync: async (sql, ...args) => sqlite.prepare(sql).run(...args),
+    getFirstAsync: async (sql, ...args) => sqlite.prepare(sql).get(...args) || null,
+    getAllAsync: async (sql, ...args) => sqlite.prepare(sql).all(...args),
+  };
+
+  const cache = loader({
+    'expo-sqlite': { openDatabaseAsync: async () => adapter },
+  })('mobile/src/lib/tripCache.ts');
+
+  const tripPayload = {
+    trip: { id: 'ride-123', name: 'Goa Coastal Run' },
+    waypoints: [],
+    stages: [],
+    days: [],
+    stays: [{ id: 'stay-1', name: 'Beach Resort', booking_reference: 'SECRET-CONFIRMATION-999' }],
+  };
+
+  // User A caches the trip
+  await cache.saveCachedTrip('ride-123', tripPayload, 'user-a');
+
+  // User B tries to read the same rideId
+  const userBView = await cache.getCachedTrip('ride-123', 'user-b');
+  assert.equal(userBView, null, 'User B must not see User A cached trip data');
+
+  // User A can read their cached trip
+  const userAView = await cache.getCachedTrip('ride-123', 'user-a');
+  assert.ok(userAView);
+  assert.equal(userAView.trip.name, 'Goa Coastal Run');
+  assert.equal(userAView.stays[0].booking_reference, 'SECRET-CONFIRMATION-999');
+
+  // User B caches a different itinerary for the same rideId
+  await cache.saveCachedTrip('ride-123', {
+    ...tripPayload,
+    trip: { id: 'ride-123', name: 'User B Version' },
+  }, 'user-b');
+
+  assert.equal((await cache.getCachedTrip('ride-123', 'user-b'))?.trip.name, 'User B Version');
+  assert.equal((await cache.getCachedTrip('ride-123', 'user-a'))?.trip.name, 'Goa Coastal Run');
+
+  // Clearing all cached trips for User A removes User A data while keeping User B intact
+  await cache.clearAllCachedTripsForUser('user-a');
+  assert.equal(await cache.getCachedTrip('ride-123', 'user-a'), null);
+  assert.equal((await cache.getCachedTrip('ride-123', 'user-b'))?.trip.name, 'User B Version');
+
+  sqlite.close();
+});
+
+test('auth hook verifies target user ID, invokes delete_user_account RPC with expected user id, and clears cached trips', () => {
+  const authSource = fs.readFileSync(path.resolve('mobile/src/hooks/useAuth.tsx'), 'utf8');
+
+  // Explicit session identity check before invoking RPC
+  assert.match(authSource, /session\.user\.id\s*!==\s*userId/);
+  assert.match(authSource, /Account mismatch during deletion request/);
+
+  // Calls RPC with expected user ID parameter
+  assert.match(authSource, /supabase\.rpc\('delete_user_account',\s*\{\s*p_expected_user_id:\s*userId\s*\}\)/);
+
+  // Clears user-scoped trip cache and queued items
+  assert.match(authSource, /clearAllCachedTripsForUser\(userId\)/);
+  assert.match(authSource, /clearQueuedItemsForUser\(userId\)/);
+
+  // Fallback sign out on error
+  assert.match(authSource, /await supabase\.auth\.signOut\(/);
+});
+
+test('live ride broadcast announcement strictly validates GPS fix and sendAlert outcome before reporting success', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+
+  // sendAlert returns boolean
+  assert.match(rideSource, /async function sendAlert\(type: AlertType, customMessage\?: string\): Promise<boolean>/);
+  assert.match(rideSource, /if\s*\(!position \|\| !userId \|\| isStale\(position\.timestamp\)\)\s*\{\s*setMessage\('Wait for a fresh GPS fix before sending an alert\.'\);\s*return false;\s*\}/);
+
+  // broadcastAnnouncement validates trimmed message and sendAlert success
+  assert.match(rideSource, /async function broadcastAnnouncement\(msg: string\): Promise<boolean>/);
+  assert.match(rideSource, /const ok = await sendAlert\('announcement', msg\.trim\(\)\);/);
+  assert.match(rideSource, /if\s*\(ok\)\s*\{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
+});
+
+test('trip workspace exports GPX via native file system and sharing dialog, and reports expense load errors', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+
+  // GPX export writes to cacheDirectory and invokes native sharing
+  assert.match(tripSource, /FileSystem\.cacheDirectory/);
+  assert.match(tripSource, /FileSystem\.writeAsStringAsync/);
+  assert.match(tripSource, /Sharing\.isAvailableAsync\(\)/);
+  assert.match(tripSource, /Sharing\.shareAsync\(fileUri,/);
+  assert.match(tripSource, /Share\.share\(\{/);
+
+  // Expense error handling and retry UI
+  assert.match(tripSource, /const \[expenseError, setExpenseError\] = useState<string \| null>\(null\);/);
+  assert.match(tripSource, /expenseError && \(/);
+  assert.match(tripSource, /Tap to retry/);
+});
+
+test('expense settlement supports multi-currency transaction records and calculates accurate transfers', () => {
+  const expensesModule = loader()('shared/expenses.ts');
+
+  const balances = [
+    { user_id: 'u1', display_name: 'Aarav', paid: 300, share: 100 },  // net +200
+    { user_id: 'u2', display_name: 'Bhavna', paid: 0, share: 100 },    // net -100
+    { user_id: 'u3', display_name: 'Chetan', paid: 0, share: 100 },    // net -100
+  ];
+
+  // Default currency is INR
+  const inrTrans = expensesModule.calculateExpenseSettlement(balances);
+  assert.equal(inrTrans.length, 2);
+  assert.equal(inrTrans[0].currency, 'INR');
+  assert.equal(inrTrans[1].currency, 'INR');
+
+  // Custom currency is preserved
+  const usdTrans = expensesModule.calculateExpenseSettlement(balances, 'USD');
+  assert.equal(usdTrans.length, 2);
+  assert.equal(usdTrans[0].currency, 'USD');
+  assert.equal(usdTrans[0].toUserId, 'u1');
+  assert.equal(usdTrans[0].amount, 100);
 });
 
 

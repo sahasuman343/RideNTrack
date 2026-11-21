@@ -32,6 +32,8 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip } from '../../src/lib/tripCache';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
@@ -114,6 +116,7 @@ export default function TripWorkspaceScreen() {
 
   const [expenses, setExpenses] = useState<TripExpense[]>([]);
   const [expenseSummary, setExpenseSummary] = useState<TripExpenseSummary | null>(null);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
   const [expenseModal, setExpenseModal] = useState(false);
   const [newExpenseTitle, setNewExpenseTitle] = useState('');
   const [newExpenseAmount, setNewExpenseAmount] = useState('');
@@ -227,8 +230,15 @@ export default function TripWorkspaceScreen() {
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
-      if (expensesResult?.data) setExpenses(expensesResult.data as TripExpense[]);
-      if (expenseSummaryResult?.data) setExpenseSummary(expenseSummaryResult.data as TripExpenseSummary);
+      if (expensesResult?.error) {
+        setExpenseError(expensesResult.error.message || 'Could not load expenses');
+      } else if (expenseSummaryResult?.error) {
+        setExpenseError(expenseSummaryResult.error.message || 'Could not load expense balances');
+      } else {
+        setExpenseError(null);
+        if (expensesResult?.data) setExpenses(expensesResult.data as TripExpense[]);
+        if (expenseSummaryResult?.data) setExpenseSummary(expenseSummaryResult.data as TripExpenseSummary);
+      }
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
 
@@ -246,7 +256,7 @@ export default function TripWorkspaceScreen() {
         stages: (stageResult.data || []) as any,
         days: (dayResult.data || []) as any,
         stays: (stayResult.data || []) as any,
-      });
+      }, user?.id);
 
       if (user?.id) {
         const { data: entry } = await supabase
@@ -261,7 +271,7 @@ export default function TripWorkspaceScreen() {
       }
     } catch (e: any) {
       if (generation === loadGeneration.current) {
-        const cached = await getCachedTrip(id);
+        const cached = await getCachedTrip(id, user?.id);
         if (cached?.trip) {
           setTrip(cached.trip as any);
           setWaypoints(cached.waypoints as any);
@@ -493,10 +503,22 @@ export default function TripWorkspaceScreen() {
         routeCoordinates: (trip as any).route_geometry?.geometry?.coordinates,
       });
 
-      await Share.share({
-        message: gpxContent,
-        title: `${trip.name}.gpx`,
-      });
+      const cleanName = trip.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileUri = `${FileSystem.cacheDirectory}${cleanName}.gpx`;
+      await FileSystem.writeAsStringAsync(fileUri, gpxContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/gpx+xml',
+          dialogTitle: `Export ${trip.name}.gpx`,
+          UTI: 'com.topografix.gpx',
+        });
+      } else {
+        await Share.share({
+          message: gpxContent,
+          title: `${cleanName}.gpx`,
+        });
+      }
     } catch (err: any) {
       Alert.alert('Could not export GPX', err?.message || 'Please try again.');
     }
@@ -1255,6 +1277,15 @@ export default function TripWorkspaceScreen() {
             <Text style={styles.smallButtonText}>＋ Add expense</Text>
           </TouchableOpacity>
         </View>
+
+        {expenseError && (
+          <View style={{ backgroundColor: '#FEE2E2', borderColor: '#EF4444', borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 8 }}>
+            <Text style={{ color: '#B91C1C', fontSize: 12, fontWeight: '700' }}>⚠️ {expenseError}</Text>
+            <TouchableOpacity onPress={() => void load()}>
+              <Text style={{ color: '#B91C1C', fontSize: 11, fontWeight: '800', marginTop: 4 }}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Spend Overview */}
         <View style={styles.expenseSummaryRow}>

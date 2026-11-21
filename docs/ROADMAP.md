@@ -37,8 +37,8 @@ This document is the implementation source of truth. Each phase is delivered as 
 - [x] Riding HUD displaying live speed, total trail distance, and distance to next stop.
 - [x] Real-time pack formation strip calculating orthogonal polyline distance, lead/sweep rider badges, and rider gaps (`shared/route.ts`).
 - [x] Pack separation detection with automatic alerts when gaps exceed 1.5 km.
-- [x] Motorcycle fuel feasibility engine calculating safe touring range, consumption, and recommended fuel stops (`shared/fuel.ts`).
-- [x] Weather forecast integration and motorcyclist road cautions (`shared/weather.ts`).
+- [x] Motorcycle fuel feasibility engine calculating safe touring range, consumption, and recommended fuel stops (`shared/touring.ts`).
+- [x] Weather forecast integration and motorcyclist road cautions (`shared/touring.ts`).
 
 ## Phase 4 — Smart Group Coordination
 - [x] Captain announcements broadcast modal with touring presets and custom message input (`mobile/app/ride/[id].tsx`).
@@ -64,7 +64,7 @@ This document is the implementation source of truth. Each phase is delivered as 
 - [x] Group expense tracking with custom/equal splits and category breakdown (`trip_expenses`, `migration 021`).
 - [x] Greedy debt minimization settlement resolution algorithm (`shared/expenses.ts`).
 - [x] Ride journal entries with photo attachments, odometer readings, and mood tags (`migration 017`).
-- [x] Shareable touring recap card generator (`shared/share.ts`).
+- [x] Shareable touring recap card generator (`shared/journal.ts`).
 - [x] Lifetime rider analytics and milestones banner (`get_rider_analytics`).
 - [x] Public touring discovery feed and one-click community route cloning (`get_public_trips`).
 

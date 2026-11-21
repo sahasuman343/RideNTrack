@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
+import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
 import { registerAccount } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
@@ -151,23 +152,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     await stopBackgroundLocationUpdates();
+    const userId = activeUserId.current;
+    if (userId) {
+      await clearAllCachedTripsForUser(userId).catch(() => {});
+    }
     const { error } = await supabase.auth.signOut();
-    if (error) throw error;
     activeUserId.current = null;
     setSession(null);
     setProfile(null);
+    if (error) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
   }
 
   async function deleteAccount() {
     const userId = activeUserId.current || session?.user?.id;
     if (!userId) throw new Error('You must be signed in to delete your account.');
+    if (session?.user?.id && session.user.id !== userId) {
+      throw new Error('Account mismatch during deletion request.');
+    }
     await stopBackgroundLocationUpdates();
-    const { error } = await supabase.rpc('delete_user_account');
+    const { error } = await supabase.rpc('delete_user_account', { p_expected_user_id: userId });
     if (error) {
       // Fallback: try edge function if available
-      const edgeRes = await supabase.functions.invoke('delete-account', { body: {} });
+      const edgeRes = await supabase.functions.invoke('delete-account', { body: { expected_user_id: userId } });
       if (edgeRes.error && error) throw new Error(error.message || edgeRes.error.message || 'Account deletion failed.');
     }
+    await clearAllCachedTripsForUser(userId).catch(() => {});
     await clearQueuedItemsForUser(userId).catch(() => {});
     await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     activeUserId.current = null;

@@ -57,13 +57,15 @@ export interface SettlementTransaction {
   toUserId: string;
   toName: string;
   amount: number;
+  currency?: string;
 }
 
 /**
  * Greedily resolves group net balances into minimal settlement transactions ("Who owes whom").
  */
 export function calculateExpenseSettlement(
-  balances: Array<{ user_id: string; display_name: string; paid: number; share: number; net?: number }>
+  balances: Array<{ user_id: string; display_name: string; paid: number; share: number; net?: number }>,
+  currency = 'INR'
 ): SettlementTransaction[] {
   if (!Array.isArray(balances) || balances.length < 2) return [];
 
@@ -101,6 +103,7 @@ export function calculateExpenseSettlement(
         toUserId: creditor.userId,
         toName: creditor.name,
         amount: settleAmount,
+        currency,
       });
     }
 
