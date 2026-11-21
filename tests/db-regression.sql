@@ -27,7 +27,21 @@ BEGIN
     'public.confirm_regroup_arrival(uuid)'::regprocedure,
     'public.get_regroup_points(uuid)'::regprocedure,
     'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
-    'public.get_rider_analytics(uuid)'::regprocedure
+    'public.get_rider_analytics(uuid)'::regprocedure,
+    'public.delete_user_account(uuid)'::regprocedure,
+    'public.archive_trip(uuid)'::regprocedure,
+    'public.unarchive_trip(uuid)'::regprocedure,
+    'public.duplicate_trip(uuid,text,date)'::regprocedure,
+    'public.seed_default_trip_checklists(uuid)'::regprocedure,
+    'public.get_trip_checklists(uuid)'::regprocedure,
+    'public.toggle_trip_checklist_item(uuid,boolean)'::regprocedure,
+    'public.transfer_trip_leadership(uuid,uuid)'::regprocedure,
+    'public.remove_trip_participant(uuid,uuid)'::regprocedure,
+    'public.reject_trip_invitation(uuid)'::regprocedure,
+    'public.add_trip_expense(uuid,text,numeric,text,uuid[],text)'::regprocedure,
+    'public.delete_trip_expense(uuid)'::regprocedure,
+    'public.get_trip_expenses(uuid)'::regprocedure,
+    'public.get_trip_expense_summary(uuid)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -36,6 +50,12 @@ BEGIN
       RAISE EXCEPTION 'authenticated RPC access missing: %',rpc;
     END IF;
   END LOOP;
+  IF NOT has_function_privilege('anon','public.get_public_trips(integer,integer)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'anon access missing for public.get_public_trips';
+  END IF;
+  IF NOT has_function_privilege('authenticated','public.get_public_trips(integer,integer)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'authenticated access missing for public.get_public_trips';
+  END IF;
   FOREACH rpc IN ARRAY ARRAY[
     'public.auto_join_admin()'::regprocedure,
     'public.handle_new_user()'::regprocedure
@@ -555,4 +575,707 @@ BEGIN
   -- Cleanup
   PERFORM public.delete_trip(journal_trip_id);
 END $$;
+
+-- Phase 1 Milestone: Trip Archiving and Deep Duplication
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  outsider_id uuid := '33333333-3333-4333-8333-333333333333';
+  orig_trip_id uuid;
+  cloned_trip_id uuid;
+  cloned_stage_count integer;
+  cloned_wp_count integer;
+  trip_status text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  -- Create a trip with waypoints and stages
+  orig_trip_id := public.create_trip_plan(
+    '{"name":"Grand Western Ghats Tour","trip_type":"touring","visibility":"invite_only","start_date":"2026-12-01","end_date":"2026-12-05","origin":"Bengaluru","destination":"Goa","origin_coords":[77.5946,12.9716],"destination_coords":[73.8567,15.2993]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bengaluru","latitude":12.9716,"longitude":77.5946,"day_number":1},{"sequence":1,"waypoint_type":"stop","name":"Shimoga","latitude":13.9299,"longitude":75.5681,"day_number":1},{"sequence":2,"waypoint_type":"destination","name":"Goa","latitude":15.2993,"longitude":73.8567,"day_number":2}]'::jsonb,
+    '[{"day_number":1,"trip_date":"2026-12-01","title":"Day 1 - Ghats Climb"},{"day_number":2,"trip_date":"2026-12-02","title":"Day 2 - Coastal Descent"}]'::jsonb,
+    '{"name":"Shimoga Lodge","stay_type":"hotel","price_amount":1500,"day_number":1}'::jsonb
+  );
+
+  -- Add a stage
+  PERFORM public.save_trip_stage(orig_trip_id, '{
+    "stage_number": 1,
+    "name": "Stage 1",
+    "start_name": "Bengaluru",
+    "destination_name": "Shimoga",
+    "start_coords": [77.5946, 12.9716],
+    "destination_coords": [75.5681, 13.9299],
+    "day_number": 1
+  }'::jsonb);
+
+  -- 1. Test Archiving
+  PERFORM public.archive_trip(orig_trip_id);
+  SELECT status INTO trip_status FROM public.rides WHERE id = orig_trip_id;
+  IF trip_status != 'archived' THEN
+    RAISE EXCEPTION 'archive_trip failed to set status to archived (got %)', trip_status;
+  END IF;
+
+  -- 2. Test Unarchiving
+  PERFORM public.unarchive_trip(orig_trip_id);
+  SELECT status INTO trip_status FROM public.rides WHERE id = orig_trip_id;
+  IF trip_status != 'planned' THEN
+    RAISE EXCEPTION 'unarchive_trip failed to set status to planned (got %)', trip_status;
+  END IF;
+
+  -- 3. Test Deep Duplication
+  cloned_trip_id := public.duplicate_trip(orig_trip_id, 'Grand Western Ghats 2027', '2027-01-10');
+  IF cloned_trip_id IS NULL OR cloned_trip_id = orig_trip_id THEN
+    RAISE EXCEPTION 'duplicate_trip failed to return new distinct ride id';
+  END IF;
+
+  -- Verify cloned waypoints and stages
+  SELECT count(*) INTO cloned_wp_count FROM public.trip_waypoints WHERE ride_id = cloned_trip_id;
+  IF cloned_wp_count != 3 THEN
+    RAISE EXCEPTION 'duplicate_trip expected 3 waypoints, found %', cloned_wp_count;
+  END IF;
+
+  SELECT count(*) INTO cloned_stage_count FROM public.trip_stages WHERE ride_id = cloned_trip_id;
+  IF cloned_stage_count != 1 THEN
+    RAISE EXCEPTION 'duplicate_trip expected 1 stage, found %', cloned_stage_count;
+  END IF;
+
+  -- 4. Outsider cannot archive private trip
+  PERFORM set_config('request.jwt.claim.sub', outsider_id::text, true);
+  BEGIN
+    PERFORM public.archive_trip(orig_trip_id);
+    RAISE EXCEPTION 'outsider was able to archive owner trip';
+  EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
+  END;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip(orig_trip_id);
+  PERFORM public.delete_trip(cloned_trip_id);
+END $$;
+
+-- Phase 2 Milestone: 5-Tier Roles, Leadership Transfer, and Pre-Ride Checklist
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  member_id uuid := '22222222-2222-4222-8222-222222222222';
+  test_ride_id uuid;
+  v_test_ride_code text;
+  checklists jsonb;
+  item_id uuid;
+  first_item_completed boolean;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  -- 1. Create a trip
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Roles and Checklist Test","trip_type":"group","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  SELECT ride_code INTO v_test_ride_code FROM public.rides WHERE id = test_ride_id;
+
+  -- 2. Member joins ride
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code(v_test_ride_code);
+
+  -- 3. Owner assigns Marshal role
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.set_trip_participant_role(test_ride_id, member_id, 'marshal');
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) != 'marshal' THEN
+    RAISE EXCEPTION 'set_trip_participant_role failed to set marshal role';
+  END IF;
+
+  -- 4. Seed and query pre-ride checklists
+  PERFORM public.seed_default_trip_checklists(test_ride_id);
+  checklists := public.get_trip_checklists(test_ride_id);
+  IF jsonb_array_length(checklists) < 5 THEN
+    RAISE EXCEPTION 'seed_default_trip_checklists expected at least 5 items, got %', jsonb_array_length(checklists);
+  END IF;
+
+  item_id := (checklists->0->>'id')::uuid;
+
+  -- 5. Toggle checklist item
+  first_item_completed := public.toggle_trip_checklist_item(item_id, true);
+  IF first_item_completed != true THEN
+    RAISE EXCEPTION 'toggle_trip_checklist_item failed to mark complete';
+  END IF;
+
+  -- 6. Transfer leadership
+  PERFORM public.transfer_trip_leadership(test_ride_id, member_id);
+  IF (SELECT admin_id FROM public.rides WHERE id = test_ride_id) != member_id THEN
+    RAISE EXCEPTION 'transfer_trip_leadership failed to update admin_id';
+  END IF;
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) != 'captain' THEN
+    RAISE EXCEPTION 'new leader participant role is not captain';
+  END IF;
+
+  -- 6b. New captain can add regroup points (verifies captain role in add_regroup_point)
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.add_regroup_point(test_ride_id, 'Captain regroup', 12.5, 77.5, 1, NULL, 'Added by captain');
+  IF NOT EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id = test_ride_id AND name = 'Captain regroup') THEN
+    RAISE EXCEPTION 'captain role was unable to add regroup point';
+  END IF;
+
+  -- 6c. Direct hard delete on ride_participants must be blocked by RLS
+  DELETE FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id;
+  IF NOT EXISTS (SELECT 1 FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = member_id) THEN
+    RAISE EXCEPTION 'direct hard deletion of ride participant was permitted';
+  END IF;
+
+  -- 7. New captain removes former leader
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.remove_trip_participant(test_ride_id, owner_id);
+  IF (SELECT is_active FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = owner_id) != false THEN
+    RAISE EXCEPTION 'remove_trip_participant failed to deactivate participant';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
+-- RT-003: Cascading account deletion via delete_user_account()
+RESET ROLE;
+INSERT INTO auth.users VALUES ('44444444-4444-4444-8444-444444444444', 'to_delete@example.test', '{"username":"deleteme","display_name":"DeleteMe"}');
+CREATE TABLE identity_hold (id uuid REFERENCES auth.users(id));
+INSERT INTO identity_hold VALUES ('44444444-4444-4444-8444-444444444444');
+GRANT DELETE ON identity_hold TO authenticated;
+SET ROLE authenticated;
+
+DO $$
+DECLARE
+  test_user_id uuid := '44444444-4444-4444-8444-444444444444';
+  test_ride_id uuid;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', test_user_id::text, true);
+
+  -- Create a trip owned by this user
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Delete Test Trip","trip_type":"solo","visibility":"private","origin":"Start","destination":"End","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Start","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"End","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  IF NOT EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id AND admin_id = test_user_id) THEN
+    RAISE EXCEPTION 'failed to create ride for account deletion test';
+  END IF;
+
+  BEGIN
+    PERFORM public.delete_user_account(gen_random_uuid());
+    RAISE EXCEPTION 'mismatched account identity accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.delete_user_account(test_user_id);
+    RAISE EXCEPTION 'identity deletion failure was suppressed';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = test_user_id) OR
+     NOT EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id) THEN
+    RAISE EXCEPTION 'failed account deletion did not roll back';
+  END IF;
+  DELETE FROM identity_hold;
+
+  -- Call delete_user_account()
+  PERFORM public.delete_user_account();
+
+  -- Verify cascades
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = test_user_id) THEN
+    RAISE EXCEPTION 'profile remains after delete_user_account';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.rides WHERE id = test_ride_id) THEN
+    RAISE EXCEPTION 'owned ride remains after delete_user_account';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.ride_participants WHERE user_id = test_user_id) THEN
+    RAISE EXCEPTION 'ride participant remains after delete_user_account';
+  END IF;
+END $$;
+
+-- Phase 4 & Phase 7: Announcements, Group Expenses, and Public Discovery
+DO $$
+DECLARE
+  owner_id uuid := '11111111-1111-4111-8111-111111111111';
+  member_id uuid := '22222222-2222-4222-8222-222222222222';
+  outsider_id uuid := '33333333-3333-4333-8333-333333333333';
+  test_ride_id uuid;
+  test_expense_id uuid;
+  v_test_ride_code text;
+  expenses jsonb;
+  summary jsonb;
+  public_trips jsonb;
+BEGIN
+  -- 1. Setup ride with owner and member
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Expenses & Public Tour","trip_type":"group","visibility":"public","origin":"Bengaluru","destination":"Chikmagalur","origin_coords":[77.59,12.97],"destination_coords":[75.78,13.31]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bengaluru","latitude":12.97,"longitude":77.59},{"sequence":1,"waypoint_type":"destination","name":"Chikmagalur","latitude":13.31,"longitude":75.78}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  SELECT ride_code INTO v_test_ride_code FROM public.rides WHERE id = test_ride_id;
+
+  -- Member joins
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  PERFORM public.join_ride_by_code(v_test_ride_code);
+
+  -- 2. Announcement Alert Check
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  INSERT INTO public.alerts (id, ride_id, user_id, type, message, lat, lng)
+  VALUES (gen_random_uuid(), test_ride_id, owner_id, 'announcement', 'Fuel stop in 5km', 12.97, 77.59);
+
+  -- 3. Add Group Expense
+  test_expense_id := public.add_trip_expense(
+    test_ride_id,
+    'Highway Dhaba Lunch',
+    600.00,
+    'food',
+    ARRAY[owner_id, member_id],
+    'Split 50-50'
+  );
+
+  IF test_expense_id IS NULL THEN
+    RAISE EXCEPTION 'add_trip_expense failed to return expense id';
+  END IF;
+
+  -- Verify splits created
+  IF (SELECT count(*) FROM public.trip_expense_splits WHERE expense_id = test_expense_id) != 2 THEN
+    RAISE EXCEPTION 'trip_expense_splits expected 2 rows';
+  END IF;
+
+  -- Verify get_trip_expenses
+  expenses := public.get_trip_expenses(test_ride_id);
+  IF jsonb_array_length(expenses) != 1 THEN
+    RAISE EXCEPTION 'get_trip_expenses expected 1 expense, got %', jsonb_array_length(expenses);
+  END IF;
+
+  -- Verify get_trip_expense_summary from owner perspective
+  summary := public.get_trip_expense_summary(test_ride_id);
+  IF (summary->>'total_spend')::numeric != 600.00 THEN
+    RAISE EXCEPTION 'total_spend expected 600.00, got %', summary->>'total_spend';
+  END IF;
+  IF (summary->>'my_paid')::numeric != 600.00 THEN
+    RAISE EXCEPTION 'my_paid for owner expected 600.00, got %', summary->>'my_paid';
+  END IF;
+  IF (summary->>'my_share')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'my_share for owner expected 300.00, got %', summary->>'my_share';
+  END IF;
+  IF (summary->>'net_balance')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'net_balance for owner expected 300.00, got %', summary->>'net_balance';
+  END IF;
+
+  -- Verify member perspective
+  PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
+  summary := public.get_trip_expense_summary(test_ride_id);
+  IF (summary->>'my_paid')::numeric != 0.00 THEN
+    RAISE EXCEPTION 'my_paid for member expected 0.00, got %', summary->>'my_paid';
+  END IF;
+  IF (summary->>'my_share')::numeric != 300.00 THEN
+    RAISE EXCEPTION 'my_share for member expected 300.00, got %', summary->>'my_share';
+  END IF;
+  IF (summary->>'net_balance')::numeric != -300.00 THEN
+    RAISE EXCEPTION 'net_balance for member expected -300.00, got %', summary->>'net_balance';
+  END IF;
+
+  -- 4. Delete Expense
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip_expense(test_expense_id);
+  IF EXISTS (SELECT 1 FROM public.trip_expenses WHERE id = test_expense_id) THEN
+    RAISE EXCEPTION 'delete_trip_expense failed to delete expense';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.trip_expense_splits WHERE expense_id = test_expense_id) THEN
+    RAISE EXCEPTION 'delete_trip_expense failed to cascade delete splits';
+  END IF;
+
+  -- 5. Public Trips Discovery (outsider caller)
+  PERFORM set_config('request.jwt.claim.sub', outsider_id::text, true);
+  public_trips := public.get_public_trips(10, 0);
+  IF jsonb_array_length(public_trips) < 1 THEN
+    RAISE EXCEPTION 'get_public_trips expected at least 1 public trip, got %', jsonb_array_length(public_trips);
+  END IF;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
+-- RT-008: Phases 1 to 3: Saved Places, Capacity Limits, Ride Rules, Attendance, and Access Controls
+DO $$
+DECLARE
+  rider_a UUID := '11111111-1111-4111-8111-111111111111';
+  rider_b UUID := '22222222-2222-4222-8222-222222222222';
+  rider_c UUID := '33333333-3333-4333-8333-333333333333';
+  test_place_id UUID;
+  test_ride_id UUID;
+  v_code TEXT;
+  v_roster JSONB;
+  v_capacity_blocked BOOLEAN := false;
+BEGIN
+  -- 1. Saved Places CRUD
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  test_place_id := public.add_saved_place('Khardung La', 'pass', 34.2787, 77.6047, 'Leh Ladakh', 'Highest motorable pass');
+  IF test_place_id IS NULL THEN
+    RAISE EXCEPTION 'add_saved_place returned null id';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.get_user_saved_places() WHERE id = test_place_id AND name = 'Khardung La') THEN
+    RAISE EXCEPTION 'get_user_saved_places did not return newly created place';
+  END IF;
+
+  PERFORM public.delete_saved_place(test_place_id);
+  IF EXISTS (SELECT 1 FROM public.get_user_saved_places() WHERE id = test_place_id) THEN
+    RAISE EXCEPTION 'delete_saved_place failed to remove place';
+  END IF;
+
+  -- 2. Create Trip with Capacity and Rules
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Himalayan Odyssey","description":"Adventure touring trip","origin":"Chandigarh","destination":"Manali","origin_coords":[76.7794,30.7333],"destination_coords":[77.1892,32.2396],"trip_type":"touring","start_date":"2026-07-01","end_date":"2026-07-07","total_distance_meters":300000,"estimated_duration_seconds":28800,"visibility":"private"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Chandigarh","latitude":30.7333,"longitude":76.7794},{"sequence":1,"waypoint_type":"destination","name":"Manali","latitude":32.2396,"longitude":77.1892}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
+
+  -- Update access control to invite_only and set capacity to 2 riders
+  PERFORM public.update_trip_access_control(test_ride_id, 'invite_only');
+  PERFORM public.update_trip_capacity_and_rules(test_ride_id, 2, 'Full armor, boots, and 2-second spacing mandatory');
+
+  IF (SELECT visibility FROM public.rides WHERE id = test_ride_id) != 'invite_only' THEN
+    RAISE EXCEPTION 'update_trip_access_control failed to set visibility';
+  END IF;
+
+  IF (SELECT max_participants FROM public.rides WHERE id = test_ride_id) != 2 THEN
+    RAISE EXCEPTION 'update_trip_capacity_and_rules failed to set max_participants';
+  END IF;
+
+  -- Rider B joins via code (occupies 2nd of 2 spots)
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- Rider C attempts to join (should fail with capacity limit)
+  PERFORM set_config('request.jwt.claim.sub', rider_c::text, true);
+  BEGIN
+    PERFORM public.join_ride_by_code(v_code);
+  EXCEPTION WHEN OTHERS THEN
+    v_capacity_blocked := true;
+  END;
+
+  IF NOT v_capacity_blocked THEN
+    RAISE EXCEPTION 'join_ride_by_code failed to enforce max_participants capacity limit';
+  END IF;
+
+  -- 3. Attendance Status
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.update_participant_attendance(test_ride_id, 'tentative');
+  IF (SELECT attendance_status FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'tentative' THEN
+    RAISE EXCEPTION 'update_participant_attendance failed to set tentative status';
+  END IF;
+
+  -- Leader marks Rider B as attended
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  PERFORM public.update_participant_attendance(test_ride_id, 'attended', rider_b);
+  IF (SELECT attendance_status FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'attended' THEN
+    RAISE EXCEPTION 'leader update_participant_attendance failed to mark rider as attended';
+  END IF;
+
+  -- 4. Co-Captain Role & Regroup Point
+  PERFORM public.set_trip_participant_role(test_ride_id, rider_b, 'co-captain');
+  IF (SELECT role FROM public.ride_participants WHERE ride_id = test_ride_id AND user_id = rider_b) != 'co-captain' THEN
+    RAISE EXCEPTION 'set_trip_participant_role failed to promote to co-captain';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', rider_b::text, true);
+  PERFORM public.add_regroup_point(test_ride_id, 'Co-captain viewpoint', 31.5, 77.1, 1, NULL, 'Check tires');
+  IF NOT EXISTS (SELECT 1 FROM public.trip_regroup_points WHERE ride_id = test_ride_id AND name = 'Co-captain viewpoint') THEN
+    RAISE EXCEPTION 'co-captain role was unable to add regroup point';
+  END IF;
+
+  -- Cleanup
+  PERFORM set_config('request.jwt.claim.sub', rider_a::text, true);
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
+-- RT-009: Phase 4 & Phase 5 - Regroup point closure, announcement acknowledgement, emergency escalation, and breakdown assistance directory
+RESET ROLE;
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+  ('00000000-0000-0000-0000-000000000091', 'lead91@example.test', '{"username":"lead_captain_91","display_name":"Lead Captain 91"}'),
+  ('00000000-0000-0000-0000-000000000092', 'tail92@example.test', '{"username":"tail_sweep_92","display_name":"Tail Sweep 92"}')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, username, display_name) VALUES
+  ('00000000-0000-0000-0000-000000000091', 'lead_captain_91', 'Lead Captain 91'),
+  ('00000000-0000-0000-0000-000000000092', 'tail_sweep_92', 'Tail Sweep 92')
+ON CONFLICT (id) DO NOTHING;
+SET ROLE authenticated;
+
+DO $$
+DECLARE
+  rider_lead UUID := '00000000-0000-0000-0000-000000000091';
+  rider_tail UUID := '00000000-0000-0000-0000-000000000092';
+  test_ride_id UUID;
+  test_point_id UUID;
+  test_alert_id UUID;
+  test_emerg_id UUID;
+  v_code TEXT;
+  v_ack_count INT;
+  v_dir_count INT;
+BEGIN
+  -- 1. Create Trip & Regroup Point
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  test_ride_id := public.create_trip_plan(
+    '{"name":"Western Ghats Tour","description":"Monsoon expedition","origin":"Bangalore","destination":"Chikmagalur","origin_coords":[77.5946,12.9716],"destination_coords":[75.7720,13.3161],"trip_type":"touring","start_date":"2026-08-10","end_date":"2026-08-12","total_distance_meters":250000,"estimated_duration_seconds":18000,"visibility":"invite_only"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bangalore","latitude":12.9716,"longitude":77.5946},{"sequence":1,"waypoint_type":"destination","name":"Chikmagalur","latitude":13.3161,"longitude":75.7720}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = test_ride_id;
+
+  test_point_id := public.add_regroup_point(test_ride_id, 'Hassan Bypass Junction', 13.0068, 76.1004, 1, NULL, 'Refuel & chai');
+  IF test_point_id IS NULL THEN
+    RAISE EXCEPTION 'add_regroup_point failed to return point id';
+  END IF;
+
+  -- 2. Tail Sweep Joins Ride
+  PERFORM set_config('request.jwt.claim.sub', rider_tail::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- Tail confirms arrival
+  PERFORM public.confirm_regroup_arrival(test_point_id);
+
+  -- 3. Leader closes regroup point
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  PERFORM public.close_regroup_point(test_point_id);
+
+  IF (SELECT status FROM public.trip_regroup_points WHERE id = test_point_id) != 'closed' THEN
+    RAISE EXCEPTION 'close_regroup_point failed to mark status as closed';
+  END IF;
+
+  IF (SELECT closed_at FROM public.trip_regroup_points WHERE id = test_point_id) IS NULL THEN
+    RAISE EXCEPTION 'close_regroup_point failed to set closed_at timestamp';
+  END IF;
+
+  -- 4. Captain broadcasts announcement alert
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (test_ride_id, rider_lead, 'announcement', 'Rain on Charmadi Ghat — drop pace to 35 km/h', 13.05, 75.85)
+  RETURNING id INTO test_alert_id;
+
+  -- Tail acknowledges announcement
+  PERFORM set_config('request.jwt.claim.sub', rider_tail::text, true);
+  PERFORM public.acknowledge_alert(test_alert_id);
+
+  SELECT count(*) INTO v_ack_count
+  FROM public.get_alert_acknowledgements(test_alert_id);
+
+  IF v_ack_count != 1 THEN
+    RAISE EXCEPTION 'get_alert_acknowledgements failed to return tail rider acknowledgement';
+  END IF;
+
+  -- Duplicate acknowledgement is idempotent
+  PERFORM public.acknowledge_alert(test_alert_id);
+  SELECT count(*) INTO v_ack_count
+  FROM public.get_alert_acknowledgements(test_alert_id);
+  IF v_ack_count != 1 THEN
+    RAISE EXCEPTION 'duplicate acknowledge_alert created duplicate row instead of ON CONFLICT DO NOTHING';
+  END IF;
+
+  -- 5. Emergency escalation
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (test_ride_id, rider_tail, 'emergency', 'Fallen tree on turn 14 — medical required', 13.06, 75.86)
+  RETURNING id INTO test_emerg_id;
+
+  PERFORM set_config('request.jwt.claim.sub', rider_lead::text, true);
+  PERFORM public.escalate_emergency_alert(test_emerg_id, 'Escalated to local 108 ambulance and forest dept');
+
+  IF (SELECT is_escalated FROM public.alerts WHERE id = test_emerg_id) != true THEN
+    RAISE EXCEPTION 'escalate_emergency_alert failed to set is_escalated';
+  END IF;
+
+  -- 6. Breakdown assistance directory query
+  SELECT count(*) INTO v_dir_count
+  FROM public.get_breakdown_assistance_directory();
+
+  IF v_dir_count < 3 THEN
+    RAISE EXCEPTION 'get_breakdown_assistance_directory failed to return seeded breakdown services';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(test_ride_id);
+END $$;
+
+-- RT-010: CodeRabbit Security and Data Integrity Regression Checks (PR #7)
+RESET ROLE;
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+  ('00000000-0000-0000-0000-000000000101', 'admin101@example.test', '{"username":"admin_user_101","display_name":"Admin 101"}'),
+  ('00000000-0000-0000-0000-000000000102', 'member102@example.test', '{"username":"member_user_102","display_name":"Member 102"}'),
+  ('00000000-0000-0000-0000-000000000103', 'outsider103@example.test', '{"username":"outsider_user_103","display_name":"Outsider 103"}')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, username, display_name) VALUES
+  ('00000000-0000-0000-0000-000000000101', 'admin_user_101', 'Admin 101'),
+  ('00000000-0000-0000-0000-000000000102', 'member_user_102', 'Member 102'),
+  ('00000000-0000-0000-0000-000000000103', 'outsider_user_103', 'Outsider 103')
+ON CONFLICT (id) DO NOTHING;
+SET ROLE authenticated;
+
+DO $$
+DECLARE
+  v_admin UUID := '00000000-0000-0000-0000-000000000101';
+  v_member UUID := '00000000-0000-0000-0000-000000000102';
+  v_outsider UUID := '00000000-0000-0000-0000-000000000103';
+  v_trip_id UUID;
+  v_code TEXT;
+  v_spoof_blocked BOOLEAN := false;
+  v_seed_blocked BOOLEAN := false;
+  v_split_blocked BOOLEAN := false;
+  v_self_transfer_blocked BOOLEAN := false;
+  v_summary JSONB;
+  v_dup_trip_id UUID;
+  v_sanitized_stay public.trip_stays%ROWTYPE;
+BEGIN
+  -- 1. Create Trip & Member
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_trip_id := public.create_trip_plan(
+    '{"name":"CR Test Trip","description":"Audit fixes trip","origin":"Bangalore","destination":"Mysore","origin_coords":[77.5946,12.9716],"destination_coords":[76.6394,12.2958],"trip_type":"touring","start_date":"2026-09-01","end_date":"2026-09-02","total_distance_meters":150000,"estimated_duration_seconds":10800,"visibility":"public"}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"Bangalore","latitude":12.9716,"longitude":77.5946},{"sequence":1,"waypoint_type":"destination","name":"Mysore","latitude":12.2958,"longitude":76.6394}]'::jsonb,
+    '[]'::jsonb,
+    NULL
+  );
+
+  SELECT ride_code INTO v_code FROM public.rides WHERE id = v_trip_id;
+
+  -- Add a stay with sensitive booking info
+  PERFORM public.add_trip_stay(
+    v_trip_id,
+    '{"name":"Grand Palace Stay","stay_type":"hotel","price_amount":3500,"booking_reference":"SECRET-PNR-999","contact_phone":"+919999911111","notes":"Private gate passcode: 1234"}'::jsonb
+  );
+
+  -- Member joins
+  PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+  PERFORM public.join_ride_by_code(v_code);
+
+  -- 2. Test Announcement Spoofing: Member attempts to insert 'announcement' alert
+  BEGIN
+    INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+    VALUES (v_trip_id, v_member, 'announcement', 'Spoofed captain alert', 12.5, 77.0);
+  EXCEPTION WHEN OTHERS THEN
+    v_spoof_blocked := true;
+  END;
+
+  IF NOT v_spoof_blocked THEN
+    RAISE EXCEPTION 'Non-admin member was able to insert announcement alert';
+  END IF;
+
+  -- Admin CAN insert announcement alert
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  INSERT INTO public.alerts (ride_id, user_id, type, message, lat, lng)
+  VALUES (v_trip_id, v_admin, 'announcement', 'Legitimate captain alert', 12.5, 77.0);
+
+  -- 3. Checklist Authorization: Outsider cannot seed checklists
+  PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
+  BEGIN
+    PERFORM public.seed_default_trip_checklists(v_trip_id);
+  EXCEPTION WHEN OTHERS THEN
+    v_seed_blocked := true;
+  END;
+
+  IF NOT v_seed_blocked THEN
+    RAISE EXCEPTION 'Outsider was able to seed checklists into another trip';
+  END IF;
+
+  -- Admin can seed checklists
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  PERFORM public.seed_default_trip_checklists(v_trip_id);
+
+  -- 4. Self-transfer Leadership is blocked
+  BEGIN
+    PERFORM public.transfer_trip_leadership(v_trip_id, v_admin);
+  EXCEPTION WHEN OTHERS THEN
+    v_self_transfer_blocked := true;
+  END;
+
+  IF NOT v_self_transfer_blocked THEN
+    RAISE EXCEPTION 'transfer_trip_leadership permitted transfer to self';
+  END IF;
+
+  -- 5. Ineligible split user in add_trip_expense is rejected
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  BEGIN
+    PERFORM public.add_trip_expense(
+      v_trip_id, 'Dinner', 1000, 'food',
+      ARRAY[v_admin, v_outsider]::uuid[], 'Dinner split'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    v_split_blocked := true;
+  END;
+
+  IF NOT v_split_blocked THEN
+    RAISE EXCEPTION 'add_trip_expense accepted non-member outsider in split';
+  END IF;
+
+  BEGIN
+    PERFORM public.add_trip_expense(v_trip_id, 'Duplicate', 10, 'food', ARRAY[v_member, v_member]);
+    RAISE EXCEPTION 'duplicate recipient accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.add_trip_expense(v_trip_id, 'Null', 10, 'food', ARRAY[v_member, NULL]);
+    RAISE EXCEPTION 'null recipient accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE public.rides SET expense_currency = 'USD' WHERE id = v_trip_id;
+  BEGIN
+    INSERT INTO public.trip_expenses(ride_id, payer_id, title, amount, category, currency)
+    VALUES (v_trip_id, v_admin, 'Mixed currency', 10, 'food', 'INR');
+    RAISE EXCEPTION 'mixed currency accepted';
+  EXCEPTION WHEN foreign_key_violation THEN NULL;
+  END;
+
+  -- Valid split works
+  PERFORM public.add_trip_expense(
+    v_trip_id, 'Highway Toll', 200, 'toll',
+    ARRAY[v_admin, v_member]::uuid[], 'Fastag toll'
+  );
+
+  BEGIN
+    INSERT INTO public.trip_expense_splits(expense_id, user_id, amount)
+    SELECT id, v_outsider, 1 FROM public.trip_expenses WHERE ride_id = v_trip_id;
+    RAISE EXCEPTION 'direct outsider split accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- Member deactivates / leaves trip
+  PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+  PERFORM public.leave_ride(v_trip_id);
+
+  -- Summary still retains member balance
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  v_summary := public.get_trip_expense_summary(v_trip_id);
+  IF v_summary->>'currency' IS DISTINCT FROM 'USD' OR (v_summary->>'total_spend')::numeric IS DISTINCT FROM 200 THEN
+    RAISE EXCEPTION 'unexpected expense currency or total';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(v_summary->'participant_balances') elem
+    WHERE elem->>'user_id' = v_member::text AND (elem->>'share')::numeric = 100
+  ) THEN
+    RAISE EXCEPTION 'get_trip_expense_summary excluded former participant with pending balance';
+  END IF;
+
+  -- 6. Privacy: Outsider duplicates public trip -> Stay booking details are sanitized
+  PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
+  v_dup_trip_id := public.duplicate_trip(v_trip_id, 'Outsider Clone Trip');
+
+  SELECT * INTO v_sanitized_stay FROM public.trip_stays WHERE ride_id = v_dup_trip_id;
+  IF v_sanitized_stay.booking_reference IS NOT NULL OR v_sanitized_stay.contact_phone IS NOT NULL OR v_sanitized_stay.notes IS NOT NULL THEN
+    RAISE EXCEPTION 'duplicate_trip leaked private stay booking details to non-member cloner';
+  END IF;
+
+  -- Cleanup
+  PERFORM public.delete_trip(v_dup_trip_id);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  PERFORM public.delete_trip(v_trip_id);
+END $$;
+
 RESET ROLE;

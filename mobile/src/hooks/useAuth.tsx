@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
+import { clearQueuedItemsForUser } from '../lib/offlineQueue';
+import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
 import { registerAccount } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
@@ -13,6 +15,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
   updateProfile: (updates: {
     display_name?: string;
     phone?: string | null;
@@ -109,7 +112,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signUp(email: string, password: string, username: string, displayName: string) {
     const data = await registerAccount(supabase, { email, password, username, displayName });
-    return Boolean(data.session);
+    if (data?.session) {
+      setSession(data.session);
+      if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);
+      activeUserId.current = data.user?.id ?? null;
+      if (data.user) fetchProfile(data.user.id);
+    }
+    return Boolean(data?.session);
   }
 
   async function signIn(email: string, password: string) {
@@ -143,15 +152,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     await stopBackgroundLocationUpdates();
+    const userId = activeUserId.current;
+    if (userId) {
+      await clearAllCachedTripsForUser(userId).catch(() => {});
+    }
     const { error } = await supabase.auth.signOut();
-    if (error) throw error;
     activeUserId.current = null;
     setSession(null);
     setProfile(null);
+    if (error) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
+  }
+
+  async function deleteAccount() {
+    const userId = activeUserId.current || session?.user?.id;
+    if (!userId) throw new Error('You must be signed in to delete your account.');
+    if (session?.user?.id && session.user.id !== userId) {
+      throw new Error('Account mismatch during deletion request.');
+    }
+    await stopBackgroundLocationUpdates();
+    const { error } = await supabase.rpc('delete_user_account', { p_expected_user_id: userId });
+    if (error) throw new Error(error.message || 'Account deletion failed.');
+    await clearAllCachedTripsForUser(userId).catch(() => {});
+    await clearQueuedItemsForUser(userId).catch(() => {});
+    if (activeUserId.current === userId) {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      activeUserId.current = null;
+      setSession(null);
+      setProfile(null);
+    }
   }
 
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, deleteAccount, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

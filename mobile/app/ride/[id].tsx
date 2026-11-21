@@ -1,9 +1,32 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, ActivityIndicator, Alert as Dialog, Share, Linking, Dimensions, Platform, Image, ScrollView, TextInput, PanResponder, LayoutAnimation, UIManager } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Camera } from '@rnmapbox/maps';
-import { type Ride, type LocationUpdate, type AlertType, ALERT_LABELS, isStale, distanceMeters, distanceToRouteMeters, buildGoogleMapsNavigationUrl, getRiderLiveStatus, type RiderLiveStatus } from '@ridentrack/shared';
+import {
+  type Ride,
+  type LocationUpdate,
+  type AlertType,
+  ALERT_LABELS,
+  isStale,
+  distanceMeters,
+  distanceToRouteMeters,
+  buildGoogleMapsNavigationUrl,
+  getRiderLiveStatus,
+  type RiderLiveStatus,
+  calculatePackFormation,
+  type PackRiderProgress,
+  calculateLiveRideStats,
+  type LiveRideStats,
+  type MechanicalIssueType,
+  MECHANICAL_ISSUE_LABELS,
+  type AlertAcknowledgement,
+  formatEmergencySms,
+  formatMechanicalBreakdownMessage,
+  NATIONAL_EMERGENCY_HELPLINES,
+  SEEDED_BREAKDOWN_DIRECTORY,
+  type VerifiedBreakdownService,
+} from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
@@ -11,12 +34,17 @@ import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { enableBackgroundLocationUpdates, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { playAlertSound } from '../../src/services/alertSound';
 
 const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN || '';
 let Mapbox: typeof import('@rnmapbox/maps').default | null = null;
 if (MAPBOX_TOKEN) {
   try { Mapbox = require('@rnmapbox/maps').default; Mapbox?.setAccessToken(MAPBOX_TOKEN); }
   catch { /* Native maps are unavailable in Expo Go; the rider panel still works. */ }
+}
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  try { UIManager.setLayoutAnimationEnabledExperimental(true); } catch { /* ignore */ }
 }
 
 
@@ -26,6 +54,8 @@ export default function LiveRideScreen() {
   const { user, profile } = useAuth();
   const userId = user?.id;
   const name = profile?.display_name || 'Rider';
+  const nameRef = useRef(name);
+  nameRef.current = name;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
@@ -41,6 +71,29 @@ export default function LiveRideScreen() {
   const [backgroundPermissionGranted, setBackgroundPermissionGranted] = useState(false);
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy < -20 || gestureState.vy < -0.4) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setExpanded(true);
+          } else if (gestureState.dy > 20 || gestureState.vy > 0.4) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setExpanded(false);
+          }
+        },
+      }),
+    []
+  );
+  const toggleExpanded = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded(v => !v);
+  };
   const [sheetHeight, setSheetHeight] = useState(200);
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
@@ -68,14 +121,38 @@ export default function LiveRideScreen() {
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
   const [targetWaypointIndex, setTargetWaypointIndex] = useState(0);
   const nextWaypoint = upcomingWaypoints[targetWaypointIndex] || null;
-  const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean }>>([]);
+  const [regroupPoints, setRegroupPoints] = useState<Array<{ id: string; name: string; latitude: number; longitude: number; sequence: number; my_arrived?: boolean; status?: string; closed_at?: string; total_arrived?: number; total_riders?: number }>>([]);
   const [arrivingRegroupPoint, setArrivingRegroupPoint] = useState<{ id: string; name: string } | null>(null);
   const [sosModal, setSosModal] = useState(false);
+  const [announcementModal, setAnnouncementModal] = useState(false);
+  const [customAnnouncement, setCustomAnnouncement] = useState('');
+  const [captainDashboardVisible, setCaptainDashboardVisible] = useState(false);
+  const [mechanicalModalVisible, setMechanicalModalVisible] = useState(false);
+  const [selectedMechanicalIssue, setSelectedMechanicalIssue] = useState<MechanicalIssueType>('puncture');
+  const [mechanicalDetails, setMechanicalDetails] = useState('');
+  const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
+  const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
+  const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
+  const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
+  const [statsModalVisible, setStatsModalVisible] = useState(false);
+  const [batterySaver, setBatterySaver] = useState(false);
+  const [gpsRecoveryStatus, setGpsRecoveryStatus] = useState<'normal' | 'recovered'>('normal');
+  const rideStartTimeMs = useRef<number | null>(null);
+  const accumulatedMovingMs = useRef<number>(0);
+  const lastCheckTimeMs = useRef<number>(Date.now());
+  const maxSpeedKmh = useRef<number>(0);
+  const currentAltitudeMeters = useRef<number | null>(null);
+  const elevationGainMeters = useRef<number>(0);
   const admin = ride?.admin_id === userId;
   const points = useMemo(() => position && active ? [...participants.filter(p => p.user_id !== userId), position] : participants, [participants, position, active, userId]);
+  const packFormation = useMemo(() => {
+    const routeCoords = route?.geometry?.coordinates;
+    if (!Array.isArray(routeCoords) || routeCoords.length < 2) return [];
+    return calculatePackFormation(points, routeCoords, ride?.rider_behind_threshold_meters || 1000);
+  }, [points, route?.geometry?.coordinates, ride?.rider_behind_threshold_meters]);
   // Keep map input tied to actual GPS samples. Per-frame JS marker animation
   // repeatedly rebuilds GeoJSON and is costly on entry-level Android devices.
   const animated = points;
@@ -98,6 +175,13 @@ export default function LiveRideScreen() {
       }),
   }), [animated, userId, now, ride?.status]);
   const newest = alerts.find(a => a.user_id !== userId && !dismissed.includes(a.id) && now - Date.parse(a.created_at) < 300000);
+  const lastPlayedAlertId = useRef<string | null>(null);
+  useEffect(() => {
+    if (newest && newest.id !== lastPlayedAlertId.current) {
+      lastPlayedAlertId.current = newest.id;
+      void playAlertSound(newest.type === 'emergency');
+    }
+  }, [newest?.id, newest?.type]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()),15000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     if (!active || !position || !userId || isStale(position.timestamp, now) || !ride) return;
@@ -147,13 +231,24 @@ export default function LiveRideScreen() {
     }
     let cancelled = false;
     setTracking('waiting'); setGpsError(null);
-    void startBackgroundLocationUpdates({ rideId: id, userId, displayName: name, publish,
+    void startBackgroundLocationUpdates({
+      rideId: id,
+      userId,
+      displayName: nameRef.current,
+      publish,
+      batterySaver,
       onLocationUpdate: p => { if (!cancelled) setPosition(p); },
       onError: e => { if (!cancelled) setGpsError(e); },
+      onGpsRecovered: () => {
+        if (!cancelled) {
+          setGpsRecoveryStatus('recovered');
+          setTimeout(() => setGpsRecoveryStatus('normal'), 6000);
+        }
+      },
     }).then(result => { if (!cancelled) setTracking(result.isBackgroundEnabled ? 'background' : 'foreground'); })
       .catch(e => { if (!cancelled) { setTracking('error'); setGpsError(e.message); } });
     return () => { cancelled = true; void stopBackgroundLocationUpdates().catch(() => {}); };
-  }, [id,userId,name,active,sharing,publish,gpsRetry]);
+  }, [id,userId,active,sharing,publish,gpsRetry,batterySaver]);
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
       if (typeof position.lng === 'number' && typeof position.lat === 'number' && Number.isFinite(position.lng) && Number.isFinite(position.lat)) {
@@ -202,7 +297,7 @@ export default function LiveRideScreen() {
       setArrivingRegroupPoint(null);
       return;
     }
-    const nearest = regroupPoints.find(rp => !rp.my_arrived && distanceMeters(position, { lat: rp.latitude, lng: rp.longitude }) < 300);
+    const nearest = regroupPoints.find(rp => (!rp.status || rp.status === 'open') && !rp.my_arrived && distanceMeters(position, { lat: rp.latitude, lng: rp.longitude }) < 300);
     setArrivingRegroupPoint(nearest ? { id: nearest.id, name: nearest.name } : null);
   }, [position?.lat, position?.lng, regroupPoints]);
 
@@ -286,6 +381,37 @@ export default function LiveRideScreen() {
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude]);
 
   const currentSpeedKmh = position?.speed ? Math.round(position.speed * 3.6) : 0;
+
+  useEffect(() => {
+    if (!position) return;
+    if (!rideStartTimeMs.current) rideStartTimeMs.current = Date.now();
+    const nowMs = Date.now();
+    const deltaMs = nowMs - lastCheckTimeMs.current;
+    lastCheckTimeMs.current = nowMs;
+    const speedKmh = (position.speed || 0) * 3.6;
+    if (speedKmh >= 5) {
+      accumulatedMovingMs.current += deltaMs;
+    }
+    if (speedKmh > maxSpeedKmh.current && speedKmh <= 220) {
+      maxSpeedKmh.current = Math.round(speedKmh * 10) / 10;
+    }
+  }, [position]);
+
+  const liveStats = useMemo(() => {
+    return calculateLiveRideStats({
+      rideStartTimeMs: rideStartTimeMs.current,
+      currentTimeMs: now,
+      accumulatedMovingMs: accumulatedMovingMs.current,
+      lastMovingCheckMs: lastCheckTimeMs.current,
+      currentSpeedMps: position?.speed,
+      distanceCoveredMeters,
+      maxSpeedKmh: maxSpeedKmh.current,
+      currentAltitudeMeters: currentAltitudeMeters.current,
+      elevationGainMeters: elevationGainMeters.current,
+      participants,
+      currentUserId: userId,
+    });
+  }, [now, position?.speed, distanceCoveredMeters, participants, userId]);
 
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
@@ -375,14 +501,50 @@ export default function LiveRideScreen() {
     } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not update ride.'); }
     finally { setBusy(false); }
   }
-  async function sendAlert(type: AlertType) {
-    if (!position || !userId || isStale(position.timestamp)) { setMessage('Wait for a fresh GPS fix before sending an alert.'); return; }
+  async function sendAlert(type: AlertType, customMessage?: string): Promise<'sent' | 'queued' | 'failed'> {
+    if (!position || !userId || isStale(position.timestamp)) {
+      setMessage('Wait for a fresh GPS fix before sending an alert.');
+      return 'failed';
+    }
     setBusy(true);
     try {
-      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() });
-      setModal(false); await sync.flushQueue(); await refresh();
-    } catch(e) { setMessage(e instanceof Error ? e.message : 'Could not save alert.'); }
-    finally { setBusy(false); }
+      const alert = { id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() };
+      if (sync.isOnline) {
+        // Reuse this ID on retry if the connection drops after the insert.
+        const { error, status } = await supabase.from('alerts').upsert(alert, { onConflict: 'id', ignoreDuplicates: true });
+        if (!error) {
+          setModal(false);
+          void refresh();
+          return 'sent';
+        }
+        if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+          setMessage(error.message);
+          return 'failed';
+        }
+      }
+      await enqueueAlert(alert);
+      setModal(false);
+      void sync.updateCounts().catch(() => {});
+      setMessage('Alert queued for delivery.');
+      return 'queued';
+    } catch(e) {
+      setMessage(e instanceof Error ? e.message : 'Could not save alert.');
+      return 'failed';
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function broadcastAnnouncement(msg: string): Promise<boolean> {
+    if (!msg || !msg.trim()) return false;
+    const outcome = await sendAlert('announcement', msg.trim());
+    if (outcome === 'sent') {
+      setAnnouncementModal(false);
+      setCustomAnnouncement('');
+      setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
+      return true;
+    }
+    return false;
   }
 
   async function confirmArrival(regroupPointId: string) {
@@ -400,6 +562,130 @@ export default function LiveRideScreen() {
     }
   }
 
+  async function acknowledgeAnnouncement(alertId: string) {
+    if (!alertId) return;
+    try {
+      const { error: ackErr } = await supabase.rpc('acknowledge_alert', { p_alert_id: alertId });
+      if (ackErr) throw ackErr;
+      setAcknowledgedAlertIds(prev => prev.includes(alertId) ? prev : [...prev, alertId]);
+      setMessage('👍 Acknowledged announcement');
+    } catch (e: any) {
+      setMessage(e?.message || 'Could not acknowledge announcement. Tap to retry.');
+    }
+  }
+
+  async function fetchAcknowledgements(alertId: string) {
+    try {
+      const { data, error } = await supabase.rpc('get_alert_acknowledgements', { p_alert_id: alertId });
+      if (!error && Array.isArray(data)) {
+        setAcknowledgementMap(prev => ({
+          ...prev,
+          [alertId]: {
+            count: data.length,
+            riders: data.map((d: any) => d.display_name || 'Rider'),
+          },
+        }));
+      }
+    } catch {
+      // Offline fallback
+    }
+  }
+
+  async function handleCloseRegroup(pointId: string) {
+    setBusy(true);
+    try {
+      const { error: closeErr } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
+      if (closeErr) throw closeErr;
+      setRegroupPoints(prev => prev.map(p => p.id === pointId ? { ...p, status: 'closed', closed_at: new Date().toISOString() } : p));
+      if (arrivingRegroupPoint?.id === pointId) {
+        setArrivingRegroupPoint(null);
+      }
+      await broadcastAnnouncement('🏁 Regroup point completed. Pack is resuming ride!');
+    } catch (e: any) {
+      setMessage(e?.message || 'Could not close regroup point.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function broadcastPaceAdvisory(paceKmh: number, label: string) {
+    await broadcastAnnouncement(`⚡ Pace Advisory: Target ${paceKmh} km/h (${label})`);
+  }
+
+  async function sendMechanicalBreakdownAlert() {
+    if (!position || !userId) {
+      setMessage('Wait for GPS fix before sending alert.');
+      return;
+    }
+    const msg = formatMechanicalBreakdownMessage({
+      issueType: selectedMechanicalIssue,
+      riderName: nameRef.current,
+      latitude: position.lat,
+      longitude: position.lng,
+      details: mechanicalDetails.trim() || undefined,
+    });
+    const outcome = await sendAlert('mechanical', msg);
+    if (outcome === 'sent') {
+      setMechanicalModalVisible(false);
+      setMechanicalDetails('');
+      setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
+      Dialog.alert(
+        'Mechanical Assistance',
+        'Alert broadcast to your pack with your live GPS location. Would you like to view roadside assistance & breakdown helplines?',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'View Directory', onPress: () => void loadBreakdownDirectory() },
+        ]
+      );
+    }
+  }
+
+  async function loadBreakdownDirectory() {
+    setBreakdownDirectoryVisible(true);
+    try {
+      const { data, error } = await supabase.rpc('get_breakdown_assistance_directory');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        setBreakdownServices(data as VerifiedBreakdownService[]);
+      }
+    } catch {
+      // Fallback already set to SEEDED_BREAKDOWN_DIRECTORY
+    }
+  }
+
+  async function escalateEmergency(alertId?: string) {
+    if (alertId) {
+      try {
+        await supabase.rpc('escalate_emergency_alert', {
+          p_alert_id: alertId,
+          p_notes: 'Rider or Captain requested emergency service escalation',
+        });
+      } catch {
+        // offline fallback
+      }
+    }
+    Dialog.alert(
+      '🚨 Escalate Emergency (112)',
+      'Direct dial National Emergency Helpline 112 immediately?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Call 112', style: 'destructive', onPress: () => void Linking.openURL('tel:112') },
+      ]
+    );
+  }
+
+  useEffect(() => {
+    if (captainDashboardVisible) {
+      const announcements = alerts.filter(a => a.type === 'announcement');
+      for (const a of announcements) {
+        void fetchAcknowledgements(a.id);
+      }
+      void supabase.rpc('get_regroup_points', { p_ride_id: id })
+        .then(({ data, error }) => {
+          if (!error && Array.isArray(data)) setRegroupPoints(data as any);
+        });
+    }
+  }, [captainDashboardVisible, alerts, id]);
+
   function triggerSosWorkflow() {
     setModal(false);
     setSosModal(true);
@@ -411,7 +697,7 @@ export default function LiveRideScreen() {
       setMessage('Wait for a fresh GPS fix before sending an emergency alert.');
       return;
     }
-    await sendAlert('emergency');
+    if (await sendAlert('emergency') !== 'sent') return;
     setMessage('🚨 Emergency alert broadcast to group with your live coordinates.');
   }
 
@@ -568,23 +854,24 @@ export default function LiveRideScreen() {
       </TouchableOpacity>
       <View style={s.title}>
         <Text numberOfLines={1} style={s.heading}>{ride.name}</Text>
-        <Text numberOfLines={1} style={s.muted}>{ride.origin} → {ride.destination}</Text>
+        <Text numberOfLines={1} style={s.muted}>
+          {ride.origin && ride.destination && !ride.origin.includes('+')
+            ? `${ride.origin} → ${ride.destination}`
+            : `Code: ${ride.ride_code} · ${active ? 'Live' : ride.status}`}
+        </Text>
       </View>
       <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
         <Text style={s.sosTopButtonText}>SOS</Text>
       </TouchableOpacity>
       {admin && (
-        <TouchableOpacity accessibilityLabel="Edit trip details" style={s.square} onPress={() => router.push('/trip/' + id)}>
-          <Text style={s.topBarIcon}>✎</Text>
+        <TouchableOpacity accessibilityLabel="Captain Dashboard" style={[s.square, { borderColor: theme.accent }]} onPress={() => setCaptainDashboardVisible(true)}>
+          <Text style={[s.topBarIcon, { color: theme.accent }]}>👑</Text>
         </TouchableOpacity>
       )}
-      <TouchableOpacity accessibilityLabel="Share ride code" style={s.square} onPress={() => void Share.share({ message: 'Join ' + ride.name + ' on RideNTrack. Code: ' + ride.ride_code }).catch(() => setMessage('Could not open sharing.'))}>
-        <Text style={s.topBarIcon}>↗</Text>
-      </TouchableOpacity>
     </View>
 
     {active && (
-      <View style={[s.hudContainer, { top: insets.top + 74 }]}>
+      <TouchableOpacity activeOpacity={0.85} onPress={() => setStatsModalVisible(true)} style={[s.hudContainer, { top: insets.top + 74 }]}>
         <View style={s.hudItem}>
           <Text style={s.hudValue}>{currentSpeedKmh}</Text>
           <Text style={s.hudLabel}>KM/H</Text>
@@ -609,10 +896,111 @@ export default function LiveRideScreen() {
           </Text>
           <Text style={s.hudLabel}>NEXT STOP</Text>
         </View>
+        <View style={s.hudDivider} />
+        <View style={s.hudItem}>
+          <Text style={[s.hudValue, { color: theme.accent }]}>📊</Text>
+          <Text style={s.hudLabel}>STATS</Text>
+        </View>
+      </TouchableOpacity>
+    )}
+
+    {/* Prominent Floating Alert Overlay Card (Petrol, Break, Food, Emergency, Announcement) */}
+    {newest && (
+      <View
+        style={[
+          s.floatingAlertBanner,
+          { top: insets.top + (active ? 132 : 74) },
+          newest.type === 'emergency' && s.floatingAlertEmergency,
+          newest.type === 'announcement' && s.floatingAlertAnnouncement,
+          newest.type === 'fuel' && s.floatingAlertFuel,
+          newest.type === 'break' && s.floatingAlertBreak,
+        ]}
+      >
+        <View style={s.floatingAlertHeader}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <Text style={s.floatingAlertTitle} numberOfLines={1}>
+              {ALERT_LABELS[newest.type] || '🚨 Rider Alert'} · {newest.display_name || 'Rider'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            accessibilityLabel="Dismiss alert"
+            onPress={() => setDismissed(ids => [...ids, newest.id])}
+            style={s.floatingAlertDismiss}
+          >
+            <Text style={s.floatingAlertDismissText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        {newest.message ? (
+          <Text style={s.floatingAlertMessage}>"{newest.message}"</Text>
+        ) : null}
+
+        <View style={s.floatingAlertActionsRow}>
+          {newest.type === 'announcement' && (
+            acknowledgedAlertIds.includes(newest.id) ? (
+              <View style={s.acknowledgedBadge}>
+                <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={s.floatingAlertActionBtn}
+                onPress={() => void acknowledgeAnnouncement(newest.id)}
+              >
+                <Text style={s.floatingAlertActionText}>👍 Acknowledge</Text>
+              </TouchableOpacity>
+            )
+          )}
+
+          {newest.type === 'emergency' && (
+            <TouchableOpacity
+              style={[s.floatingAlertActionBtn, { backgroundColor: theme.danger }]}
+              onPress={() => void escalateEmergency(newest.id)}
+            >
+              <Text style={s.floatingAlertActionText}>🚨 Escalate / Call 112</Text>
+            </TouchableOpacity>
+          )}
+
+          {newest.lat && newest.lng && (
+            <>
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => {
+                  setFollow(false);
+                  if (typeof newest.lat === 'number' && typeof newest.lng === 'number') {
+                    try {
+                      camera.current?.setCamera({
+                        centerCoordinate: [newest.lng, newest.lat],
+                        zoomLevel: 15,
+                        animationDuration: 700,
+                      });
+                    } catch {}
+                  }
+                }}
+              >
+                <Text style={s.floatingAlertSecondaryText}>📍 Focus on Map</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
+              >
+                <Text style={s.floatingAlertSecondaryText}>🧭 Directions ↗</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
     )}
 
-    <View style={[s.controls, { top: insets.top + (active ? 134 : 74) }]}>
+    {gpsRecoveryStatus === 'recovered' && (
+      <View style={[s.arrivalToast, { backgroundColor: '#22c55e', top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
+        <Text style={s.arrivalToastText}>
+          🛰️ GPS signal restored! Tracking resumed smoothly.
+        </Text>
+      </View>
+    )}
+
+    <View style={[s.controls, { top: insets.top + (active ? 134 : 74) + (newest ? 120 : 0) }]}>
       <TouchableOpacity accessibilityLabel="Follow my location" style={[s.control, follow && s.selected]} disabled={!position} onPress={() => { lastCameraPosition.current = null; setFollow(true); }}>
         <Text style={[s.controlText, follow && s.selectedText]}>◎ Me</Text>
       </TouchableOpacity>
@@ -622,7 +1010,7 @@ export default function LiveRideScreen() {
     </View>
 
     {arrivingRegroupPoint && (
-      <View style={[s.regroupBanner, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.regroupBanner, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text numberOfLines={1} style={s.regroupBannerText}>📍 Near Regroup: {arrivingRegroupPoint.name}</Text>
         <TouchableOpacity style={s.confirmRegroupButton} disabled={busy} onPress={() => void confirmArrival(arrivingRegroupPoint.id)}>
           <Text style={s.confirmRegroupText}>Confirm arrival</Text>
@@ -631,7 +1019,7 @@ export default function LiveRideScreen() {
     )}
 
     {routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
-      <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.deviationWarning, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text style={s.deviationWarningText}>
           ⚠️ Route Deviation: ~{Math.round(routeDeviation)} m from planned route
         </Text>
@@ -639,214 +1027,853 @@ export default function LiveRideScreen() {
     )}
 
     {lastArrivedWaypoint && (
-      <View style={[s.arrivalToast, { top: insets.top + (active ? 186 : 124) }]}>
+      <View style={[s.arrivalToast, { top: insets.top + (active ? 186 : 124) + (newest ? 115 : 0) }]}>
         <Text style={s.arrivalToastText}>
           🏁 Arrived at {lastArrivedWaypoint}! Next stop loaded.
         </Text>
       </View>
     )}
 
-    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
-    <View onLayout={event => setSheetHeight(event.nativeEvent.layout.height)} style={[s.sheet, { paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={expanded ? 'Collapse rider panel' : 'Expand rider panel'}
-        onPress={() => setExpanded(v => !v)}
-        style={s.sheetHeader}
-      >
-        <View style={s.handle} />
-        <View style={s.row}>
-          <View style={s.sheetTitleGroup}>
-            <View style={s.statusBadge}>
-              <View style={[s.liveDot, { backgroundColor: sync.isOnline && active ? '#22C55E' : theme.muted }]} />
-              <Text style={s.eyebrow}>{status}</Text>
-            </View>
-            <Text style={s.heading}>
-              {points.length} {points.length === 1 ? 'rider' : 'riders'} on map
-            </Text>
+    {(message || gpsError || error || mapError) && <View style={[s.warning,{ top: insets.top + (active ? 228 : 140) + (newest ? 115 : 0) }]}><Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text><TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}><Text style={s.link}>Retry</Text></TouchableOpacity>{tracking === 'error' && <TouchableOpacity onPress={() => void Linking.openSettings()}><Text style={s.link}>Open settings</Text></TouchableOpacity>}</View>}
+    {/* Floating Navigation and Alert buttons on the map */}
+    {active && (
+      <View style={[s.floatingButtonsRow, { bottom: sheetHeight + 12 }]}>
+        {active && nextWaypoint ? (
+          <View style={{ flex: 1, flexDirection: 'row', gap: 6 }}>
+            <TouchableOpacity
+              style={[s.navButton, s.floatingNavButton]}
+              onPress={() => void navigateToNextWaypoint()}
+              accessibilityRole="button"
+              accessibilityLabel={`Navigate to ${nextWaypoint.name}`}
+            >
+              <Text numberOfLines={1} style={[s.navButtonText, s.floatingNavText]}>
+                🧭 Navigate to {nextWaypoint.name} ↗
+              </Text>
+            </TouchableOpacity>
+            {upcomingWaypoints.length > 1 && (
+              <TouchableOpacity
+                style={s.floatingWaypointSwitch}
+                onPress={() => setTargetWaypointIndex(curr => (curr + 1) % upcomingWaypoints.length)}
+                accessibilityRole="button"
+                accessibilityLabel="Switch to next stop on route"
+              >
+                <Text style={s.floatingWaypointText}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          <View style={s.headerRight}>
-            <View style={s.codeBadge}>
-              <Text style={s.codeLabel}>CODE</Text>
-              <Text style={s.code}>{ride.ride_code}</Text>
-            </View>
-            <View style={[s.expandButton, expanded && s.expandButtonActive]}>
-              <Text style={[s.expandButtonIcon, expanded && s.expandButtonIconActive]}>
-                {expanded ? '▼' : '▲'}
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+
+        <TouchableOpacity
+          style={[
+            s.alertButton,
+            s.floatingAlertButton,
+            (!position || isStale(position.timestamp, now)) && s.disabled,
+          ]}
+          disabled={busy || !position || isStale(position.timestamp, now)}
+          onPress={() => setModal(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Broadcast alert to group"
+        >
+          <Text style={[s.alertButtonText, s.floatingAlertText]} numberOfLines={1}>🚨 Alert</Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    <View
+      onLayout={event => setSheetHeight(event.nativeEvent.layout.height)}
+      style={[
+        s.sheet,
+        { paddingBottom: Math.max(insets.bottom + 12, 28) },
+        expanded && s.sheetExpanded,
+      ]}
+    >
+      <View {...panResponder.panHandlers}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Collapse rider drawer' : 'Swipe up or tap to expand rider drawer'}
+          onPress={toggleExpanded}
+          style={s.sheetHeader}
+          activeOpacity={0.8}
+        >
+          <View style={s.handle} />
+          <View style={s.row}>
+            <View style={s.sheetTitleGroup}>
+              <View style={s.statusBadge}>
+                <View style={[s.liveDot, { backgroundColor: sync.isOnline && active ? '#22C55E' : theme.muted }]} />
+                <Text style={s.eyebrow}>{status}</Text>
+              </View>
+              <Text style={s.heading}>
+                {points.length} {points.length === 1 ? 'rider' : 'riders'} on map
               </Text>
             </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-      {newest && <TouchableOpacity style={s.alertBanner} onPress={() => setDismissed(ids => [...ids,newest.id])}><Text style={s.warningText}>{(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'} · tap to dismiss</Text></TouchableOpacity>}
-      {(pending > 0 || sync.syncError) && <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}><Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>{sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}</TouchableOpacity>}
-      {expanded && <FlatList
-        data={points}
-        style={s.riders}
-        keyExtractor={item => item.user_id}
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={5}
-        updateCellsBatchingPeriod={50}
-        removeClippedSubviews
-        ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
-        renderItem={({ item: p }) => {
-          const riderStatus = getRiderLiveStatus(p, ride.status, now);
-          const isDisconnected = riderStatus.status === 'disconnected';
-          return (
-            <TouchableOpacity style={s.rider} onPress={() => {
-              setFollow(false);
-              if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
-                try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
-              }
-            }}>
-              <View style={[
-                s.avatar,
-                riderStatus.status === 'riding' ? s.avatarRiding :
-                riderStatus.status === 'stopped' ? s.avatarStopped :
-                riderStatus.status === 'completed' ? s.avatarCompleted : s.stale
-              ]}>
-                <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
+            <View style={s.headerRight}>
+              <View style={s.codeBadge}>
+                <Text style={s.codeLabel}>CODE</Text>
+                <Text style={s.code}>{ride.ride_code}</Text>
               </View>
-              <View style={s.grow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
-                  <View style={[
-                    s.statusPill,
-                    riderStatus.status === 'riding' ? s.statusPillRiding :
-                    riderStatus.status === 'stopped' ? s.statusPillStopped :
-                    riderStatus.status === 'completed' ? s.statusPillCompleted : s.statusPillDisconnected
-                  ]}>
-                    <Text style={[
-                      s.statusPillText,
-                      riderStatus.status === 'riding' ? s.statusPillTextRiding :
-                      riderStatus.status === 'stopped' ? s.statusPillTextStopped :
-                      riderStatus.status === 'completed' ? s.statusPillTextCompleted : s.statusPillTextDisconnected
-                    ]}>
-                      {riderStatus.label}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={s.muted}>
-                  {isDisconnected
-                    ? (riderStatus.lastSeenText || 'Last known position')
-                    : riderStatus.status === 'completed'
-                    ? 'Ride completed'
-                    : 'Live location'}
+              <View style={[s.expandButton, expanded && s.expandButtonActive]}>
+                <Text style={[s.expandButtonIcon, expanded && s.expandButtonIconActive]}>
+                  {expanded ? '▼' : '▲'}
                 </Text>
               </View>
-              <Text style={s.text}>
-                {riderStatus.status === 'riding'
-                  ? Math.round((p.speed || 0) * 3.6) + ' km/h'
-                  : riderStatus.status === 'stopped'
-                  ? '0 km/h'
-                  : '—'}
-              </Text>
-            </TouchableOpacity>
-          );
-        }}
-      />}
-      {active && nextWaypoint && <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
-        <TouchableOpacity style={[s.navButton, { flex: 1, marginBottom: 0 }]} onPress={() => void navigateToNextWaypoint()}>
-          <Text style={s.navButtonText}>Navigate to {nextWaypoint.name} ↗</Text>
-        </TouchableOpacity>
-        {upcomingWaypoints.length > 1 && <TouchableOpacity
-          style={[s.control, { minHeight: 48, justifyContent: 'center', paddingHorizontal: 12 }]}
-          onPress={() => setTargetWaypointIndex(curr => (curr + 1) % upcomingWaypoints.length)}
-          accessibilityLabel="Switch to next stop on route"
-        >
-          <Text style={s.text}>{targetWaypointIndex + 1}/{upcomingWaypoints.length} ⏭</Text>
-        </TouchableOpacity>}
-      </View>}
-      {active ? (
-        <View style={s.activeActionsContainer}>
-          <View style={s.actionsRow}>
-            <TouchableOpacity
-              style={s.actionButton}
-              onPress={() => setSharing(v => !v)}
-              accessibilityRole="button"
-              accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
-            >
-              <Text style={s.actionButtonText} numberOfLines={1}>
-                {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[s.alertButton, (!position || isStale(position.timestamp, now)) && s.disabled]}
-              disabled={busy || !position || isStale(position.timestamp, now)}
-              onPress={() => setModal(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Broadcast alert to group"
-            >
-              <Text style={s.alertButtonText} numberOfLines={1}>🚨 Alert</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={s.actionButton}
-              disabled={!position}
-              onPress={() => void shareLiveLocation()}
-              accessibilityRole="button"
-              accessibilityLabel="Share live location with contact"
-            >
-              <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
-            </TouchableOpacity>
+            </View>
           </View>
+          {!expanded && (
+            <Text style={s.swipeUpHint}>Swipe up for controls & riders</Text>
+          )}
+        </TouchableOpacity>
+      </View>
 
-          {((tracking !== 'background' && sharing) || (admin && active)) && (
-            <View style={s.subActionsRow}>
-              {tracking !== 'background' && sharing && (
-                <TouchableOpacity
-                  style={[s.subActionButton, (admin && active) ? { flex: 1 } : { width: '100%' }]}
-                  onPress={() => void enableBackgroundGps()}
-                  accessibilityRole="button"
-                  accessibilityLabel="Enable background GPS tracking"
-                >
-                  <Text style={s.subActionText} numberOfLines={1}>
-                    📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+      {expanded && (
+        <ScrollView
+          style={s.drawerContent}
+          contentContainerStyle={s.drawerScrollContent}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
+          {newest && (
+            <View style={[s.alertBanner, newest.type === 'announcement' && s.announcementBanner]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={[s.warningText, newest.type === 'announcement' && s.announcementBannerText]}>
+                    {(ALERT_LABELS[newest.type] || 'Alert')} · {newest.display_name || 'Rider'}
+                    {newest.message ? `: "${newest.message}"` : ''}
                   </Text>
+                </View>
+                <TouchableOpacity onPress={() => setDismissed(ids => [...ids, newest.id])}>
+                  <Text style={{ color: theme.muted, fontSize: 16, fontWeight: '700', padding: 4 }}>✕</Text>
                 </TouchableOpacity>
+              </View>
+              {newest.type === 'announcement' && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  {acknowledgedAlertIds.includes(newest.id) ? (
+                    <View style={s.acknowledgedBadge}>
+                      <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={s.acknowledgeButton}
+                      onPress={() => void acknowledgeAnnouncement(newest.id)}
+                    >
+                      <Text style={s.acknowledgeButtonText}>👍 Acknowledge</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
-
-              {admin && active && (
-                <TouchableOpacity
-                  accessibilityLabel="End ride for everyone"
-                  style={[s.endRideButton, (tracking !== 'background' && sharing) ? { flex: 1 } : { width: '100%' }]}
-                  disabled={busy}
-                  onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
-                    { text: 'Keep riding', style: 'cancel' },
-                    { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
-                  ])}
-                >
-                  <Text style={s.endRideText}>🏁 End Ride</Text>
-                </TouchableOpacity>
+              {newest.type === 'emergency' && (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity
+                    style={[s.acknowledgeButton, { backgroundColor: theme.danger }]}
+                    onPress={() => void escalateEmergency(newest.id)}
+                  >
+                    <Text style={s.acknowledgeButtonText}>🚨 Escalate / Call 112</Text>
+                  </TouchableOpacity>
+                  {newest.lat && newest.lng && (
+                    <TouchableOpacity
+                      style={[s.acknowledgeButton, { backgroundColor: theme.accent }]}
+                      onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}
+                    >
+                      <Text style={s.acknowledgeButtonText}>📍 Open Location</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
           )}
-        </View>
-      ) : admin && ride.status === 'planned' ? (
-        <View style={s.actions}>
-          <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
-            <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={s.actions}>
-          <Text style={s.muted}>
-            {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
-          </Text>
-        </View>
+
+          {packFormation.length > 1 && (
+            <View style={s.formationContainer}>
+              <View style={s.formationHeader}>
+                <Text style={s.formationTitle}>FORMATION & SPACING</Text>
+                {packFormation.some(p => p.isSeparated) && (
+                  <Text style={s.separationBadge}>⚠️ Gap Alert</Text>
+                )}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.formationStrip}>
+                {packFormation.map(rider => (
+                  <View key={rider.userId} style={s.formationItem}>
+                    <View style={[s.formationBadge, rider.isLeader ? s.leaderBadge : rider.isTail ? s.tailBadge : s.memberBadge]}>
+                      <Text style={s.formationBadgeText}>
+                        {rider.isLeader ? '👑 LEAD' : rider.isTail ? '🧹 SWEEP' : `#${rider.order}`}
+                      </Text>
+                    </View>
+                    <Text numberOfLines={1} style={s.formationName}>{rider.displayName}</Text>
+                    <Text style={[s.formationGap, rider.isSeparated ? s.separatedGap : null]}>
+                      {rider.isLeader ? 'Lead' : `+${rider.gapToAheadMeters >= 1000 ? (rider.gapToAheadMeters / 1000).toFixed(1) + 'km' : rider.gapToAheadMeters + 'm'}`}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {active ? (
+            <View style={s.activeActionsContainer}>
+              <View style={s.actionsRow}>
+                <TouchableOpacity
+                  style={s.actionButton}
+                  onPress={() => setSharing(v => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>
+                    {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.actionButton}
+                  disabled={!position}
+                  onPress={() => void shareLiveLocation()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share live location with contact"
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.actionButton}
+                  onPress={() => router.push('/trip/' + id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Trip workspace and details"
+                >
+                  <Text style={s.actionButtonText} numberOfLines={1}>✎ Details</Text>
+                </TouchableOpacity>
+              </View>
+
+              {((tracking !== 'background' && sharing) || (admin && active)) && (
+                <View style={s.subActionsRow}>
+                  {tracking !== 'background' && sharing && (
+                    <TouchableOpacity
+                      style={[s.subActionButton, (admin && active) ? { flex: 1 } : { width: '100%' }]}
+                      onPress={() => void enableBackgroundGps()}
+                      accessibilityRole="button"
+                      accessibilityLabel="Enable background GPS tracking"
+                    >
+                      <Text style={s.subActionText} numberOfLines={1}>
+                        📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {admin && active && (
+                    <TouchableOpacity
+                      accessibilityLabel="End ride for everyone"
+                      style={[s.endRideButton, (tracking !== 'background' && sharing) ? { flex: 1 } : { width: '100%' }]}
+                      disabled={busy}
+                      onPress={() => Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
+                        { text: 'Keep riding', style: 'cancel' },
+                        { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
+                      ])}
+                    >
+                      <Text style={s.endRideText}>🏁 End Ride</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          ) : admin && ride.status === 'planned' ? (
+            <View style={s.actions}>
+              <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
+                <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={s.actions}>
+              <Text style={s.muted}>
+                {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
+              </Text>
+            </View>
+          )}
+
+          <FlatList
+            data={points}
+            style={s.riders}
+            scrollEnabled={false}
+            keyExtractor={item => item.user_id}
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={5}
+            updateCellsBatchingPeriod={50}
+            removeClippedSubviews
+            ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
+            renderItem={({ item: p }) => {
+              const riderStatus = getRiderLiveStatus(p, ride.status, now);
+              const isDisconnected = riderStatus.status === 'disconnected';
+              return (
+                <TouchableOpacity style={s.rider} onPress={() => {
+                  setFollow(false);
+                  if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
+                    try { camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 }); } catch { /* ignore */ }
+                  }
+                }}>
+                  <View style={[
+                    s.avatar,
+                    riderStatus.status === 'riding' ? s.avatarRiding :
+                    riderStatus.status === 'stopped' ? s.avatarStopped :
+                    riderStatus.status === 'completed' ? s.avatarCompleted : s.stale
+                  ]}>
+                    <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
+                  </View>
+                  <View style={s.grow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
+                      <View style={[
+                        s.statusPill,
+                        riderStatus.status === 'riding' ? s.statusPillRiding :
+                        riderStatus.status === 'stopped' ? s.statusPillStopped :
+                        riderStatus.status === 'completed' ? s.statusPillCompleted : s.statusPillDisconnected
+                      ]}>
+                        <Text style={[
+                          s.statusPillText,
+                          riderStatus.status === 'riding' ? s.statusPillTextRiding :
+                          riderStatus.status === 'stopped' ? s.statusPillTextStopped :
+                          riderStatus.status === 'completed' ? s.statusPillTextCompleted : s.statusPillTextDisconnected
+                        ]}>
+                          {riderStatus.label}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.muted}>
+                      {isDisconnected
+                        ? (riderStatus.lastSeenText || 'Last known position')
+                        : riderStatus.status === 'completed'
+                        ? 'Ride completed'
+                        : 'Live location'}
+                    </Text>
+                  </View>
+                  <Text style={s.text}>
+                    {riderStatus.status === 'riding'
+                      ? Math.round((p.speed || 0) * 3.6) + ' km/h'
+                      : riderStatus.status === 'stopped'
+                      ? '0 km/h'
+                      : '—'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+
+          {(pending > 0 || sync.syncError) && (
+            <TouchableOpacity disabled={sync.isSyncing} onPress={() => void sync.flushQueue()} style={s.sync}>
+              <Text style={s.muted}>{sync.isSyncing ? 'Uploading saved updates…' : pending + ' updates saved · tap to sync'}</Text>
+              {sync.syncError && <Text style={s.warningText}>{sync.syncError}</Text>}
+            </TouchableOpacity>
+          )}
+        </ScrollView>
       )}
     </View>
-    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={s.heading}>Let your group know</Text><Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>{(Object.keys(ALERT_LABELS) as AlertType[]).map(type => <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}><Text style={s.text}>{ALERT_LABELS[type]}</Text></TouchableOpacity>)}<TouchableOpacity style={s.secondary} onPress={() => setModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
-    <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}><View style={s.overlay}><View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}><Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text><Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text><TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}><Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}><Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text></TouchableOpacity><TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}><Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text></TouchableOpacity><TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}><Text style={s.text}>Cancel</Text></TouchableOpacity></View></View></Modal>
+    <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}>
+          <Text style={s.heading}>Let your group know</Text>
+          <Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>
+          {admin && (
+            <TouchableOpacity
+              style={[s.alertOption, { backgroundColor: theme.accentSoft, borderColor: theme.accent, borderWidth: 1 }]}
+              disabled={busy}
+              onPress={() => { setModal(false); setAnnouncementModal(true); }}
+            >
+              <Text style={[s.text, { color: theme.accent }]}>📢 Captain Announcement...</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[s.alertOption, { backgroundColor: theme.surfaceRaised, borderColor: '#F59E0B', borderWidth: 1 }]}
+            disabled={busy}
+            onPress={() => { setModal(false); setMechanicalModalVisible(true); }}
+          >
+            <Text style={[s.text, { color: '#D97706' }]}>🔧 Mechanical Breakdown...</Text>
+          </TouchableOpacity>
+          {(Object.keys(ALERT_LABELS) as AlertType[]).filter(t => t !== 'announcement' && t !== 'mechanical').map(type => (
+            <TouchableOpacity key={type} style={[s.alertOption,type === 'emergency' && s.emergency]} disabled={busy} onPress={() => type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type)}>
+              <Text style={s.text}>{ALERT_LABELS[type]}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={[s.alertOption, { borderColor: theme.border, borderWidth: 1 }]}
+            onPress={() => { setModal(false); void loadBreakdownDirectory(); }}
+          >
+            <Text style={s.text}>🛠️ Breakdown Assistance Directory (1033 / RSA)</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={announcementModal} transparent animationType="slide" onRequestClose={() => setAnnouncementModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <Text style={[s.heading, { color: theme.accent }]}>📢 Captain Announcement</Text>
+          {message && <Text style={s.warningText}>{message}</Text>}
+          <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
+          <View style={{ gap: 8, marginVertical: 4 }}>
+            {[
+              '⛽ Fuel stop at next pump (~5km)',
+              '☕ Chai & stretch break ahead',
+              '🌧️ Wet roads / rain ahead — reduce speed',
+              '⚠️ Road hazard / debris observed',
+              '📢 Regroup at next junction',
+              '🛑 Pull over safely now',
+            ].map((preset, idx) => (
+              <TouchableOpacity key={idx} style={s.presetOption} disabled={busy} onPress={() => void broadcastAnnouncement(preset)}>
+                <Text style={s.presetText}>{preset}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <TextInput
+              style={s.announcementInput}
+              placeholder="Or type custom announcement..."
+              placeholderTextColor={theme.muted}
+              value={customAnnouncement}
+              onChangeText={setCustomAnnouncement}
+              maxLength={120}
+            />
+            <TouchableOpacity
+              style={[s.sendAnnouncementBtn, !customAnnouncement.trim() && s.disabled]}
+              disabled={busy || !customAnnouncement.trim()}
+              onPress={() => void broadcastAnnouncement(customAnnouncement)}
+            >
+              <Text style={s.sendAnnouncementText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={s.secondary} onPress={() => setAnnouncementModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal,{ paddingBottom: Math.max(insets.bottom,24) }]}>
+          <Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text>
+          <Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text>
+          <TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}>
+            <Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
+            <Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}>
+            <Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1 }]} onPress={() => { setSosModal(false); void loadBreakdownDirectory(); }}>
+            <Text style={[s.text, { color: theme.accent }]}>🛠️ Highway Assistance & RSA Directory (1033 / 112)</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
+            <Text style={s.text}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Live Ride Statistics Modal */}
+    <Modal visible={statsModalVisible} transparent animationType="slide" onRequestClose={() => setStatsModalVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={s.heading}>📊 Live Ride Telemetry & Statistics</Text>
+              <TouchableOpacity onPress={() => setStatsModalVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Real-time speed, pace, moving time, and pack spread statistics.</Text>
+
+            {/* Time Stats */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⏱️ TIME & DURATION</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.elapsedTime}</Text>
+                  <Text style={s.statsLabel}>ELAPSED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.green }]}>{liveStats.formatted.movingTime}</Text>
+                  <Text style={s.statsLabel}>MOVING TIME</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.stoppedTime}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Speed Stats */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⚡ SPEED & DISTANCE</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.currentSpeed}</Text>
+                  <Text style={s.statsLabel}>CURRENT</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.avgSpeed}</Text>
+                  <Text style={s.statsLabel}>AVG MOVING</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.maxSpeed}</Text>
+                  <Text style={s.statsLabel}>TOP SPEED</Text>
+                </View>
+              </View>
+              <View style={[s.statsGrid, { marginTop: 10 }]}>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.distance}</Text>
+                  <Text style={s.statsLabel}>RECORDED TRAIL</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.formatted.altitude}</Text>
+                  <Text style={s.statsLabel}>ALTITUDE</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.elevationGainMeters} m</Text>
+                  <Text style={s.statsLabel}>ASCENT GAIN</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Pack Telemetry */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>🏍️ PACK FORMATION & TELEMETRY</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.packSpread}</Text>
+                  <Text style={s.statsLabel}>LEAD-TO-SWEEP SPREAD</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.ridingCount}</Text>
+                  <Text style={s.statsLabel}>RIDING NOW</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.stoppedCount}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Battery Saver Option */}
+            <View style={[s.statsCard, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[s.statsCardHeader, { marginBottom: 2 }]}>🔋 TOURING BATTERY SAVER</Text>
+                <Text style={s.muted}>Adapts GPS interval (15s/25m) for all-day tours to conserve phone battery.</Text>
+              </View>
+              <TouchableOpacity
+                style={[s.control, batterySaver && s.selected]}
+                onPress={() => setBatterySaver(v => !v)}
+              >
+                <Text style={[s.controlText, batterySaver && s.selectedText]}>{batterySaver ? 'ON' : 'OFF'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setStatsModalVisible(false)}>
+              <Text style={s.text}>Close Statistics</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Captain Command Dashboard Modal */}
+    <Modal visible={captainDashboardVisible} transparent animationType="slide" onRequestClose={() => setCaptainDashboardVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: theme.accent }]}>👑 Captain Command Dashboard</Text>
+              <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Lead controls, pack spacing overview, speed advisories, and regroup coordination.</Text>
+
+            {/* Pack Overview Card */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>🏍️ PACK STATUS & SPREAD</Text>
+              <View style={s.statsGrid}>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.green }]}>{liveStats.packSummary.ridingCount}</Text>
+                  <Text style={s.statsLabel}>RIDING</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={s.statsValue}>{liveStats.packSummary.stoppedCount}</Text>
+                  <Text style={s.statsLabel}>STOPPED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, packFormation.some(p => p.isSeparated) ? { color: theme.danger } : null]}>
+                    {packFormation.filter(p => p.isSeparated).length}
+                  </Text>
+                  <Text style={s.statsLabel}>SEPARATED</Text>
+                </View>
+                <View style={s.statsGridItem}>
+                  <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.packSpread}</Text>
+                  <Text style={s.statsLabel}>SPREAD</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Pace Advisory Actions */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>⚡ BROADCAST PACE ADVISORY</Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(40, 'Curves / Ghats')}>
+                  <Text style={s.paceButtonText}>🏔️ 40 km/h (Ghats)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(60, 'Cruising')}>
+                  <Text style={s.paceButtonText}>🏍️ 60 km/h (Cruising)</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(80, 'Highway')}>
+                  <Text style={s.paceButtonText}>🛣️ 80 km/h (Highway)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(30, 'Wet Road / Rain')}>
+                  <Text style={s.paceButtonText}>🌧️ 30 km/h (Rain)</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Active Regroup Points Coordination */}
+            <View style={s.statsCard}>
+              <Text style={s.statsCardHeader}>📍 REGROUP POINTS COORDINATION</Text>
+              {regroupPoints.length === 0 ? (
+                <Text style={s.muted}>No regroup points set for this ride. Add them in Trip Workspace.</Text>
+              ) : (
+                regroupPoints.map(point => {
+                  const isClosed = point.status === 'closed';
+                  return (
+                    <View key={point.id} style={s.regroupActionItem}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={s.text}>#{point.sequence} {point.name}</Text>
+                        <Text style={s.muted}>
+                          {isClosed ? 'Closed & completed' : `${point.total_arrived || 0}/${participants.length} arrived`}
+                        </Text>
+                      </View>
+                      {isClosed ? (
+                        <View style={s.acknowledgedBadge}>
+                          <Text style={s.acknowledgedText}>Closed</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={s.regroupCloseBtn}
+                          disabled={busy}
+                          onPress={() => void handleCloseRegroup(point.id)}
+                        >
+                          <Text style={s.regroupCloseBtnText}>Close & Resume</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+
+            {/* Announcements & Acknowledgements Monitor */}
+            <View style={s.statsCard}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={s.statsCardHeader}>📢 ANNOUNCEMENT ACKNOWLEDGEMENTS</Text>
+                <TouchableOpacity
+                  style={{ backgroundColor: theme.accentSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
+                  onPress={() => { setCaptainDashboardVisible(false); setAnnouncementModal(true); }}
+                >
+                  <Text style={{ color: theme.accent, fontSize: 11, fontWeight: '800' }}>+ New Broadcast</Text>
+                </TouchableOpacity>
+              </View>
+              {alerts.filter(a => a.type === 'announcement').length === 0 ? (
+                <Text style={s.muted}>No announcements broadcast yet.</Text>
+              ) : (
+                alerts.filter(a => a.type === 'announcement').slice(0, 5).map(alertItem => {
+                  const ack = acknowledgementMap[alertItem.id];
+                  return (
+                    <View key={alertItem.id} style={{ backgroundColor: theme.surface, padding: 10, borderRadius: 8, marginBottom: 6, borderWidth: 1, borderColor: theme.border }}>
+                      <Text style={[s.text, { fontSize: 13 }]}>"{alertItem.message}"</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                        <Text style={s.muted}>{new Date(alertItem.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                        <Text style={[s.statsValue, { fontSize: 12, color: theme.accent }]}>
+                          {ack ? `${ack.count}/${participants.length} acknowledged` : 'Checking...'}
+                        </Text>
+                      </View>
+                      {ack && ack.riders.length > 0 && (
+                        <Text style={[s.muted, { fontSize: 10, marginTop: 2 }]}>
+                          ✓ {ack.riders.join(', ')}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+
+            {/* Quick Link to Breakdown Directory */}
+            <TouchableOpacity
+              style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12 }]}
+              onPress={() => { setCaptainDashboardVisible(false); void loadBreakdownDirectory(); }}
+            >
+              <Text style={[s.text, { color: theme.accent, textAlign: 'center' }]}>
+                🛠️ Open Roadside Breakdown Directory
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setCaptainDashboardVisible(false)}>
+              <Text style={s.text}>Close Dashboard</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Mechanical Breakdown Modal */}
+    <Modal visible={mechanicalModalVisible} transparent animationType="slide" onRequestClose={() => setMechanicalModalVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: '#D97706' }]}>🔧 Mechanical Breakdown Alert</Text>
+              <TouchableOpacity onPress={() => setMechanicalModalVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>Notify your pack of bike issues and attach your exact live location so sweep and teammates can assist.</Text>
+
+            <Text style={[s.statsCardHeader, { marginBottom: 8 }]}>SELECT ISSUE TYPE</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+              {(Object.keys(MECHANICAL_ISSUE_LABELS) as MechanicalIssueType[]).map(issue => (
+                <TouchableOpacity
+                  key={issue}
+                  style={[s.issueChip, selectedMechanicalIssue === issue && s.issueChipSelected]}
+                  onPress={() => setSelectedMechanicalIssue(issue)}
+                >
+                  <Text style={[s.issueChipText, selectedMechanicalIssue === issue && s.issueChipTextSelected]}>
+                    {MECHANICAL_ISSUE_LABELS[issue].icon} {MECHANICAL_ISSUE_LABELS[issue].label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[s.statsCardHeader, { marginBottom: 6 }]}>ADDITIONAL DETAILS (OPTIONAL)</Text>
+            <TextInput
+              style={[s.announcementInput, { marginBottom: 14, minHeight: 44 }]}
+              placeholder="e.g. Rear tire flat, need pump or patch kit..."
+              placeholderTextColor={theme.muted}
+              value={mechanicalDetails}
+              onChangeText={setMechanicalDetails}
+              maxLength={140}
+            />
+
+            <TouchableOpacity
+              style={[s.primary, { backgroundColor: '#D97706', marginBottom: 10 }]}
+              disabled={busy}
+              onPress={() => void sendMechanicalBreakdownAlert()}
+            >
+              <Text style={[s.buttonText, { color: '#FFFFFF' }]}>Broadcast Breakdown Alert</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[s.alertOption, { borderColor: theme.border, borderWidth: 1, marginBottom: 10 }]}
+              onPress={() => { setMechanicalModalVisible(false); void loadBreakdownDirectory(); }}
+            >
+              <Text style={[s.text, { textAlign: 'center' }]}>🛠️ View Roadside Assistance Numbers</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={s.secondary} onPress={() => setMechanicalModalVisible(false)}>
+              <Text style={s.text}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+
+    {/* Breakdown Directory Modal */}
+    <Modal visible={breakdownDirectoryVisible} transparent animationType="slide" onRequestClose={() => setBreakdownDirectoryVisible(false)}>
+      <View style={s.overlay}>
+        <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={[s.heading, { color: theme.accent }]}>🛠️ Roadside Breakdown Directory</Text>
+              <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)}>
+                <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[s.muted, { marginBottom: 14 }]}>24x7 verified highway helplines, motorcycle roadside recovery, and emergency towing.</Text>
+
+            {/* National Helplines */}
+            <Text style={s.statsCardHeader}>🚨 24X7 NATIONAL HELPLINES</Text>
+            {NATIONAL_EMERGENCY_HELPLINES.map((helpline, idx) => (
+              <View key={idx} style={s.directoryCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={s.directoryName}>{helpline.icon} {helpline.name}</Text>
+                    <Text style={s.directoryCoverage}>{helpline.purpose}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={s.callButton}
+                    onPress={() => void Linking.openURL('tel:' + helpline.number)}
+                  >
+                    <Text style={s.callButtonText}>📞 {helpline.number}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            {/* Verified Breakdown Services */}
+            <Text style={[s.statsCardHeader, { marginTop: 10 }]}>🏍️ MOTORCYCLE RSA & TOWING SERVICES</Text>
+            {breakdownServices.map((service, idx) => (
+              <View key={service.id || idx} style={s.directoryCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={s.directoryName}>{service.name}</Text>
+                    <Text style={s.directoryCoverage}>📍 {service.region} · {service.category}</Text>
+                    {(service.notes || service.description) && (
+                      <Text style={s.directoryPhone}>{service.notes || service.description}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={s.callButton}
+                    onPress={() => void Linking.openURL('tel:' + service.phone)}
+                  >
+                    <Text style={s.callButtonText}>📞 Call</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity style={[s.secondary, { marginTop: 8 }]} onPress={() => setBreakdownDirectoryVisible(false)}>
+              <Text style={s.text}>Close Directory</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   </View>;
 }
 const makeStyles = (c: RidePalette) => StyleSheet.create({
+  announcementBanner:{backgroundColor:'#FFF7ED',borderColor:'#F97316',borderWidth:1},
+  announcementBannerText:{color:'#C2410C',fontWeight:'800'},
+  formationContainer:{marginBottom:12,backgroundColor:c.surfaceRaised,borderRadius:12,padding:10,borderWidth:1,borderColor:c.border},
+  formationHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8},
+  formationTitle:{color:c.muted,fontSize:10,fontWeight:'800',letterSpacing:0.5},
+  separationBadge:{color:c.danger,fontSize:10,fontWeight:'800'},
+  formationStrip:{flexDirection:'row',gap:8,alignItems:'center'},
+  formationItem:{alignItems:'center',minWidth:68,backgroundColor:c.surface,borderRadius:8,padding:6,borderWidth:1,borderColor:c.border},
+  formationBadge:{paddingHorizontal:6,paddingVertical:2,borderRadius:4,marginBottom:4},
+  leaderBadge:{backgroundColor:c.accentSoft},
+  tailBadge:{backgroundColor:'#FEF3C7'},
+  memberBadge:{backgroundColor:c.surfaceRaised},
+  formationBadgeText:{color:c.text,fontSize:9,fontWeight:'800'},
+  formationName:{color:c.text,fontSize:11,fontWeight:'700',maxWidth:70},
+  formationGap:{color:c.muted,fontSize:10,fontWeight:'600',marginTop:2},
+  separatedGap:{color:c.danger,fontWeight:'800'},
+  presetOption:{padding:12,borderRadius:8,backgroundColor:c.surfaceRaised,borderWidth:1,borderColor:c.border},
+  presetText:{color:c.text,fontSize:13,fontWeight:'600'},
+  announcementInput:{flex:1,backgroundColor:c.surfaceRaised,borderRadius:10,borderWidth:1,borderColor:c.border,paddingHorizontal:12,paddingVertical:10,color:c.text,fontSize:13},
+  sendAnnouncementBtn:{backgroundColor:c.accent,paddingHorizontal:16,justifyContent:'center',borderRadius:10},
+  sendAnnouncementText:{color:'#FFFFFF',fontSize:13,fontWeight:'800'},
   screen:{flex:1,backgroundColor:c.background},loading:{flex:1,alignItems:'center',justifyContent:'center',gap:24,padding:28,backgroundColor:c.background},brand:{color:c.accent,fontSize:16,fontWeight:'800',letterSpacing:4},
   text:{color:c.text,fontSize:14,fontWeight:'600'},muted:{color:c.muted,fontSize:12,lineHeight:18},heading:{color:c.text,fontSize:18,fontWeight:'800',letterSpacing:-0.3},
   top:{position:'absolute',left:14,right:14,flexDirection:'row',gap:8,alignItems:'center'},
-  title:{flex:1,paddingHorizontal:14,paddingVertical:10,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  title:{flex:1,minWidth:0,justifyContent:'center',paddingHorizontal:12,paddingVertical:8,borderRadius:14,backgroundColor:c.surface,borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
   square:{width:44,height:48,borderRadius:14,backgroundColor:c.surface,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:c.border,elevation:3,shadowColor:'#000',shadowOpacity:0.08,shadowRadius:4,shadowOffset:{width:0,height:2}},
   backIcon:{color:c.text,fontSize:24,fontWeight:'700',lineHeight:26,marginTop:-2},
   topBarIcon:{color:c.text,fontSize:16,fontWeight:'700'},
@@ -857,7 +1884,33 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   selected:{borderColor:c.accent,backgroundColor:c.accentSoft},
   controlText:{color:c.text,fontSize:13,fontWeight:'700'},
   selectedText:{color:c.accent,fontWeight:'800'},
-  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8,borderWidth:1,borderColor:c.border},
+  sheet:{position:'absolute',bottom:0,left:0,right:0,backgroundColor:c.surface,borderTopLeftRadius:28,borderTopRightRadius:28,paddingHorizontal:20,shadowColor:c.text,shadowOpacity:0.12,shadowRadius:15,elevation:8,borderWidth:1,borderColor:c.border,zIndex:20},
+  sheetExpanded:{maxHeight:'65%'},
+  swipeUpHint:{color:c.muted,fontSize:10,fontWeight:'700',textAlign:'center',marginTop:4,letterSpacing:0.3},
+  drawerContent:{marginTop:4},
+  drawerScrollContent:{paddingBottom:12},
+  floatingButtonsRow:{position:'absolute',left:14,right:14,flexDirection:'row',gap:10,alignItems:'center',zIndex:15},
+  floatingNavButton:{flex:1,backgroundColor:c.accent,borderRadius:16,minHeight:48,paddingHorizontal:14,flexDirection:'row',alignItems:'center',justifyContent:'center',elevation:4,shadowColor:c.accent,shadowOpacity:0.3,shadowRadius:6,shadowOffset:{width:0,height:2},marginBottom:0},
+  floatingNavText:{color:'#FFFFFF',fontSize:13,fontWeight:'800',letterSpacing:0.2},
+  floatingWaypointSwitch:{backgroundColor:c.surface,borderRadius:16,minHeight:48,paddingHorizontal:10,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.border,elevation:4,shadowColor:'#000',shadowOpacity:0.1,shadowRadius:4,shadowOffset:{width:0,height:2}},
+  floatingWaypointText:{color:c.text,fontSize:11,fontWeight:'800'},
+  floatingAlertButton:{minWidth:95,backgroundColor:c.danger,borderRadius:16,minHeight:48,paddingHorizontal:14,alignItems:'center',justifyContent:'center',elevation:4,shadowColor:c.danger,shadowOpacity:0.3,shadowRadius:6,shadowOffset:{width:0,height:2}},
+  floatingAlertText:{color:'#FFFFFF',fontSize:13,fontWeight:'900',letterSpacing:0.3},
+  floatingAlertBanner:{position:'absolute',left:14,right:14,backgroundColor:c.surface,borderRadius:16,padding:14,borderWidth:1.5,borderColor:c.accent,elevation:8,shadowColor:'#000',shadowOpacity:0.18,shadowRadius:10,shadowOffset:{width:0,height:4},zIndex:50},
+  floatingAlertEmergency:{backgroundColor:'#FEF2F2',borderColor:c.danger,borderWidth:2},
+  floatingAlertAnnouncement:{backgroundColor:'#FFF7ED',borderColor:'#F97316'},
+  floatingAlertFuel:{backgroundColor:'#FFFBEB',borderColor:'#F59E0B'},
+  floatingAlertBreak:{backgroundColor:'#FEF3C7',borderColor:'#D97706'},
+  floatingAlertHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:6},
+  floatingAlertTitle:{color:c.text,fontSize:14,fontWeight:'800',letterSpacing:-0.2},
+  floatingAlertDismiss:{padding:4,marginLeft:8},
+  floatingAlertDismissText:{color:c.muted,fontSize:16,fontWeight:'800'},
+  floatingAlertMessage:{color:c.text,fontSize:13,fontWeight:'600',lineHeight:18,marginBottom:10},
+  floatingAlertActionsRow:{flexDirection:'row',flexWrap:'wrap',gap:8,alignItems:'center'},
+  floatingAlertActionBtn:{backgroundColor:c.accent,paddingHorizontal:14,paddingVertical:8,borderRadius:10,alignItems:'center',justifyContent:'center'},
+  floatingAlertActionText:{color:'#FFFFFF',fontSize:12,fontWeight:'800'},
+  floatingAlertSecondaryBtn:{backgroundColor:c.surfaceRaised,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:c.border,alignItems:'center',justifyContent:'center'},
+  floatingAlertSecondaryText:{color:c.text,fontSize:12,fontWeight:'700'},
   sheetHeader:{paddingTop:10,paddingBottom:16},
   handle:{width:44,height:4,backgroundColor:c.border,borderRadius:2,alignSelf:'center',marginBottom:12},
   row:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8},
@@ -927,4 +1980,29 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   confirmRegroupText:{color:c.text,fontSize:12,fontWeight:'800'},
   sosEmergencyOption:{padding:16,borderRadius:10,backgroundColor:c.danger,alignItems:'center'},
   sosEmergencyText:{color:'#fff',fontSize:15,fontWeight:'800'},
+  statsCard:{backgroundColor:c.surfaceRaised,borderRadius:12,padding:12,marginBottom:10,borderWidth:1,borderColor:c.border},
+  statsCardHeader:{color:c.muted,fontSize:10,fontWeight:'800',letterSpacing:0.5,marginBottom:8},
+  statsGrid:{flexDirection:'row',justifyContent:'space-around'},
+  statsGridItem:{alignItems:'center',flex:1},
+  statsValue:{color:c.text,fontSize:16,fontWeight:'800'},
+  statsLabel:{color:c.muted,fontSize:9,fontWeight:'700',letterSpacing:0.3,marginTop:2},
+  acknowledgeButton: { backgroundColor: c.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  acknowledgeButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  acknowledgedBadge: { backgroundColor: c.greenSoft, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  acknowledgedText: { color: c.green, fontSize: 12, fontWeight: '800' },
+  regroupActionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.surface, padding: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  regroupCloseBtn: { backgroundColor: c.green, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  regroupCloseBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  paceButton: { flex: 1, backgroundColor: c.surfaceRaised, padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: c.border },
+  paceButtonText: { color: c.text, fontSize: 11, fontWeight: '700' },
+  issueChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: 6 },
+  issueChipSelected: { backgroundColor: c.accentSoft, borderColor: c.accent },
+  issueChipText: { color: c.text, fontSize: 12, fontWeight: '600' },
+  issueChipTextSelected: { color: c.accent, fontWeight: '800' },
+  directoryCard: { backgroundColor: c.surfaceRaised, padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
+  directoryName: { color: c.text, fontSize: 14, fontWeight: '800' },
+  directoryCoverage: { color: c.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
+  directoryPhone: { color: c.muted, fontSize: 12, marginTop: 2 },
+  callButton: { backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  callButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
 });

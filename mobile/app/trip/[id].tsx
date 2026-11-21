@@ -1,22 +1,55 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal, Platform, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { buildGoogleMapsNavigationUrl, type TripStage, type StageStatus, calculateMotorcycleFuelPlan, generateTouringAdvisories, getWeatherConditionFromCode, type RouteWeatherPoint, type TripJournalEntry, type JournalPhoto, formatShareableRideCard } from '@ridentrack/shared';
+import {
+  buildGoogleMapsNavigationUrl,
+  type TripStage,
+  type StageStatus,
+  calculateMotorcycleFuelPlan,
+  generateTouringAdvisories,
+  getWeatherConditionFromCode,
+  type RouteWeatherPoint,
+  type TripJournalEntry,
+  type JournalPhoto,
+  formatShareableRideCard,
+  ROLE_LABELS,
+  CHECKLIST_CATEGORY_LABELS,
+  type TripChecklistItem,
+  type RideParticipantRole,
+  type TripChecklistCategory,
+  exportTripToGpx,
+  calculateExpenseSettlement,
+  EXPENSE_CATEGORY_META,
+  type TripExpense,
+  type TripExpenseCategory,
+  type TripExpenseSummary,
+  type SettlementTransaction,
+  type AttendanceStatus,
+  ATTENDANCE_STATUS_LABELS,
+} from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
+import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
+import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 type Trip = {
   id: string; name: string; description?: string | null; origin: string; destination: string;
   origin_coords?: [number, number] | null; destination_coords?: [number, number] | null;
   status: string; trip_type?: string; start_date?: string | null; end_date?: string | null;
   estimated_distance_meters?: number | null; estimated_duration_seconds?: number | null;
+  expense_currency: string;
   ride_code: string; admin_id: string; route_deviation_threshold_meters: number; rider_behind_threshold_meters: number;
+  visibility?: 'private' | 'invite_only' | 'public';
+  max_participants?: number | null;
+  ride_rules?: string | null;
 };
 type Waypoint = { id: string; sequence: number; waypoint_type: string; name: string; address?: string; latitude: number; longitude: number; provider_place_id?: string | null; notes?: string; trip_day_id?: string | null };
 type Day = { id: string; day_number: number; trip_date?: string; title?: string; notes?: string };
-type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean };
-type Rider = { user_id: string; display_name: string; role: 'leader' | 'sweep' | 'rider'; is_active: boolean; last_seen: string | null };
+type Regroup = { id: string; name: string; latitude: number; longitude: number; sequence: number; target_arrival: string | null; notes: string | null; arrived_count: number; my_arrived: boolean; status?: string; closed_at?: string | null };
+type Rider = { user_id: string; display_name: string; role: RideParticipantRole; is_active: boolean; last_seen: string | null; attendance_status?: AttendanceStatus };
 type Stay = { id: string; name: string; stay_type: string; address?: string; check_in?: string; check_out?: string; price_amount?: number; price_currency: string; trip_day_id?: string | null };
 
 export default function TripWorkspaceScreen() {
@@ -33,7 +66,10 @@ export default function TripWorkspaceScreen() {
   const [roster, setRoster] = useState<Rider[]>([]);
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'rider' | 'sweep'>('rider');
+  const [inviteRole, setInviteRole] = useState<RideParticipantRole>('member');
+  const [checklists, setChecklists] = useState<TripChecklistItem[]>([]);
+  const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
+  const [riderRoleModalVisible, setRiderRoleModalVisible] = useState(false);
   const [regroupPoints, setRegroupPoints] = useState<Regroup[]>([]);
   const [deviationLimit, setDeviationLimit] = useState('500');
   const [behindLimit, setBehindLimit] = useState('1000');
@@ -52,6 +88,9 @@ export default function TripWorkspaceScreen() {
   const [editTripVisible, setEditTripVisible] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editVisibility, setEditVisibility] = useState<'private' | 'invite_only' | 'public'>('invite_only');
+  const [editMaxParticipants, setEditMaxParticipants] = useState('');
+  const [editRideRules, setEditRideRules] = useState('');
 
   // Stage modal state
   const [stageModalVisible, setStageModalVisible] = useState(false);
@@ -75,6 +114,20 @@ export default function TripWorkspaceScreen() {
 
   const [weatherPoints, setWeatherPoints] = useState<RouteWeatherPoint[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
+
+  const [expenses, setExpenses] = useState<TripExpense[] | null>(null);
+  const [expenseSummary, setExpenseSummary] = useState<TripExpenseSummary | null>(null);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
+  const [expenseModal, setExpenseModal] = useState(false);
+  const [newExpenseTitle, setNewExpenseTitle] = useState('');
+  const [newExpenseAmount, setNewExpenseAmount] = useState('');
+  const [newExpenseCategory, setNewExpenseCategory] = useState<TripExpenseCategory>('fuel');
+  const [newExpenseSplitUsers, setNewExpenseSplitUsers] = useState<string[]>([]);
+  const [newExpenseNotes, setNewExpenseNotes] = useState('');
+
+  const settlements = useMemo(() => {
+    return calculateExpenseSettlement(expenseSummary?.participant_balances || [], expenseSummary?.currency);
+  }, [expenseSummary]);
 
   useEffect(() => {
     if (!trip) return;
@@ -151,8 +204,9 @@ export default function TripWorkspaceScreen() {
     const generation = ++loadGeneration.current;
     if (!id) return;
     setLoading(true); setError('');
+    setExpenses(null); setExpenseSummary(null); setExpenseError(null);
     try {
-      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult] = await Promise.all([
+      const [tripResult, waypointResult, dayResult, stayResult, rosterResult, regroupResult, stageResult, checklistResult, expensesResult, expenseSummaryResult] = await Promise.all([
         supabase.from('rides').select('*').eq('id', id).single(),
         supabase.from('trip_waypoints').select('*').eq('ride_id', id).order('sequence'),
         supabase.from('trip_days').select('*').eq('ride_id', id).order('day_number'),
@@ -160,6 +214,9 @@ export default function TripWorkspaceScreen() {
         supabase.rpc('get_trip_roster', { p_ride_id: id }),
         supabase.rpc('get_regroup_points', { p_ride_id: id }),
         supabase.rpc('get_trip_stages', { p_ride_id: id }),
+        supabase.rpc('get_trip_checklists', { p_ride_id: id }),
+        supabase.rpc('get_trip_expenses', { p_ride_id: id }),
+        supabase.rpc('get_trip_expense_summary', { p_ride_id: id }),
       ]);
       if (generation !== loadGeneration.current) return;
       if (tripResult.error) throw tripResult.error;
@@ -175,8 +232,35 @@ export default function TripWorkspaceScreen() {
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
+      const list = expensesResult.error ? null : expensesResult.data as TripExpense[] | null;
+      const summary = expenseSummaryResult.error ? null : expenseSummaryResult.data as TripExpenseSummary | null;
+      setExpenses(list);
+      setExpenseSummary(summary);
+      setExpenseError([
+        !list && (expensesResult.error?.message || 'Expense list unavailable.'),
+        !summary && (expenseSummaryResult.error?.message || 'Expense balances unavailable.'),
+      ].filter(Boolean).join(' · ') || null);
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
+
+      let clData = (checklistResult.data || []) as TripChecklistItem[];
+      if (clData.length === 0 && tripResult.data?.admin_id === user?.id) {
+        await supabase.rpc('seed_default_trip_checklists', { p_ride_id: id });
+        const { data: refetched } = await supabase.rpc('get_trip_checklists', { p_ride_id: id });
+        if (refetched) clData = refetched as TripChecklistItem[];
+      }
+      setChecklists(clData);
+
+      if (generation === loadGeneration.current && user?.id) {
+        void saveCachedTrip(id, {
+          trip: tripResult.data as any,
+          waypoints: (waypointResult.data || []) as any,
+          stages: (stageResult.data || []) as any,
+          days: (dayResult.data || []) as any,
+          stays: (stayResult.data || []) as any,
+        }, user.id);
+      }
+
       if (user?.id) {
         const { data: entry } = await supabase
           .from('trip_journal_entries')
@@ -188,7 +272,30 @@ export default function TripWorkspaceScreen() {
           setJournalEntry(entry as TripJournalEntry);
         }
       }
-    } catch (e: any) { if (generation === loadGeneration.current) setError(e?.message || 'Could not load this trip.'); }
+      return !!summary && generation === loadGeneration.current;
+    } catch (e: any) {
+      if (generation === loadGeneration.current) {
+        setExpenses(null); setExpenseSummary(null); setExpenseError('Expense data unavailable.');
+        const isAuthOrPermissionError = e?.status === 401 || e?.status === 403 || e?.code === '42501' || e?.code === 'PGRST116' || /permission|unauthorized|not found/i.test(e?.message || '');
+        if (isAuthOrPermissionError) {
+          void clearCachedTrip(id, user?.id);
+          setTrip(null);
+          setError(e?.message || 'You do not have permission to view this trip.');
+        } else {
+          const cached = await getCachedTrip(id, user?.id);
+          if (cached?.trip) {
+            setTrip(cached.trip as any);
+            setWaypoints(cached.waypoints as any);
+            setDays(cached.days as any);
+            setStays(cached.stays as any);
+            setStages(cached.stages as any);
+            setError('Offline Mode: Showing cached trip itinerary.');
+          } else {
+            setError(e?.message || 'Could not load this trip.');
+          }
+        }
+      }
+    }
     finally { if (generation === loadGeneration.current) setLoading(false); }
   }, [id, user?.id]);
 
@@ -271,23 +378,61 @@ export default function TripWorkspaceScreen() {
     if (!trip) return;
     setEditName(trip.name || '');
     setEditDescription(trip.description || '');
+    setEditVisibility(trip.visibility || 'invite_only');
+    setEditMaxParticipants(trip.max_participants ? String(trip.max_participants) : '');
+    setEditRideRules(trip.ride_rules || '');
     setEditTripVisible(true);
   }
 
   async function saveTripDetails() {
     if (!editName.trim()) { Alert.alert('Trip name required', 'Enter a name for this trip.'); return; }
+    const maxPartNum = editMaxParticipants.trim() ? Number(editMaxParticipants) : null;
+    if (maxPartNum != null && (!Number.isInteger(maxPartNum) || maxPartNum < 2 || maxPartNum > 500)) {
+      Alert.alert('Invalid pack capacity', 'Pack size must be a whole number between 2 and 500 riders.'); return;
+    }
     setSaving(true); setError('');
     try {
       const { error: updateError } = await supabase.from('rides').update({
-        name: editName.trim(), description: editDescription.trim() || null,
+        name: editName.trim(),
+        description: editDescription.trim() || null,
+        visibility: editVisibility,
+        max_participants: maxPartNum,
+        ride_rules: editRideRules.trim() || null,
       }).eq('id', id);
       if (updateError) throw updateError;
       setEditTripVisible(false);
       await load();
-      Alert.alert('Trip updated', 'Your trip details have been saved.');
+      Alert.alert('Trip updated', 'Your trip settings, capacity, and rules have been saved.');
     } catch (e: any) {
       setError(e?.message || 'Could not update trip details.');
     } finally { setSaving(false); }
+  }
+
+  const [updatingAttendance, setUpdatingAttendance] = useState(false);
+
+  async function handleUpdateAttendance(status: AttendanceStatus, targetUserId?: string): Promise<boolean> {
+    if (updatingAttendance) return false;
+    setUpdatingAttendance(true);
+    try {
+      const { error: attError } = await supabase.rpc('update_participant_attendance', {
+        p_ride_id: id,
+        p_status: status,
+        p_target_user_id: targetUserId || null,
+      });
+      if (attError) throw attError;
+      setRoster(prev => prev.map(r => {
+        if (targetUserId ? r.user_id === targetUserId : r.user_id === user?.id) {
+          return { ...r, attendance_status: status };
+        }
+        return r;
+      }));
+      return true;
+    } catch (e: any) {
+      Alert.alert('Could not update attendance', e?.message || 'Please try again.');
+      return false;
+    } finally {
+      setUpdatingAttendance(false);
+    }
   }
 
   function confirmDeleteTrip() {
@@ -308,11 +453,174 @@ export default function TripWorkspaceScreen() {
     try {
       const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: id });
       if (deleteError) throw deleteError;
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not delete this trip.');
       setSaving(false);
     }
+  }
+
+  function duplicateTrip() {
+    if (!trip) return;
+    Alert.alert(
+      'Duplicate Trip?',
+      'Clone “' + trip.name + '” with all its stops, days, and stages into a new planned trip?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Duplicate',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { data, error: dupError } = await supabase.rpc('duplicate_trip', { p_ride_id: trip.id });
+              if (dupError) throw dupError;
+              Alert.alert('Trip Cloned', 'Your cloned trip is ready.', [
+                { text: 'Open Copy', onPress: () => router.push(`/trip/${data}`) },
+                { text: 'Stay Here', style: 'cancel' },
+              ]);
+            } catch (e: any) {
+              Alert.alert('Could not duplicate', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  async function toggleArchiveTrip() {
+    if (!trip || !isAdmin) return;
+    const isArchived = trip.status === 'archived';
+    setSaving(true);
+    try {
+      const rpcName = isArchived ? 'unarchive_trip' : 'archive_trip';
+      const { error: archError } = await supabase.rpc(rpcName, { p_ride_id: trip.id });
+      if (archError) throw archError;
+      setTrip(prev => prev ? { ...prev, status: isArchived ? 'planned' : 'archived' } : null);
+      Alert.alert(isArchived ? 'Trip Restored' : 'Trip Archived', isArchived ? 'Trip is restored to active planning.' : 'Trip has been archived.');
+    } catch (e: any) {
+      Alert.alert('Action failed', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function exportGpxFile() {
+    if (!trip) return;
+    try {
+      const gpxContent = exportTripToGpx({
+        tripName: trip.name,
+        description: trip.description,
+        waypoints: waypoints.map(w => ({
+          name: w.name,
+          latitude: w.latitude,
+          longitude: w.longitude,
+          waypoint_type: w.waypoint_type,
+          notes: w.notes,
+        })),
+        routeCoordinates: (trip as any).route_geometry?.geometry?.coordinates,
+      });
+
+      const cleanName = trip.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          const blob = new Blob([gpxContent], { type: 'application/gpx+xml;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${cleanName}.gpx`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return;
+        }
+        throw new Error('File downloads are unavailable in this browser.');
+      }
+
+      const fileUri = `${FileSystem.cacheDirectory}${cleanName}.gpx`;
+      await FileSystem.writeAsStringAsync(fileUri, gpxContent, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/gpx+xml',
+          dialogTitle: `Export ${trip.name}.gpx`,
+          UTI: 'com.topografix.gpx',
+        });
+      } else {
+        throw new Error('File sharing is unavailable on this device.');
+      }
+    } catch (err: any) {
+      Alert.alert('Could not export GPX', err?.message || 'Please try again.');
+    }
+  }
+
+  async function handleAddExpense() {
+    if (!newExpenseTitle.trim()) {
+      Alert.alert('Required', 'Please enter an expense title.');
+      return;
+    }
+    const parsedAmount = parseFloat(newExpenseAmount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Required', 'Please enter a valid expense amount.');
+      return;
+    }
+    if (newExpenseSplitUsers.length === 0) {
+      Alert.alert('Required', 'Please select at least one rider to share this expense.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { error } = await supabase.rpc('add_trip_expense', {
+        p_ride_id: id,
+        p_title: newExpenseTitle.trim(),
+        p_amount: parsedAmount,
+        p_category: newExpenseCategory,
+        p_split_user_ids: newExpenseSplitUsers,
+        p_notes: newExpenseNotes.trim() || null,
+      });
+      if (error) throw error;
+      setExpenseModal(false);
+      setNewExpenseTitle('');
+      setNewExpenseAmount('');
+      setNewExpenseNotes('');
+      const refreshed = await load();
+      Alert.alert('Expense Added', refreshed ? 'Group expense recorded and split calculated.' : 'Expense saved. Balances could not be refreshed.');
+    } catch (err: any) {
+      Alert.alert('Could not save expense', err?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleDeleteExpense(expenseId: string, title: string) {
+    Alert.alert(
+      'Delete Expense?',
+      `Remove "${title}" from trip expenses?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error } = await supabase.rpc('delete_trip_expense', { p_expense_id: expenseId });
+              if (error) throw error;
+              await load();
+            } catch (err: any) {
+              Alert.alert('Could not delete expense', err?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function confirmLeaveRide() {
@@ -333,11 +641,115 @@ export default function TripWorkspaceScreen() {
     try {
       const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
       if (leaveError) throw leaveError;
+      await stopBackgroundLocationUpdates(id).catch(() => {});
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not leave this ride.');
       setSaving(false);
     }
+  }
+
+  async function toggleChecklist(item: TripChecklistItem) {
+    const nextCompleted = !item.my_completed;
+    setChecklists(prev => prev.map(c => c.id === item.id
+      ? { ...c, my_completed: nextCompleted, completed_count: nextCompleted ? c.completed_count + 1 : Math.max(0, c.completed_count - 1) }
+      : c
+    ));
+    try {
+      const { error } = await supabase.rpc('toggle_trip_checklist_item', {
+        p_checklist_id: item.id,
+        p_completed: nextCompleted,
+      });
+      if (error) throw error;
+    } catch (e: any) {
+      setChecklists(prev => prev.map(c => c.id === item.id ? item : c));
+      Alert.alert('Checklist update failed', e?.message || 'Please try again.');
+    }
+  }
+
+  async function updateRiderRole(targetRole: RideParticipantRole) {
+    if (!selectedRider || !isAdmin) return;
+    setSaving(true);
+    try {
+      const { error: roleError } = await supabase.rpc('set_trip_participant_role', {
+        p_ride_id: id,
+        p_user_id: selectedRider.user_id,
+        p_role: targetRole,
+      });
+      if (roleError) throw roleError;
+      setRoster(prev => prev.map(r => r.user_id === selectedRider.user_id ? { ...r, role: targetRole } : r));
+      setRiderRoleModalVisible(false);
+      setSelectedRider(null);
+    } catch (e: any) {
+      Alert.alert('Role update failed', e?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function transferLeadership(rider: Rider) {
+    if (!isAdmin) return;
+    Alert.alert(
+      'Transfer Captaincy?',
+      `Make "${rider.display_name}" the Captain of this trip? You will become Co-Captain.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Transfer',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error: xferError } = await supabase.rpc('transfer_trip_leadership', {
+                p_ride_id: id,
+                p_new_admin_id: rider.user_id,
+              });
+              if (xferError) throw xferError;
+              setRiderRoleModalVisible(false);
+              setSelectedRider(null);
+              await load();
+              Alert.alert('Captain Transferred', `${rider.display_name} is now the trip captain.`);
+            } catch (e: any) {
+              Alert.alert('Transfer failed', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  async function removeParticipant(rider: Rider) {
+    if (!isAdmin) return;
+    Alert.alert(
+      'Remove Rider?',
+      `Remove "${rider.display_name}" from this group ride?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const { error: remError } = await supabase.rpc('remove_trip_participant', {
+                p_ride_id: id,
+                p_user_id: rider.user_id,
+              });
+              if (remError) throw remError;
+              setRoster(prev => prev.filter(r => r.user_id !== rider.user_id));
+              setRiderRoleModalVisible(false);
+              setSelectedRider(null);
+            } catch (e: any) {
+              Alert.alert('Could not remove rider', e?.message || 'Please try again.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function openCreateStage(dayNum?: number) {
@@ -596,6 +1008,16 @@ export default function TripWorkspaceScreen() {
     } catch (e: any) { setError(e?.message || 'Could not confirm arrival.'); }
     finally { setSaving(false); }
   }
+  async function closeRegroupPoint(pointId: string) {
+    setSaving(true); setError('');
+    try {
+      const { error: closeError } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
+      if (closeError) throw closeError;
+      await load();
+      Alert.alert('Regroup Point Closed', 'The regroup point has been closed and the pack notified.');
+    } catch (e: any) { setError(e?.message || 'Could not close regroup point.'); }
+    finally { setSaving(false); }
+  }
   async function inviteRider() {
     setSaving(true); setError('');
     try {
@@ -716,10 +1138,28 @@ export default function TripWorkspaceScreen() {
         <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void shareItinerary()}>
           <Text style={styles.secondaryText}>📤 Share touring itinerary</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={duplicateTrip} disabled={saving}>
+          <Text style={styles.secondaryText}>📋 Duplicate trip</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.actions}>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void exportGpxFile()}>
+          <Text style={styles.secondaryText}>🗺️ Export GPX route</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => {
+          const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
+          setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
+          setExpenseModal(true);
+        }}>
+          <Text style={styles.secondaryText}>💰 Add trip expense</Text>
+        </TouchableOpacity>
       </View>
       {isAdmin && <View style={styles.actions}>
         <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}><Text style={styles.primaryText}>✎ Edit route & stops</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={openTripEditor}><Text style={styles.secondaryText}>Trip details</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={() => void toggleArchiveTrip()} disabled={saving}>
+          <Text style={styles.secondaryText}>{trip.status === 'archived' ? '📂 Unarchive' : '📦 Archive'}</Text>
+        </TouchableOpacity>
       </View>}
       {isAdmin && <TouchableOpacity style={styles.dangerButton} disabled={saving} onPress={confirmDeleteTrip}>
         <Text style={styles.dangerText}>{saving ? 'Please wait…' : 'Delete trip permanently'}</Text>
@@ -859,17 +1299,135 @@ export default function TripWorkspaceScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Trip Expenses & Bill Splitting */}
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>💰 Trip Expenses & Splitting</Text>
+          <TouchableOpacity style={styles.smallButton} onPress={() => {
+            const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
+            setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
+            setExpenseModal(true);
+          }}>
+            <Text style={styles.smallButtonText}>＋ Add expense</Text>
+          </TouchableOpacity>
+        </View>
+
+        {expenseError && (
+          <View style={{ backgroundColor: '#FEE2E2', borderColor: '#EF4444', borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 8 }}>
+            <Text style={{ color: '#B91C1C', fontSize: 12, fontWeight: '700' }}>⚠️ {expenseError}</Text>
+            <TouchableOpacity onPress={() => void load()}>
+              <Text style={{ color: '#B91C1C', fontSize: 11, fontWeight: '800', marginTop: 4 }}>Tap to retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Spend Overview */}
+        {expenseSummary && <View style={styles.expenseSummaryRow}>
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={styles.expenseSummaryValue}>{expenseSummary.currency} {expenseSummary.total_spend}</Text>
+            <Text style={styles.expenseSummaryLabel}>TOTAL SPEND</Text>
+          </View>
+          <View style={styles.expenseSummaryDivider} />
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={styles.expenseSummaryValue}>{expenseSummary.currency} {expenseSummary.my_share}</Text>
+            <Text style={styles.expenseSummaryLabel}>YOUR SHARE</Text>
+          </View>
+          <View style={styles.expenseSummaryDivider} />
+          <View style={styles.expenseSummaryBlock}>
+            <Text style={[
+              styles.expenseSummaryValue,
+              expenseSummary.net_balance > 0 ? { color: '#16A34A' } : expenseSummary.net_balance < 0 ? { color: '#EA580C' } : null
+            ]}>
+              {expenseSummary.net_balance > 0 ? `+${expenseSummary.currency} ${expenseSummary.net_balance}` : expenseSummary.net_balance < 0 ? `-${expenseSummary.currency} ${Math.abs(expenseSummary.net_balance)}` : `${expenseSummary.currency} 0`}
+            </Text>
+            <Text style={styles.expenseSummaryLabel}>
+              {expenseSummary.net_balance > 0 ? 'YOU ARE OWED' : expenseSummary.net_balance < 0 ? 'YOU OWE' : 'SETTLED'}
+            </Text>
+          </View>
+        </View>}
+
+        {/* Settlement Breakdown ("Who Owes Whom") */}
+        {settlements.length > 0 && (
+          <View style={styles.settlementContainer}>
+            <Text style={styles.settlementTitle}>SETTLEMENT RESOLUTION</Text>
+            {settlements.map((s, idx) => (
+              <View key={idx} style={styles.settlementRow}>
+                <Text style={styles.settlementFrom}>{s.fromName}</Text>
+                <Text style={styles.settlementArrow}>pays</Text>
+                <Text style={styles.settlementTo}>{s.toName}</Text>
+                <Text style={styles.settlementAmount}>{s.currency} {s.amount}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Expenses List */}
+        {expenses === null ? null : expenses.length === 0 ? (
+          <Text style={styles.mutedSmall}>No expenses logged yet. Record fuel, food, and stays to split fairly.</Text>
+        ) : (
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {expenses.map(exp => (
+              <View key={exp.id} style={styles.expenseItem}>
+                <Text style={{ fontSize: 20 }}>{EXPENSE_CATEGORY_META[exp.category]?.icon || '💳'}</Text>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.expenseItemTitle}>{exp.title}</Text>
+                    <Text style={styles.expenseItemAmount}>{exp.currency} {exp.amount}</Text>
+                  </View>
+                  <Text style={styles.mutedSmall}>
+                    Paid by {exp.payer_name} · Split among {exp.splits.length} {exp.splits.length === 1 ? 'rider' : 'riders'} ({exp.currency} {exp.splits[0]?.amount || 0}/ea)
+                  </Text>
+                  {!!exp.notes && (
+                    <Text style={[styles.mutedSmall, { fontStyle: 'italic', marginTop: 2 }]}>
+                      {exp.notes}
+                    </Text>
+                  )}
+                </View>
+                {(exp.payer_id === user?.id || isAdmin) && (
+                  <TouchableOpacity
+                    style={styles.deleteExpenseBtn}
+                    onPress={() => handleDeleteExpense(exp.id, exp.title)}
+                    accessibilityLabel="Delete expense"
+                  >
+                    <Text style={styles.deleteExpenseIcon}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.section}>Regroup points · {regroupPoints.length}</Text>
-        {regroupPoints.map(point => <View key={point.id} style={styles.riderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.pointName}>{point.name}</Text>
-            <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
-          </View>
-          <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
-            <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
-          </TouchableOpacity>
-        </View>)}
+        {regroupPoints.map(point => {
+          const isClosed = point.status === 'closed';
+          return (
+            <View key={point.id} style={styles.riderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.pointName}>{point.name}</Text>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: isClosed ? theme.muted : theme.green }}>
+                    {isClosed ? 'CLOSED ✓' : 'OPEN'}
+                  </Text>
+                </View>
+                <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {!isClosed && (
+                  <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
+                    <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
+                  </TouchableOpacity>
+                )}
+                {isAdmin && !isClosed && (
+                  <TouchableOpacity style={[styles.smallButton, { borderColor: '#10B981' }]} disabled={saving} onPress={() => void closeRegroupPoint(point.id)}>
+                    <Text style={[styles.smallButtonText, { color: '#10B981' }]}>Close Point</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })}
         {isAdmin && <>
           <Text style={styles.label}>Add regroup point (coordinates)</Text>
           <TextInput style={styles.input} value={regroupName} onChangeText={setRegroupName} placeholder="Meetup / regroup location" placeholderTextColor="#77809a" />
@@ -886,32 +1444,170 @@ export default function TripWorkspaceScreen() {
         </>}
       </View>
 
+      {/* Ride Rules & Guidelines */}
+      {!!trip.ride_rules && (
+        <View style={styles.card}>
+          <Text style={styles.section}>⚠️ Group Ride Rules & Safety Guidelines</Text>
+          <Text style={[styles.note, { color: theme.text, fontSize: 13, lineHeight: 20 }]}>{trip.ride_rules}</Text>
+        </View>
+      )}
+
+      {/* Share Group Ride & Ride Code */}
       <View style={styles.card}>
-        <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
+        <Text style={styles.section}>Share Group Ride & Access</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.surfaceRaised, padding: 12, borderRadius: 10 }}>
+          <View>
+            <Text style={styles.mutedSmall}>RIDE CODE</Text>
+            <Text style={{ color: theme.accent, fontSize: 22, fontWeight: '800', letterSpacing: 2 }}>{trip.ride_code}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.primary}
+            onPress={() => {
+              void Share.share({
+                message: `Join our motorcycle trip "${trip.name}" on RideNTrack!\nRide Code: ${trip.ride_code}\nRoute: ${trip.origin} → ${trip.destination}\nOpen RideNTrack → Join a Group Ride.`,
+              });
+            }}
+          >
+            <Text style={styles.primaryText}>Share Code 📲</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={[styles.mutedSmall, { marginTop: 8 }]}>
+          Access Mode: {trip.visibility?.toUpperCase() || 'INVITE_ONLY'} · {trip.visibility === 'public' ? '🌍 Public (Community Touring Feed)' : trip.visibility === 'private' ? '🔒 Private (Invited Members Only)' : '🔑 Invite Only (Requires Ride Code)'}
+        </Text>
+      </View>
+
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>Group ride control · {roster.length} riders</Text>
+          <Text style={[styles.statValue, { fontSize: 13 }]}>
+            {roster.filter(r => r.is_active).length} / {trip.max_participants ? `${trip.max_participants} bikes` : '∞'}
+          </Text>
+        </View>
+
+        {/* Capacity Limit Alert if full */}
+        {trip.max_participants != null && roster.filter(r => r.is_active).length >= trip.max_participants && (
+          <View style={[styles.note, { backgroundColor: '#FF572222', borderColor: '#FF5722', borderWidth: 1, borderRadius: 8, padding: 8, marginVertical: 6 }]}>
+            <Text style={{ color: '#FF5722', fontWeight: '700', fontSize: 12 }}>⚠️ Pack has reached maximum capacity ({trip.max_participants} riders).</Text>
+          </View>
+        )}
+
+        {/* Current User Attendance RSVP Selector */}
+        {roster.some(r => r.user_id === user?.id && r.is_active) && (
+          <View style={{ marginVertical: 10, padding: 10, backgroundColor: theme.surfaceRaised, borderRadius: 10 }}>
+            <Text style={styles.label}>Your Attendance RSVP</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+              {(['confirmed', 'tentative', 'declined'] as const).map(status => {
+                const myRider = roster.find(r => r.user_id === user?.id);
+                const isSelected = (myRider?.attendance_status || 'confirmed') === status;
+                const meta = ATTENDANCE_STATUS_LABELS[status];
+                return (
+                  <TouchableOpacity
+                    key={status}
+                    disabled={updatingAttendance}
+                    style={[styles.smallButton, { flex: 1, alignItems: 'center' }, isSelected && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
+                    onPress={() => void handleUpdateAttendance(status)}
+                  >
+                    <Text style={[styles.smallButtonText, isSelected && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {roster.map(rider => {
           const age = rider.last_seen ? now - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
           const status = !rider.last_seen ? 'OFFLINE' : age > 120000 ? 'OFFLINE' : age > 30000 ? 'STALE' : 'LIVE';
-          return <View key={rider.user_id} style={styles.riderRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
-              <Text style={styles.mutedSmall}>{rider.role.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
+          const roleInfo = ROLE_LABELS[rider.role] || { title: rider.role, icon: '🏍️' };
+          const attMeta = rider.attendance_status ? ATTENDANCE_STATUS_LABELS[rider.attendance_status] : null;
+          return (
+            <View key={rider.user_id} style={styles.riderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 13 }}>{roleInfo.icon}</Text>
+                  <Text style={styles.pointName}>{rider.display_name}{rider.user_id === user?.id ? ' · you' : ''}</Text>
+                  {attMeta && (
+                    <Text style={{ fontSize: 11, color: attMeta.color, fontWeight: '700' }}>
+                      {attMeta.icon} {attMeta.label}
+                    </Text>
+                  )}
+                </View>
+                <Text style={styles.mutedSmall}>{roleInfo.title.toUpperCase()} · {status}{rider.last_seen ? ' · seen ' + new Date(rider.last_seen).toLocaleTimeString() : ' · no GPS update yet'}</Text>
+              </View>
+              {isAdmin && rider.user_id !== user?.id && (
+                <TouchableOpacity
+                  style={styles.smallButton}
+                  disabled={saving}
+                  onPress={() => {
+                    setSelectedRider(rider);
+                    setRiderRoleModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.smallButtonText}>Manage ⚙</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            {isAdmin && rider.user_id !== user?.id && <TouchableOpacity style={styles.smallButton} disabled={saving}
-              onPress={() => void changeRole(rider, rider.role === 'sweep' ? 'rider' : 'sweep')}>
-              <Text style={styles.smallButtonText}>{rider.role === 'sweep' ? 'Make rider' : 'Assign sweep'}</Text>
-            </TouchableOpacity>}
-          </View>;
+          );
         })}
         {isAdmin && <>
           <Text style={styles.label}>Invite by email (optional)</Text>
           <TextInput style={styles.input} value={inviteEmail} onChangeText={setInviteEmail} keyboardType="email-address" autoCapitalize="none" placeholder="rider@example.com" placeholderTextColor="#77809a" />
+          <Text style={[styles.mutedSmall, { marginTop: 8, marginBottom: 4 }]}>Assign invitation role</Text>
           <View style={styles.editorRow}>
-            <TouchableOpacity style={[styles.smallButton, inviteRole === 'rider' && styles.roleSelected]} onPress={() => setInviteRole('rider')}><Text style={styles.smallButtonText}>Rider</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.smallButton, inviteRole === 'sweep' && styles.roleSelected]} onPress={() => setInviteRole('sweep')}><Text style={styles.smallButtonText}>Sweep</Text></TouchableOpacity>
+            {(['member', 'sweeper', 'marshal', 'co-captain'] as const).map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.smallButton, inviteRole === r && styles.roleSelected]}
+                onPress={() => setInviteRole(r)}
+              >
+                <Text style={styles.smallButtonText}>{ROLE_LABELS[r].icon} {ROLE_LABELS[r].title}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
           <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void inviteRider()}><Text style={styles.primaryText}>{saving ? 'Please wait…' : 'Create & share 72-hour invitation'}</Text></TouchableOpacity>
         </>}
-        <Text style={styles.mutedSmall}>GPS status is based on the latest saved location: live ≤30 seconds, stale 30–120 seconds, offline/no recent update after 2 minutes. A missing GPS update is not proof that a rider has left the group.</Text>
+        <Text style={styles.mutedSmall}>GPS status: Live ≤30s, Stale 30–120s, Disconnected after 2 min. Captains and Sweepers coordinate the front and rear of the pack.</Text>
+      </View>
+
+      {/* Pre-Ride Preparation Checklist */}
+      <View style={styles.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={styles.section}>Pre-Ride Preparation Checklist</Text>
+          <View style={[styles.statusBadge, { backgroundColor: checklists.filter(c => c.my_completed).length === checklists.length && checklists.length > 0 ? '#4CAF50' : '#FF9800' }]}>
+            <Text style={styles.statusText}>
+              {checklists.filter(c => c.my_completed).length}/{checklists.length} READY
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.mutedSmall}>Personal motorcycle and riding safety verification before hitting the highway.</Text>
+
+        {checklists.length === 0 ? (
+          <Text style={[styles.mutedSmall, { marginVertical: 10 }]}>No checklist items defined for this ride.</Text>
+        ) : (
+          checklists.map(item => {
+            const cat = CHECKLIST_CATEGORY_LABELS[item.category] || { title: item.category, icon: '🔧' };
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.checklistItem, item.my_completed && styles.checklistItemDone]}
+                onPress={() => void toggleChecklist(item)}
+              >
+                <View style={[styles.checkbox, item.my_completed && styles.checkboxChecked]}>
+                  {item.my_completed && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>
+                    {cat.icon} {item.title}
+                  </Text>
+                  {!!item.description && <Text style={styles.mutedSmall}>{item.description}</Text>}
+                  <Text style={[styles.mutedSmall, { fontSize: 10, marginTop: 2, color: theme.accent }]}>
+                    {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
       </View>
 
       <View style={styles.card}>
@@ -1113,6 +1809,43 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Trip name" placeholderTextColor={theme.subtle} />
             <Text style={styles.label}>Description</Text>
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
+
+            <Text style={styles.label}>Access & Visibility</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
+              {[
+                { key: 'private', label: '🔒 Private' },
+                { key: 'invite_only', label: '🔑 Invite Only' },
+                { key: 'public', label: '🌍 Public Community' },
+              ].map(v => (
+                <TouchableOpacity
+                  key={v.key}
+                  style={[styles.smallButton, editVisibility === v.key && styles.roleSelected]}
+                  onPress={() => setEditVisibility(v.key as any)}
+                >
+                  <Text style={[styles.smallButtonText, editVisibility === v.key && { color: '#fff' }]}>{v.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Maximum Pack Capacity (riders)</Text>
+            <TextInput
+              style={styles.input}
+              value={editMaxParticipants}
+              onChangeText={setEditMaxParticipants}
+              keyboardType="number-pad"
+              placeholder="e.g. 15 (leave blank for unlimited)"
+              placeholderTextColor={theme.subtle}
+            />
+
+            <Text style={styles.label}>Group Ride Rules & Safety Guidelines</Text>
+            <TextInput
+              style={[styles.input, { height: 80 }]}
+              value={editRideRules}
+              onChangeText={setEditRideRules}
+              placeholder="e.g. Full riding gear mandatory, headlights ON, staggered formation, no overtaking leader or sweep"
+              placeholderTextColor={theme.subtle}
+              multiline
+            />
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
           </ScrollView>
@@ -1159,6 +1892,170 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save journal entry'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={() => setJournalModalVisible(false)}>
+              <Text style={styles.secondaryText}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Role Management Modal */}
+      <Modal visible={riderRoleModalVisible} transparent animationType="slide" onRequestClose={() => setRiderRoleModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModal}>
+            <Text style={styles.section}>Manage Rider Role</Text>
+            {selectedRider && (
+              <>
+                <Text style={styles.pointName}>{selectedRider.display_name}</Text>
+                <Text style={[styles.mutedSmall, { marginBottom: 14 }]}>
+                  Current Role: {ROLE_LABELS[selectedRider.role]?.icon || '🏍️'} {ROLE_LABELS[selectedRider.role]?.title || selectedRider.role}
+                </Text>
+
+                <Text style={styles.label}>Assign Role</Text>
+                <View style={{ gap: 8, marginVertical: 8 }}>
+                  {(['co-captain', 'marshal', 'sweeper', 'member'] as const).map(r => (
+                    <TouchableOpacity
+                      key={r}
+                      style={[styles.smallButton, { paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }, selectedRider.role === r && styles.roleSelected]}
+                      disabled={saving}
+                      onPress={() => void updateRiderRole(r)}
+                    >
+                      <Text style={{ fontSize: 16 }}>{ROLE_LABELS[r].icon}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.smallButtonText, { fontWeight: '800' }]}>{ROLE_LABELS[r].title}</Text>
+                        <Text style={[styles.mutedSmall, { fontSize: 10 }]}>
+                          {r === 'co-captain' && 'Route navigator & second-in-command'}
+                          {r === 'marshal' && 'Traffic blocker & intersection safety officer'}
+                          {r === 'sweeper' && 'Tail rider & roadside mechanical backup'}
+                          {r === 'member' && 'Pack rider traveling in formation'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={[styles.label, { marginTop: 10 }]}>Update Attendance Status</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
+                  {(['confirmed', 'tentative', 'declined', 'attended'] as const).map(att => {
+                    const isSel = (selectedRider.attendance_status || 'confirmed') === att;
+                    const meta = ATTENDANCE_STATUS_LABELS[att];
+                    return (
+                      <TouchableOpacity
+                        key={att}
+                        disabled={updatingAttendance}
+                        style={[styles.smallButton, isSel && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
+                        onPress={async () => {
+                          const ok = await handleUpdateAttendance(att, selectedRider.user_id);
+                          if (ok) {
+                            setSelectedRider(prev => prev ? { ...prev, attendance_status: att } : null);
+                          }
+                        }}
+                      >
+                        <Text style={[styles.smallButtonText, isSel && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]}
+                  disabled={saving}
+                  onPress={() => void transferLeadership(selectedRider)}
+                >
+                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>👑 Transfer Captain Role</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.dangerButton, { marginTop: 8 }]}
+                  disabled={saving}
+                  onPress={() => void removeParticipant(selectedRider)}
+                >
+                  <Text style={styles.dangerText}>Remove from Group Ride</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={() => setRiderRoleModalVisible(false)}>
+                  <Text style={styles.secondaryText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add Expense Modal */}
+      <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.section}>💰 Add Trip Expense</Text>
+            <Text style={styles.mutedSmall}>Log group spending and split equally among selected riders.</Text>
+
+            <Text style={styles.label}>Expense Title *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Petrol in Sakleshpur, Dinner at Dhaba"
+              placeholderTextColor={theme.subtle}
+              value={newExpenseTitle}
+              onChangeText={setNewExpenseTitle}
+            />
+
+            <Text style={styles.label}>Amount ({trip.expense_currency}) *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="0.00"
+              placeholderTextColor={theme.subtle}
+              keyboardType="decimal-pad"
+              value={newExpenseAmount}
+              onChangeText={setNewExpenseAmount}
+            />
+
+            <Text style={styles.label}>Category</Text>
+            <View style={styles.categoryRow}>
+              {(Object.keys(EXPENSE_CATEGORY_META) as TripExpenseCategory[]).map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.categoryPill, newExpenseCategory === cat && styles.categoryPillActive]}
+                  onPress={() => setNewExpenseCategory(cat)}
+                >
+                  <Text style={[styles.categoryPillText, newExpenseCategory === cat && styles.categoryPillTextActive]}>
+                    {EXPENSE_CATEGORY_META[cat].icon} {EXPENSE_CATEGORY_META[cat].label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Split Among Riders ({newExpenseSplitUsers.length} selected)</Text>
+            <View style={{ gap: 4, marginVertical: 4 }}>
+              {roster.filter(r => r.is_active).map(r => {
+                const isSelected = newExpenseSplitUsers.includes(r.user_id);
+                return (
+                  <TouchableOpacity
+                    key={r.user_id}
+                    style={styles.splitUserRow}
+                    onPress={() => {
+                      setNewExpenseSplitUsers(prev =>
+                        isSelected ? prev.filter(uid => uid !== r.user_id) : [...prev, r.user_id]
+                      );
+                    }}
+                  >
+                    <Text style={{ fontSize: 16 }}>{isSelected ? '☑' : '☐'}</Text>
+                    <Text style={styles.splitUserName}>{r.display_name} {r.user_id === user?.id ? '(you)' : ''}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Any details (e.g. paid via UPI)"
+              placeholderTextColor={theme.subtle}
+              value={newExpenseNotes}
+              onChangeText={setNewExpenseNotes}
+            />
+
+            <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={handleAddExpense}>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save Expense'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => setExpenseModal(false)}>
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -1233,4 +2130,37 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
   advisoryCaution: { backgroundColor: '#FEF9C3', borderColor: '#CA8A04' },
   advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
+  statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  checklistItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
+  checklistItemDone: { opacity: 0.85 },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: c.muted, alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked: { backgroundColor: c.accent, borderColor: c.accent },
+  checkmark: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  checklistTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
+  checklistTitleDone: { textDecorationLine: 'line-through', color: c.muted },
+  expenseSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12 },
+  expenseSummaryBlock: { alignItems: 'center', flex: 1 },
+  expenseSummaryValue: { color: c.text, fontSize: 16, fontWeight: '900' },
+  expenseSummaryLabel: { color: c.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 },
+  expenseSummaryDivider: { width: 1, height: 26, backgroundColor: c.border },
+  settlementContainer: { backgroundColor: c.accentSoft, borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: c.accent },
+  settlementTitle: { color: c.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 6 },
+  settlementRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 2 },
+  settlementFrom: { color: c.text, fontSize: 12, fontWeight: '700' },
+  settlementArrow: { color: c.muted, fontSize: 11 },
+  settlementTo: { color: c.text, fontSize: 12, fontWeight: '700' },
+  settlementAmount: { color: c.accent, fontSize: 12, fontWeight: '900', marginLeft: 'auto' },
+  expenseItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: c.surfaceRaised, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: c.border },
+  expenseItemTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
+  expenseItemAmount: { color: c.accent, fontSize: 13, fontWeight: '900' },
+  deleteExpenseBtn: { padding: 4 },
+  deleteExpenseIcon: { color: c.muted, fontSize: 12, fontWeight: '700' },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 },
+  categoryPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.background, borderWidth: 1, borderColor: c.border },
+  categoryPillActive: { backgroundColor: c.accentSoft, borderColor: c.accent },
+  categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
+  categoryPillTextActive: { color: c.accent, fontWeight: '800' },
+  splitUserRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border },
+  splitUserName: { color: c.text, fontSize: 12, fontWeight: '600' },
 });
