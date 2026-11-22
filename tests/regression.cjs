@@ -1825,6 +1825,40 @@ test('Trip Details renders sticky section switcher, sticky bottom action bar, da
   assert.match(tripSource, /heroCoverWrapper/);
 });
 
+test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm offline queue, and hold-to-confirm SOS', () => {
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+
+  // Cockpit HUD status strip: GPS freshness, cellular lock, pack count
+  assert.match(rideSource, /cockpitStatusStrip/);
+  assert.match(rideSource, /GPS FRESH|NO FIX/);
+  assert.match(rideSource, /4G LOCK|OFFLINE/);
+  assert.match(rideSource, /PACK/);
+
+  // Calm offline queue indicator (never alarming, clear sync explanation)
+  assert.match(rideSource, /calmOfflineBanner/);
+  assert.match(rideSource, /queued, syncing when signal returns/);
+
+  // Next apex waypoint split HUD with distance remaining and current speed
+  assert.match(rideSource, /heroApexSplitRow/);
+  assert.match(rideSource, /NEXT APEX TARGET/);
+  assert.match(rideSource, /DIST REMAINING/);
+  assert.match(rideSource, /currentSpeedKmh/);
+  assert.match(rideSource, /distanceCoveredMeters/);
+
+  // Giant 64dp+ glove-friendly action deck
+  assert.match(rideSource, /giantActionDeck/);
+  assert.match(rideSource, /giantActionBtn/);
+  assert.match(rideSource, /minHeight:\s*64/);
+
+  // Hold-to-confirm SOS emergency button (2000ms duration with progress ring)
+  assert.match(rideSource, /HoldToConfirmButton/);
+  assert.match(rideSource, /durationMs=\{2000\}/);
+  assert.match(rideSource, /EMERGENCY SOS/);
+
+  // Screen keep-awake while tracking
+  assert.match(rideSource, /useKeepAwake/);
+});
+
 
 
 
