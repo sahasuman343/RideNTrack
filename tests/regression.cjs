@@ -1690,6 +1690,49 @@ test('live ride displays incoming broadcast alerts as a floating card on the map
   assert.ok(fs.existsSync(path.resolve('mobile/assets/sounds/alert_chime.wav')));
 });
 
+test('rider-first theme defines dark, light, and high-contrast sunlight ride mode palettes', () => {
+  const themeSource = fs.readFileSync(path.resolve('mobile/src/theme.tsx'), 'utf8');
+  assert.match(themeSource, /dark:\s*\{/);
+  assert.match(themeSource, /ride:\s*\{/);
+  assert.match(themeSource, /light:\s*\{/);
+  assert.match(themeSource, /#FF7A1A/); // Action Amber
+  assert.match(themeSource, /#10B981/); // Telemetry Live Green
+  assert.match(themeSource, /#EF4444/); // Hazard SOS
+  assert.match(themeSource, /isRideMode/);
+});
+
+test('shared UI primitives provide Card, StatusBadge, LiveDot, SegmentedControl, Button, HoldToConfirmButton, RouteLine, AvatarStack, Skeleton', () => {
+  const uiIndex = fs.readFileSync(path.resolve('mobile/src/components/ui/index.ts'), 'utf8');
+  assert.match(uiIndex, /export \* from '\.\/Card'/);
+  assert.match(uiIndex, /export \* from '\.\/StatusBadge'/);
+  assert.match(uiIndex, /export \* from '\.\/LiveDot'/);
+  assert.match(uiIndex, /export \* from '\.\/SegmentedControl'/);
+  assert.match(uiIndex, /export \* from '\.\/Button'/);
+  assert.match(uiIndex, /export \* from '\.\/HoldToConfirmButton'/);
+  assert.match(uiIndex, /export \* from '\.\/RouteLine'/);
+  assert.match(uiIndex, /export \* from '\.\/Avatar'/);
+  assert.match(uiIndex, /export \* from '\.\/AvatarStack'/);
+  assert.match(uiIndex, /export \* from '\.\/Skeleton'/);
+
+  const badgeSource = fs.readFileSync(path.resolve('mobile/src/components/ui/StatusBadge.tsx'), 'utf8');
+  // Never color alone: requires icon and label
+  assert.match(badgeSource, /LiveDot/);
+  assert.match(badgeSource, /accessibilityLabel=\{`Status: \$\{title\}`\}/);
+
+  const sosSource = fs.readFileSync(path.resolve('mobile/src/components/ui/HoldToConfirmButton.tsx'), 'utf8');
+  // 2-second hold-down threshold with cancel on release
+  assert.match(sosSource, /durationMs\s*=\s*2000/);
+  assert.match(sosSource, /onPressIn=\{handlePressIn\}/);
+  assert.match(sosSource, /onPressOut=\{handlePressOut\}/);
+  assert.match(sosSource, /Vibration\.vibrate/);
+  assert.match(sosSource, /minHeight:\s*64/);
+
+  const segSource = fs.readFileSync(path.resolve('mobile/src/components/ui/SegmentedControl.tsx'), 'utf8');
+  assert.match(segSource, /accessibilityRole="tablist"/);
+  assert.match(segSource, /minHeight:\s*48/);
+});
+
+
 
 
 

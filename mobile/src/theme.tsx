@@ -1,59 +1,199 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type ThemeMode = 'system' | 'light' | 'dark' | 'ride';
+
 export type RidePalette = {
-  background: string; surface: string; surfaceRaised: string; text: string; muted: string;
-  subtle: string; border: string; accent: string; accentSoft: string; green: string;
-  greenSoft: string; danger: string; input: string; shadow: string;
+  background: string;
+  surface: string;
+  surfaceRaised: string;
+  surfaceHigh: string;
+  text: string;
+  textMuted: string;
+  muted: string;
+  subtle: string;
+  border: string;
+  accent: string;
+  accentSoft: string;
+  green: string;
+  greenSoft: string;
+  tertiary: string;
+  danger: string;
+  dangerSoft: string;
+  input: string;
+  shadow: string;
 };
 
-const palettes: Record<'light' | 'dark', RidePalette> = {
-  light: {
-    background: '#F2F0E8', surface: '#FFFDF7', surfaceRaised: '#E9E6DC',
-    text: '#202B25', muted: '#68756D', subtle: '#8A948A', border: '#D8D9CF',
-    accent: '#D96535', accentSoft: '#F8E5D9', green: '#356B53', greenSoft: '#E2EDE3',
-    danger: '#B94E40', input: '#FFFFFF', shadow: '#26352B',
-  },
+export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
   dark: {
-    background: '#14221D', surface: '#1D3028', surfaceRaised: '#263B32',
-    text: '#F2F0E8', muted: '#B1BDB3', subtle: '#87968B', border: '#3B5045',
-    accent: '#E47A49', accentSoft: '#493326', green: '#82B69A', greenSoft: '#294438',
-    danger: '#F08B7D', input: '#192B23', shadow: '#000000',
+    background: '#0E1013',
+    surface: '#111317',
+    surfaceRaised: '#1E2023',
+    surfaceHigh: '#282A2D',
+    text: '#E2E2E6',
+    textMuted: '#94A3B8',
+    muted: '#94A3B8',
+    subtle: '#64748B',
+    border: '#282A2D',
+    accent: '#FF7A1A',
+    accentSoft: 'rgba(255, 122, 26, 0.15)',
+    green: '#10B981',
+    greenSoft: 'rgba(16, 185, 129, 0.15)',
+    tertiary: '#38BDF8',
+    danger: '#EF4444',
+    dangerSoft: 'rgba(239, 68, 68, 0.18)',
+    input: '#171A1E',
+    shadow: '#000000',
+  },
+  ride: {
+    background: '#050706',
+    surface: '#0D110F',
+    surfaceRaised: '#141A17',
+    surfaceHigh: '#1C2420',
+    text: '#FFFFFF',
+    textMuted: '#A3B8AD',
+    muted: '#A3B8AD',
+    subtle: '#6B8276',
+    border: '#2E3D35',
+    accent: '#FF7A1A',
+    accentSoft: 'rgba(255, 122, 26, 0.25)',
+    green: '#00E676',
+    greenSoft: 'rgba(0, 230, 118, 0.25)',
+    tertiary: '#00E5FF',
+    danger: '#FF1744',
+    dangerSoft: 'rgba(255, 23, 68, 0.3)',
+    input: '#0D110F',
+    shadow: '#000000',
+  },
+  light: {
+    background: '#F2F0E8',
+    surface: '#FFFDF7',
+    surfaceRaised: '#E9E6DC',
+    surfaceHigh: '#DDD9CC',
+    text: '#111317',
+    textMuted: '#68756D',
+    muted: '#68756D',
+    subtle: '#8A948A',
+    border: '#D8D9CF',
+    accent: '#FF7A1A',
+    accentSoft: 'rgba(255, 122, 26, 0.15)',
+    green: '#0D9488',
+    greenSoft: 'rgba(13, 148, 136, 0.12)',
+    tertiary: '#0284C7',
+    danger: '#DC2626',
+    dangerSoft: 'rgba(220, 38, 38, 0.12)',
+    input: '#FFFFFF',
+    shadow: '#26352B',
   },
 };
 
-type ThemeContextValue = { mode: ThemeMode; setMode: (mode: ThemeMode) => void; palette: RidePalette };
+export const typography = {
+  displayTelemetry: {
+    fontFamily: Platform.select({ ios: 'SpaceGrotesk-Bold', android: 'SpaceGrotesk-Bold', default: 'monospace' }),
+    fontSize: 56,
+    fontWeight: '700' as const,
+    letterSpacing: -1.5,
+  },
+  headlineLg: {
+    fontSize: 32,
+    fontWeight: '800' as const,
+    letterSpacing: -0.5,
+  },
+  headlineMd: {
+    fontSize: 24,
+    fontWeight: '700' as const,
+    letterSpacing: -0.3,
+  },
+  headlineSm: {
+    fontSize: 20,
+    fontWeight: '600' as const,
+  },
+  labelNumeric: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    fontVariant: ['tabular-nums' as const],
+  },
+  labelCaps: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    letterSpacing: 1.0,
+    textTransform: 'uppercase' as const,
+  },
+  titleMd: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  bodyLg: {
+    fontSize: 16,
+    fontWeight: '400' as const,
+  },
+  bodyMd: {
+    fontSize: 14,
+    fontWeight: '400' as const,
+  },
+  bodySm: {
+    fontSize: 12,
+    fontWeight: '400' as const,
+  },
+};
+
+type ThemeContextValue = {
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+  palette: RidePalette;
+  isRideMode: boolean;
+};
+
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function RideThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [mode, setModeState] = useState<ThemeMode>('system');
+  const [mode, setModeState] = useState<ThemeMode>('dark');
+
   useEffect(() => {
     let mounted = true;
-    void AsyncStorage.getItem('ridentrack.theme-mode').then(value => {
-      if (mounted && (value === 'light' || value === 'dark' || value === 'system')) setModeState(value);
-    }).catch(() => {});
-    return () => { mounted = false; };
+    void AsyncStorage.getItem('ridentrack.theme-mode')
+      .then(value => {
+        if (mounted && (value === 'light' || value === 'dark' || value === 'ride' || value === 'system')) {
+          setModeState(value);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
   }, []);
+
   const setMode = (next: ThemeMode) => {
     setModeState(next);
     void AsyncStorage.setItem('ridentrack.theme-mode', next).catch(() => {});
   };
+
   const resolved = mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
-  const value = useMemo(() => ({ mode, setMode, palette: palettes[resolved] }), [mode, resolved]);
+  const palette = palettes[resolved];
+  const isRideMode = resolved === 'ride';
+
+  const value = useMemo(
+    () => ({ mode, setMode, palette, isRideMode }),
+    [mode, resolved, palette, isRideMode]
+  );
+
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useRideTheme() {
   const context = useContext(ThemeContext);
   const systemScheme = useColorScheme();
-  return context?.palette || palettes[systemScheme === 'dark' ? 'dark' : 'light'];
+  return context?.palette || palettes[systemScheme === 'light' ? 'light' : 'dark'];
 }
 
 export function useRideThemeSettings() {
   const context = useContext(ThemeContext);
   if (!context) throw new Error('useRideThemeSettings must be used inside RideThemeProvider');
-  return { mode: context.mode, setMode: context.setMode };
+  return {
+    mode: context.mode,
+    setMode: context.setMode,
+    isRideMode: context.isRideMode,
+  };
 }
