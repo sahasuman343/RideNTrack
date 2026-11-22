@@ -27,6 +27,7 @@ interface AuthContextType {
     mileage_km_per_liter?: number | null;
     fuel_reserve_liters?: number | null;
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
+    blood_group?: string | null;
   }) => Promise<void>;
 }
 
@@ -143,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     mileage_km_per_liter?: number | null;
     fuel_reserve_liters?: number | null;
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
+    blood_group?: string | null;
   }) {
     if (!activeUserId.current) throw new Error('You must be signed in to edit your profile.');
     const { data, error } = await supabase.from('profiles').update(updates).eq('id', activeUserId.current).select('*').single();

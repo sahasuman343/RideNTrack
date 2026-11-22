@@ -32,6 +32,7 @@ export default function ProfileScreen() {
   const [displayName, setDisplayName] = useState(profile?.display_name || '');
   const [phone, setPhone] = useState(profile?.phone || '');
   const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
+  const [bloodGroup, setBloodGroup] = useState(profile?.blood_group || '');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
@@ -131,6 +132,7 @@ export default function ProfileScreen() {
     setDisplayName(profile?.display_name || '');
     setPhone(profile?.phone || '');
     setEmergencyContact(profile?.emergency_contact || '');
+    setBloodGroup(profile?.blood_group || '');
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
@@ -179,6 +181,7 @@ export default function ProfileScreen() {
         display_name: displayName.trim(),
         phone: phone.trim() || null,
         emergency_contact: emergencyContact.trim() || null,
+        blood_group: bloodGroup.trim() || null,
         avatar_url: avatarUrl.trim() || null,
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
@@ -311,12 +314,14 @@ export default function ProfileScreen() {
           <View style={styles.iceCard}>
             <View style={styles.iceLeft}>
               <Text style={styles.iceIcon}>🏥</Text>
-              <Text style={styles.iceBloodType}>O+ POSITIVE</Text>
+              <Text style={styles.iceBloodType}>
+                {profile?.blood_group ? profile.blood_group.toUpperCase() : 'Not recorded'}
+              </Text>
             </View>
             <View style={styles.iceRight}>
               <Text style={styles.iceLabel}>ICE:</Text>
               <Text style={styles.icePhone}>
-                {profile?.emergency_contact || '+91 98201 44521'}
+                {profile?.emergency_contact || 'Not recorded'}
               </Text>
             </View>
           </View>
@@ -569,6 +574,8 @@ export default function ProfileScreen() {
             <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91..." placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Emergency contact</Text>
             <TextInput style={styles.input} value={emergencyContact} onChangeText={setEmergencyContact} keyboardType="phone-pad" placeholder="Emergency contact phone (+91...)" placeholderTextColor={theme.subtle} />
+            <Text style={styles.fieldLabel}>Blood group (ICE medical)</Text>
+            <TextInput style={styles.input} value={bloodGroup} onChangeText={setBloodGroup} autoCapitalize="characters" placeholder="e.g. O+, A+, B-, AB+" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Profile photo URL</Text>
             <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
 

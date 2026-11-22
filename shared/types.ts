@@ -13,6 +13,7 @@ export interface User {
   mileage_km_per_liter?: number | null;
   fuel_reserve_liters?: number | null;
   motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
+  blood_group?: string | null;
 }
 
 export type Profile = User;

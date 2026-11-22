@@ -1954,7 +1954,9 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
 
   // Medical and ICE emergency tag
   assert.match(profileSource, /iceCard/);
-  assert.match(profileSource, /O\+ POSITIVE/);
+  assert.match(profileSource, /profile\??\.blood_group/);
+  assert.doesNotMatch(profileSource, /O\+ POSITIVE/);
+  assert.doesNotMatch(profileSource, /\+91 98201 44521/);
   assert.match(profileSource, /ICE:/);
 
   // Primary steed card
