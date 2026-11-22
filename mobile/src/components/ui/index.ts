@@ -8,3 +8,5 @@ export * from './RouteLine';
 export * from './Avatar';
 export * from './AvatarStack';
 export * from './Skeleton';
+export * from './FallbackTripCover';
+

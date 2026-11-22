@@ -22,6 +22,7 @@ import {
   RouteLine,
   Skeleton,
   Button,
+  FallbackTripCover,
 } from '../../src/components/ui';
 
 export type TripsFilter = 'all' | 'live' | 'planned' | 'past' | 'community';
@@ -321,12 +322,21 @@ export default function TripsScreen() {
         </View>
       )}
 
-      {/* Loading Skeletons */}
+      {/* Loading Skeletons matching exact card shape */}
       {loading ? (
         <View style={styles.skeletonContainer}>
-          <Skeleton height={160} style={{ marginBottom: 16 }} />
-          <Skeleton height={140} style={{ marginBottom: 16 }} />
-          <Skeleton height={140} />
+          <Card variant="raised" style={styles.tripCard}>
+            <Skeleton height={124} borderRadius={16} style={{ marginBottom: 12 }} />
+            <Skeleton height={22} width="65%" style={{ marginBottom: 10 }} />
+            <Skeleton height={14} width="100%" style={{ marginBottom: 12 }} />
+            <Skeleton height={16} width="45%" />
+          </Card>
+          <Card variant="raised" style={styles.tripCard}>
+            <Skeleton height={124} borderRadius={16} style={{ marginBottom: 12 }} />
+            <Skeleton height={22} width="50%" style={{ marginBottom: 10 }} />
+            <Skeleton height={14} width="100%" style={{ marginBottom: 12 }} />
+            <Skeleton height={16} width="40%" />
+          </Card>
         </View>
       ) : filterTab === 'community' ? (
         communityTrips.length === 0 ? (
@@ -357,6 +367,12 @@ export default function TripsScreen() {
                   style={styles.tripCard}
                   onPress={() => router.push(`/trip/${item.id}`)}
                 >
+                  <FallbackTripCover
+                    tripId={item.id}
+                    name={item.name}
+                    status="planned"
+                    elevation={item.estimated_distance_meters ? `${Math.round(item.estimated_distance_meters / 1000)}km` : undefined}
+                  />
                   <View style={styles.cardHeader}>
                     <Text style={styles.tripName}>{item.name}</Text>
                     <TouchableOpacity
@@ -449,9 +465,19 @@ export default function TripsScreen() {
                 style={[styles.tripCard, isLive && styles.liveCard]}
                 onPress={() => router.push(`/trip/${item.id}`)}
               >
-                {/* Fallback Cover & Status Badge Header */}
-                <View style={styles.cardTopRow}>
-                  <StatusBadge status={item.status} size="sm" />
+                {/* Fallback Cover with Overlaid Status Badge (Icon + Color) */}
+                <FallbackTripCover
+                  tripId={item.id}
+                  name={item.name}
+                  status={item.status}
+                  timeTag={dates}
+                  elevation={km}
+                />
+
+                <View style={styles.cardHeader}>
+                  <Text style={styles.tripName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
                   <View style={styles.actionsGroup}>
                     {/* Duplicate Action */}
                     <TouchableOpacity
@@ -491,16 +517,11 @@ export default function TripsScreen() {
                   </View>
                 </View>
 
-                {/* Trip Name & Route */}
-                <Text style={styles.tripName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-
                 {/* Signature Route Line */}
                 <RouteLine
                   origin={item.origin}
                   destination={item.destination}
-                  style={{ marginVertical: 12 }}
+                  style={{ marginVertical: 10 }}
                 />
 
                 {/* Footer Metadata */}
