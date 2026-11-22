@@ -1760,6 +1760,8 @@ test('navigation architecture defines exactly three bottom tabs with Home as def
   assert.match(tripsSource, /RouteLine/);
   assert.match(tripsSource, /Skeleton/);
   assert.match(tripsSource, /a\.status === 'active' && b\.status !== 'active'/); // Pinned live trips
+  assert.match(tripsSource, /delete_trip[\s\S]*stopBackgroundLocationUpdates/);
+  assert.match(tripsSource, /leave_ride[\s\S]*stopBackgroundLocationUpdates/);
 });
 
 test('Home screen renders time-based greeting, default motorcycle, hero ongoing trip with live LED, and quiet next-trip line for empty state', () => {
