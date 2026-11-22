@@ -1501,7 +1501,7 @@ export default function TripWorkspaceScreen() {
                   <Text style={styles.sectionTitle}>Route Difficulty & Surface Profile</Text>
                 </View>
                 <View style={styles.tierPill}>
-                  <Text style={styles.tierPillText}>Tier 4 Expedition</Text>
+                  <Text style={styles.tierPillText}>Tier 4 Expedition (Advisory Preview)</Text>
                 </View>
               </View>
 
@@ -1518,15 +1518,15 @@ export default function TripWorkspaceScreen() {
               <View style={styles.elevationStatsRow}>
                 <View style={styles.elevationStatBlock}>
                   <Text style={styles.elevationStatLabel}>MAX ALTITUDE</Text>
-                  <Text style={styles.elevationStatValue}>5,359 m</Text>
+                  <Text style={styles.elevationStatValue}>5,359 m (Advisory)</Text>
                 </View>
                 <View style={styles.elevationStatBlock}>
                   <Text style={styles.elevationStatLabel}>OFF-ROAD</Text>
-                  <Text style={[styles.elevationStatValue, { color: theme.accent }]}>35% Slag</Text>
+                  <Text style={[styles.elevationStatValue, { color: theme.accent }]}>Estimated</Text>
                 </View>
                 <View style={styles.elevationStatBlock}>
                   <Text style={styles.elevationStatLabel}>CURRENT PACK</Text>
-                  <Text style={[styles.elevationStatValue, { color: theme.green }]}>4,530 m</Text>
+                  <Text style={[styles.elevationStatValue, { color: theme.green }]}>Pending Fix</Text>
                 </View>
               </View>
             </Card>
@@ -2276,15 +2276,15 @@ export default function TripWorkspaceScreen() {
             style={styles.tacticalSosBtn}
             onPress={() => {
               Alert.alert(
-                'Emergency Distress Ping',
-                `Broadcast satellite distress signal to group sweep & base camp for "${trip.name}"?`,
+                'Open Emergency Controls?',
+                `Access live emergency SOS and distress beacon controls for "${trip.name}"?`,
                 [
                   { text: 'Cancel', style: 'cancel' },
-                  { text: 'Broadcast Distress', style: 'destructive', onPress: () => router.push('/ride/' + trip.id) },
+                  { text: 'Open emergency controls', style: 'destructive', onPress: () => router.push('/ride/' + trip.id) },
                 ]
               );
             }}
-            accessibilityLabel="Trip Emergency Broadcast"
+            accessibilityLabel="Open emergency controls"
           >
             <Text style={styles.tacticalSosIcon}>🚨</Text>
             <Text style={styles.tacticalSosLabel}>EMERG</Text>

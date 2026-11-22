@@ -388,7 +388,7 @@ export default function ProfileScreen() {
             <View style={styles.steedMetricCol}>
               <Text style={styles.steedMetricLabel}>Estimated fuel range (advisory)</Text>
               <Text style={[styles.steedMetricValue, { color: theme.green }]}>
-                ~{safeRangeKm || 306} KM
+                {safeRangeKm != null ? `~${safeRangeKm} KM` : 'Unavailable'}
               </Text>
               <Text style={styles.steedMetricSub}>Safe Range</Text>
             </View>
@@ -462,7 +462,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Emergency SOS Protocols</Text>
-                <Text style={styles.systemItemSub}>Auto Crash-Detect • Armed</Text>
+                <Text style={styles.systemItemSub}>Manual SOS & Emergency Contacts</Text>
               </View>
               <Text style={styles.systemItemArrow}>›</Text>
             </View>

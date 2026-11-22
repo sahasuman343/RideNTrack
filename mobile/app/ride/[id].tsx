@@ -1408,7 +1408,7 @@ export default function LiveRideScreen() {
 
               {/* Action 4: Hold-to-Confirm Emergency SOS (2s Radial Countdown) */}
               <HoldToConfirmButton
-                onConfirm={triggerSosWorkflow}
+                onConfirm={broadcastSosToGroup}
                 durationMs={2000}
                 title="HOLD FOR SOS"
                 confirmTitle="SOS DISPATCHED"
@@ -1529,7 +1529,7 @@ export default function LiveRideScreen() {
             <FlatList
               data={points}
               style={s.riders}
-              scrollEnabled={false}
+              scrollEnabled={true}
               keyExtractor={item => item.user_id}
               initialNumToRender={8}
               maxToRenderPerBatch={8}

@@ -20,7 +20,7 @@ import { LiveDot } from '../../src/components/ui';
 
 export default function JoinRideScreen() {
   const params = useLocalSearchParams<{ code?: string; token?: string; rideId?: string }>();
-  const [activeTab, setActiveTab] = useState<'qr' | 'code' | 'link'>('qr');
+  const [activeTab, setActiveTab] = useState<'qr' | 'code' | 'link'>('code');
   const [code, setCode] = useState(params.code ? params.code.toUpperCase() : '');
   const [token, setToken] = useState(params.token || '');
   const [loading, setLoading] = useState(false);

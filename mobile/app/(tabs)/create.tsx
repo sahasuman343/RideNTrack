@@ -297,10 +297,28 @@ export default function CreateRideScreen() {
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  // Load autosaved draft on mount
+  const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autosavePromiseRef = useRef<Promise<any> | null>(null);
+  const isDraftClearedRef = useRef(false);
+  const isCreatingRef = useRef(false);
+
+  // Load autosaved draft scoped to active user on mount / account switch
   useEffect(() => {
+    if (!user?.id) {
+      // Clear form when logged out
+      setName('');
+      setOrigin(null);
+      setDestination(null);
+      setStartDate('');
+      setEndDate('');
+      setStops([]);
+      setStay(null);
+      return;
+    }
+
     let cancelled = false;
-    AsyncStorage.getItem(DRAFT_STORAGE_KEY)
+    const scopedKey = `${DRAFT_STORAGE_KEY}_${user.id}`;
+    AsyncStorage.getItem(scopedKey)
       .then((raw) => {
         if (cancelled || !raw) return;
         try {
@@ -327,11 +345,16 @@ export default function CreateRideScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.id]);
 
-  // Autosave draft to AsyncStorage (debounced)
+  // Autosave draft to scoped AsyncStorage (debounced)
   useEffect(() => {
-    const timer = setTimeout(() => {
+    if (!user?.id || isDraftClearedRef.current) return;
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+    const scopedKey = `${DRAFT_STORAGE_KEY}_${user.id}`;
+    autosaveTimerRef.current = setTimeout(() => {
       const draftData = {
         name,
         origin,
@@ -349,23 +372,32 @@ export default function CreateRideScreen() {
         stayPrice,
         savedAt: Date.now(),
       };
-      AsyncStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftData))
+      autosavePromiseRef.current = AsyncStorage.setItem(scopedKey, JSON.stringify(draftData))
         .then(() => setDraftSavedTime('Draft Saved'))
         .catch(() => {});
     }, 1000);
-    return () => clearTimeout(timer);
-  }, [name, origin, destination, startDate, endDate, tripType, description, meetup, stops, stay, stayType, checkIn, checkOut, stayPrice]);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [user?.id, name, origin, destination, startDate, endDate, tripType, description, meetup, stops, stay, stayType, checkIn, checkOut, stayPrice]);
 
-  // Route preview fetcher
+  // Route preview fetcher (includes origin, meetup, intermediate stops, and destination)
   useEffect(() => {
     if (!TOKEN || !origin || !destination) {
       setPreviewRoute(null);
       return;
     }
     const controller = new AbortController();
-    const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+    const orderedPreviewPoints = [
+      origin,
+      ...(meetup ? [meetup] : []),
+      ...stops.filter((s) => s.place).map((s) => s.place!),
+      destination,
+    ];
+    const coords = orderedPreviewPoints.map((p) => `${p.longitude},${p.latitude}`).join(';');
+    const excludeParam = avoidTolls ? '&exclude=toll' : '';
     fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?overview=false&access_token=${TOKEN}`,
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?overview=false${excludeParam}&access_token=${TOKEN}`,
       { signal: controller.signal }
     )
       .then((res) => (res.ok ? res.json() : null))
@@ -380,7 +412,7 @@ export default function CreateRideScreen() {
       .catch(() => undefined);
 
     return () => controller.abort();
-  }, [origin?.id, destination?.id]);
+  }, [origin?.id, destination?.id, meetup?.id, stops, avoidTolls]);
 
   const days = useMemo(() => {
     if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -478,6 +510,7 @@ export default function CreateRideScreen() {
   }
 
   async function handleCreate() {
+    if (isCreatingRef.current) return;
     if (!name.trim() || !origin || !destination) {
       Alert.alert('Missing trip details', 'Please add a trip name, a starting point (origin) and a final destination.');
       return;
@@ -491,6 +524,7 @@ export default function CreateRideScreen() {
       Alert.alert('Incomplete stop', 'Please select a location for every added stop or remove the empty stop.');
       return;
     }
+    isCreatingRef.current = true;
     setLoading(true);
     try {
       // Check free tier limits
@@ -511,7 +545,6 @@ export default function CreateRideScreen() {
             },
           ]
         );
-        setLoading(false);
         return;
       }
 
@@ -529,10 +562,13 @@ export default function CreateRideScreen() {
       if (TOKEN && ordered.length >= 2) {
         try {
           const coords = ordered.map((p) => p.place.longitude + ',' + p.place.latitude).join(';');
+          const excludeParam = avoidTolls ? '&exclude=toll' : '';
           const response = await fetch(
             'https://api.mapbox.com/directions/v5/mapbox/driving/' +
               coords +
-              '?overview=full&geometries=geojson&steps=false&access_token=' +
+              '?overview=full&geometries=geojson&steps=false' +
+              excludeParam +
+              '&access_token=' +
               TOKEN
           );
           if (response.ok) {
@@ -606,16 +642,28 @@ export default function CreateRideScreen() {
       if (error) throw error;
       if (!rideId) throw new Error('Trip creation returned no trip ID.');
 
-      // Clear draft on successful creation
+      // Stop autosave scheduling and wait for in-flight write before clearing draft
+      isDraftClearedRef.current = true;
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      if (autosavePromiseRef.current) {
+        await autosavePromiseRef.current.catch(() => {});
+      }
+      const scopedKey = `${DRAFT_STORAGE_KEY}_${user.id}`;
+      await AsyncStorage.removeItem(scopedKey).catch(() => {});
       await AsyncStorage.removeItem(DRAFT_STORAGE_KEY).catch(() => {});
 
       Alert.alert('Trip created', 'Your trip plan is ready. You can invite riders, divide into stages, and customize routes.', [
         { text: 'Open trip', onPress: () => router.push('/trip/' + rideId) },
       ]);
     } catch (error: any) {
+      isDraftClearedRef.current = false;
       Alert.alert('Could not create trip', error?.message || 'Please try again.');
     } finally {
       setLoading(false);
+      isCreatingRef.current = false;
     }
   }
 
@@ -627,6 +675,25 @@ export default function CreateRideScreen() {
     { num: 5, label: 'Invite' },
     { num: 6, label: 'Review' },
   ];
+
+  const isStepCompleted = (stepNum: number) => {
+    switch (stepNum) {
+      case 1:
+        return !!name.trim();
+      case 2:
+        return !!origin && !!destination;
+      case 3:
+        return stops.length === 0 || stops.every((s) => !!s.place);
+      case 4:
+        return !!stay;
+      case 5:
+        return !!description.trim() || !!tripType;
+      case 6:
+        return !!name.trim() && !!origin && !!destination;
+      default:
+        return false;
+    }
+  };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
 
@@ -665,13 +732,16 @@ export default function CreateRideScreen() {
           contentContainerStyle={styles.stepperScrollTrack}
         >
           {stepsList.map((step, idx) => {
-            const isCompleted = step.num < currentStep;
+            const isCompleted = isStepCompleted(step.num);
             const isCurrent = step.num === currentStep;
             return (
               <React.Fragment key={step.num}>
                 <TouchableOpacity
                   style={styles.stepChip}
-                  onPress={() => setCurrentStep(step.num)}
+                  onPress={() => {
+                    setCurrentStep(step.num);
+                    if (step.num >= 3) setShowCustomizations(true);
+                  }}
                 >
                   <View
                     style={[
@@ -738,13 +808,13 @@ export default function CreateRideScreen() {
             <Text style={styles.telemetrySummaryLabel}>TOTAL DISTANCE</Text>
             <View style={styles.telemetryValueRow}>
               <Text style={styles.telemetryValueNum}>
-                {previewRoute ? Math.round(previewRoute.distance / 1000) : '620'}
+                {previewRoute ? Math.round(previewRoute.distance / 1000) : '—'}
               </Text>
-              <Text style={styles.telemetryValueUnit}>KM</Text>
+              <Text style={styles.telemetryValueUnit}>{previewRoute ? 'KM' : ''}</Text>
             </View>
             <View style={styles.saddleTimeRow}>
               <Text style={styles.saddleTimeText}>
-                ⏱️ {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '14h 45m Est. Saddle'}
+                ⏱️ {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '— Est. Saddle'}
               </Text>
             </View>
           </View>
@@ -753,7 +823,7 @@ export default function CreateRideScreen() {
             <View style={styles.apexTopRow}>
               <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
               <View style={styles.reconBadge}>
-                <Text style={styles.reconBadgeText}>T3 Recon</Text>
+                <Text style={styles.reconBadgeText}>Advisory</Text>
               </View>
             </View>
             <View style={styles.telemetryValueRow}>
@@ -762,7 +832,7 @@ export default function CreateRideScreen() {
             </View>
             <View style={styles.saddleTimeRow}>
               <Text style={styles.apexPassText} numberOfLines={1}>
-                🏔️ Kunzum Top Pass
+                🏔️ Sample Topography
               </Text>
             </View>
           </View>
@@ -776,7 +846,7 @@ export default function CreateRideScreen() {
               <Text style={styles.ascentTitleText}>Ascent Profile</Text>
             </View>
             <View style={styles.ascentNetClimbBadge}>
-              <Text style={styles.ascentNetClimbText}>+2,314m Net Climb</Text>
+              <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
             </View>
           </View>
           {/* Topographic Sparkline Visual */}
@@ -792,14 +862,14 @@ export default function CreateRideScreen() {
               <View style={styles.sparklineRidge} />
             </View>
             <View style={styles.sparklineFooters}>
-              <Text style={styles.sparklineElevationLabel}>{origin ? origin.name : 'Shimla 2,276m'}</Text>
-              <Text style={styles.sparklineElevationLabel}>{destination ? destination.name : 'Kaza 3,800m'}</Text>
+              <Text style={styles.sparklineElevationLabel}>{origin ? origin.name : 'Origin'}</Text>
+              <Text style={styles.sparklineElevationLabel}>{destination ? destination.name : 'Destination'}</Text>
             </View>
           </View>
           <View style={styles.cautionNotice}>
             <Text style={styles.cautionIcon}>⚠️</Text>
             <Text style={styles.cautionText}>
-              <Text style={{ fontWeight: '800', color: theme.text }}>Caution:</Text> Steep 18% switchbacks & active rockfall zone near Malling Nullah at KM 410.
+              <Text style={{ fontWeight: '800', color: theme.text }}>Advisory:</Text> High-altitude mountain passes feature steep gradients and variable road surfaces.
             </Text>
           </View>
         </View>
@@ -1077,10 +1147,11 @@ export default function CreateRideScreen() {
                 <View style={styles.calibrationRow}>
                   <View style={styles.calibrationLabelCol}>
                     <Text style={styles.calibrationTitle}>Prefer Technical Twisties & Passes</Text>
-                    <Text style={styles.calibrationSub}>Include off-camber hairpins & gravel routes</Text>
+                    <Text style={styles.calibrationSub}>Technical twisties routing (Provider unsupported - standard driving active)</Text>
                   </View>
                   <Switch
                     value={preferTwisties}
+                    disabled={true}
                     onValueChange={setPreferTwisties}
                     trackColor={{ false: theme.border, true: theme.accent }}
                     thumbColor="#FFFFFF"
@@ -1105,12 +1176,12 @@ export default function CreateRideScreen() {
                     <Text style={styles.offlineCacheIcon}>💾</Text>
                     <View>
                       <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
-                      <Text style={styles.offlineCacheSub}>Ready for remote pass (340 MB)</Text>
+                      <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
                     </View>
                   </View>
                   <TouchableOpacity
                     style={styles.syncBtn}
-                    onPress={() => Alert.alert('Offline Pack', 'Offline vector tiles and radar contours cached to device storage.')}
+                    onPress={() => Alert.alert('Offline Pack', 'Offline vector pack download is not supported in this build. Dynamic online routing will be used.')}
                   >
                     <Text style={styles.syncBtnText}>SYNC</Text>
                   </TouchableOpacity>
@@ -1166,10 +1237,15 @@ export default function CreateRideScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.footerContinueBtn}
+          style={[styles.footerContinueBtn, loading && { opacity: 0.6 }]}
+          disabled={loading}
           onPress={() => {
             if (currentStep < 6) {
-              setCurrentStep(currentStep + 1);
+              const nextStep = currentStep + 1;
+              setCurrentStep(nextStep);
+              if (nextStep >= 3) {
+                setShowCustomizations(true);
+              }
             } else {
               void handleCreate();
             }
@@ -1178,7 +1254,7 @@ export default function CreateRideScreen() {
           accessibilityLabel="Continue to next step"
         >
           <Text style={styles.footerContinueText}>
-            {currentStep === 6 ? 'Create Trip Plan' : `Continue to ${stepsList[currentStep]?.label || 'Next'}`}
+            {loading ? 'Creating Trip Plan…' : currentStep === 6 ? 'Create Trip Plan' : `Continue to ${stepsList[currentStep]?.label || 'Next'}`}
           </Text>
           <Text style={styles.footerContinueArrow}>→</Text>
         </TouchableOpacity>
