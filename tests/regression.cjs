@@ -733,6 +733,8 @@ test('trip workspace integrates multi-day stages and touring itinerary sharing',
   assert.match(tripSource, /shareItinerary/);
   assert.match(tripSource, /Share\.share/);
   assert.match(tripSource, /Day-by-day plan & stages/);
+  assert.match(tripSource, /start_coords:\s*startCoords/);
+  assert.match(tripSource, /destination_coords:\s*destCoords/);
 });
 
 test('route workshop includes repair and accommodation stop pills', () => {

@@ -1137,11 +1137,37 @@ export default function TripWorkspaceScreen() {
     setStageName('');
     setStageStart(trip?.origin || '');
     setStageDestination(trip?.destination || '');
-    setStageStartCoords('');
-    setStageDestCoords('');
+    setStageStartCoords(
+      trip?.origin_coords && trip.origin_coords.length === 2
+        ? `${trip.origin_coords[0]}, ${trip.origin_coords[1]}`
+        : ''
+    );
+    setStageDestCoords(
+      trip?.destination_coords && trip.destination_coords.length === 2
+        ? `${trip.destination_coords[0]}, ${trip.destination_coords[1]}`
+        : ''
+    );
     setStageDayNumber(String(dayNumber));
     setStageNotes('');
     setStageModalVisible(true);
+  }
+
+  function parseCoordinateInput(input: string, fallback?: [number, number] | null): [number, number] | null {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      if (fallback && fallback.length === 2 && Number.isFinite(fallback[0]) && Number.isFinite(fallback[1])) {
+        return [fallback[0], fallback[1]];
+      }
+      return null;
+    }
+    const parts = trimmed.split(/[\s,]+/).filter(Boolean).map(Number);
+    if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+      const [lng, lat] = parts;
+      if (lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90) {
+        return [lng, lat];
+      }
+    }
+    return null;
   }
 
   async function saveStage() {
@@ -1149,6 +1175,18 @@ export default function TripWorkspaceScreen() {
       Alert.alert('Required fields', 'Stage name, start, and destination are required.');
       return;
     }
+
+    const startCoords = parseCoordinateInput(stageStartCoords, trip?.origin_coords);
+    const destCoords = parseCoordinateInput(stageDestCoords, trip?.destination_coords);
+
+    if (!startCoords || !destCoords) {
+      Alert.alert(
+        'Invalid coordinates',
+        'Valid start and destination coordinates (lng, lat) are required (e.g. 77.59, 12.97).'
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       const { error: stageError } = await supabase.rpc('save_trip_stage', {
@@ -1157,6 +1195,8 @@ export default function TripWorkspaceScreen() {
           name: stageName.trim(),
           start_name: stageStart.trim(),
           destination_name: stageDestination.trim(),
+          start_coords: startCoords,
+          destination_coords: destCoords,
           day_number: Number(stageDayNumber) || 1,
           notes: stageNotes.trim() || null,
           status: 'planned',
