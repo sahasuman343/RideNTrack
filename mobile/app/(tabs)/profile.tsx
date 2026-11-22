@@ -21,13 +21,15 @@ import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, t
 import { LiveDot } from '../../src/components/ui';
 
 export default function ProfileScreen() {
-  const { user, profile, signOut, deleteAccount, updateProfile } = useAuth();
+  const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const { mode, setMode } = useRideThemeSettings();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const [editing, setEditing] = useState(false);
+  const [section, setSection] = useState<'rider' | 'emergency' | 'bike'>('rider');
+  const [original, setOriginal] = useState(profile);
   const [saving, setSaving] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name || '');
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -36,7 +38,7 @@ export default function ProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
-  const [category, setCategory] = useState(profile?.motorcycle_category || 'adventure');
+  const [category, setCategory] = useState<NonNullable<NonNullable<typeof profile>['motorcycle_category']> | ''>(profile?.motorcycle_category ?? '');
   const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
   const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
   const [reserve, setReserve] = useState(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
@@ -54,14 +56,19 @@ export default function ProfileScreen() {
   const [placeLng, setPlaceLng] = useState('');
   const [placeNotes, setPlaceNotes] = useState('');
   const [savingPlace, setSavingPlace] = useState(false);
+  const [placesUnavailable, setPlacesUnavailable] = useState(false);
+  const [analyticsUnavailable, setAnalyticsUnavailable] = useState(false);
+  const [placesLoaded, setPlacesLoaded] = useState(false);
 
   const loadSavedPlaces = useCallback(async () => {
     try {
       const { data, error } = await supabase.rpc('get_user_saved_places');
       if (error) throw error;
       setSavedPlaces(data || []);
+      setPlacesUnavailable(false);
+      setPlacesLoaded(true);
     } catch {
-      // Non-critical; fallback to empty list
+      setPlacesUnavailable(true);
     }
   }, []);
 
@@ -70,8 +77,9 @@ export default function ProfileScreen() {
       const { data, error } = await supabase.rpc('get_rider_analytics');
       if (error) throw error;
       if (data) setAnalytics(data as RiderAnalytics);
+      setAnalyticsUnavailable(false);
     } catch {
-      // Non-critical; fallback to empty analytics
+      setAnalyticsUnavailable(true);
     }
   }, []);
 
@@ -87,7 +95,7 @@ export default function ProfileScreen() {
     }
     const lat = Number(placeLat);
     const lng = Number(placeLng);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    if (!placeLat.trim() || !placeLng.trim() || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       Alert.alert('Invalid coordinates', 'Enter valid latitude (-90 to 90) and longitude (-180 to 180).');
       return;
     }
@@ -142,7 +150,10 @@ export default function ProfileScreen() {
     );
   }
 
-  function openEditor() {
+  function openEditor(target: typeof section) {
+    if (!profile || profile.id !== user?.id) return;
+    setOriginal(profile);
+    setSection(target);
     setDisplayName(profile?.display_name || '');
     setPhone(profile?.phone || '');
     setEmergencyContact(profile?.emergency_contact || '');
@@ -150,63 +161,72 @@ export default function ProfileScreen() {
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
-    setCategory(profile?.motorcycle_category || 'adventure');
+    setCategory(profile.motorcycle_category ?? '');
     setTankCapacity(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
     setMileage(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
-    setReserve(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
+    setReserve(profile.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '');
     setEditing(true);
   }
 
   async function saveProfile() {
-    if (!displayName.trim()) {
+    if (!original || original.id !== user?.id || saving) return;
+    if (section === 'rider' && !displayName.trim()) {
       Alert.alert('Name required', 'Please enter your display name.');
       return;
     }
-    if (phone.trim() && !/^\+?[0-9 ()-]{7,20}$/.test(phone.trim())) {
+    if (section === 'rider' && phone.trim() && !/^\+?[0-9 ()-]{7,20}$/.test(phone.trim())) {
       Alert.alert('Check phone number', 'Enter a valid phone number, including country code if needed.');
       return;
     }
-    if (emergencyContact.trim() && !/^\+?[0-9 ()-]{7,25}$/.test(emergencyContact.trim())) {
+    if (section === 'emergency' && emergencyContact.trim() && !/^\+?[0-9 ()-]{7,25}$/.test(emergencyContact.trim())) {
       Alert.alert('Check emergency contact', 'Enter a valid emergency contact number, including country code.');
       return;
     }
-    if (avatarUrl.trim() && !/^https?:\/\//i.test(avatarUrl.trim())) {
+    if (section === 'emergency' && bloodGroup.trim() && !/^(A|B|AB|O)[+-]$/i.test(bloodGroup.trim())) {
+      Alert.alert('Check blood group', 'Use A, B, AB or O followed by + or -, or leave this blank.');
+      return;
+    }
+    if (section === 'rider' && avatarUrl.trim() && !/^https?:\/\//i.test(avatarUrl.trim())) {
       Alert.alert('Invalid photo URL', 'Use a public HTTPS or HTTP image URL.');
       return;
     }
     const tankNum = tankCapacity.trim() ? Number(tankCapacity) : null;
-    if (tankNum != null && (!Number.isFinite(tankNum) || tankNum <= 0 || tankNum > 100)) {
+    if (section === 'bike' && tankNum != null && (!Number.isFinite(tankNum) || tankNum <= 0 || tankNum > 100)) {
       Alert.alert('Invalid fuel tank capacity', 'Enter a valid capacity between 1 and 100 liters.');
       return;
     }
     const mileageNum = mileage.trim() ? Number(mileage) : null;
-    if (mileageNum != null && (!Number.isFinite(mileageNum) || mileageNum <= 0 || mileageNum > 150)) {
+    if (section === 'bike' && mileageNum != null && (!Number.isFinite(mileageNum) || mileageNum <= 0 || mileageNum > 150)) {
       Alert.alert('Invalid mileage', 'Enter a valid mileage between 1 and 150 km/l.');
       return;
     }
     const reserveNum = reserve.trim() ? Number(reserve) : null;
-    if (reserveNum != null && (!Number.isFinite(reserveNum) || reserveNum < 0 || reserveNum > 30)) {
-      Alert.alert('Invalid reserve', 'Enter a valid reserve between 0 and 30 liters.');
+    if (section === 'bike' && reserveNum != null && (!Number.isFinite(reserveNum) || reserveNum < 0 || reserveNum > 30 || (tankNum !== null && reserveNum >= tankNum))) {
+      Alert.alert('Invalid reserve', 'Reserve must be between 0 and 30 liters and less than tank capacity.');
       return;
     }
     setSaving(true);
     try {
-      await updateProfile({
+      const values: Parameters<typeof updateProfile>[0] = section === 'rider' ? {
         display_name: displayName.trim(),
         phone: phone.trim() || null,
-        emergency_contact: emergencyContact.trim() || null,
-        blood_group: bloodGroup.trim() || null,
         avatar_url: avatarUrl.trim() || null,
+      } : section === 'emergency' ? {
+        emergency_contact: emergencyContact.trim() || null,
+        blood_group: bloodGroup.trim().toUpperCase() || null,
+      } : {
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
-        motorcycle_category: (category as any) || null,
+        motorcycle_category: category || null,
         fuel_tank_capacity_liters: tankNum,
         mileage_km_per_liter: mileageNum,
         fuel_reserve_liters: reserveNum,
-      });
-      await loadAnalytics();
+      };
+      const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) =>
+        value !== (original[key as keyof typeof values] ?? null)));
+      if (Object.keys(changed).length) await updateProfile(changed);
       setEditing(false);
-      Alert.alert('Profile updated', 'Your rider details and motorcycle profile have been saved.');
+      if (Object.keys(changed).length) Alert.alert('Changes saved', 'Your profile is up to date.');
     } catch (error) {
       Alert.alert('Could not update profile', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -219,7 +239,8 @@ export default function ProfileScreen() {
 
   const safeRangeKm =
     profile?.fuel_tank_capacity_liters && profile?.mileage_km_per_liter
-      ? Math.round(Math.max(0.5, profile.fuel_tank_capacity_liters - (profile.fuel_reserve_liters || 0)) * profile.mileage_km_per_liter)
+      && (profile.fuel_reserve_liters ?? 0) < profile.fuel_tank_capacity_liters
+      ? Math.round((profile.fuel_tank_capacity_liters - (profile.fuel_reserve_liters ?? 0)) * profile.mileage_km_per_liter)
       : null;
   const totalRangeKm =
     profile?.fuel_tank_capacity_liters && profile?.mileage_km_per_liter
@@ -241,7 +262,8 @@ export default function ProfileScreen() {
         <View style={styles.headerRightActions}>
           <TouchableOpacity
             style={styles.headerActionBtn}
-            onPress={openEditor}
+            disabled={!profile}
+            onPress={() => openEditor('rider')}
             accessibilityRole="button"
             accessibilityLabel="Edit Profile & Garage"
           >
@@ -263,7 +285,10 @@ export default function ProfileScreen() {
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom + 80, 100) }]}
       >
-        {/* Rider Profile Card */}
+        {!profile && <View style={styles.card}>
+          <Text style={styles.hint}>{profileError ? 'Could not load your profile. Your saved details have not been changed.' : 'Loading your rider profile…'}</Text>
+          {profileError && <TouchableOpacity accessibilityRole="button" onPress={() => void reloadProfile()}><Text style={styles.addPlaceBtnText}>Retry profile</Text></TouchableOpacity>}
+        </View>}
         <View style={styles.riderCard}>
           <View style={styles.riderTopRow}>
             <View style={styles.riderAvatarBox}>
@@ -310,9 +335,9 @@ export default function ProfileScreen() {
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>DISTANCE</Text>
               <Text style={styles.telemetryCellNum}>
-                {analytics?.total_distance_km != null ? analytics.total_distance_km.toLocaleString('en-IN') : '0'}
+                {analytics?.total_distance_km != null ? analytics.total_distance_km.toLocaleString('en-IN') : '—'}
               </Text>
-              <Text style={[styles.telemetryCellSub, { color: theme.accent }]}>KM LOGGED</Text>
+              <Text style={[styles.telemetryCellSub, { color: theme.accent }]}>EST. KM · COMPLETED</Text>
             </View>
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>APEX ALT</Text>
@@ -322,14 +347,14 @@ export default function ProfileScreen() {
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>EXPEDITIONS</Text>
               <Text style={styles.telemetryCellNum}>
-                {analytics?.completed_trips != null ? String(analytics.completed_trips) : '0'}
+                {analytics?.completed_trips != null ? String(analytics.completed_trips) : '—'}
               </Text>
               <Text style={[styles.telemetryCellSub, { color: theme.tertiary }]}>COMPLETED</Text>
             </View>
           </View>
 
-          {/* Medical & Emergency ICE Tag */}
-          <View style={styles.iceCard}>
+          {analyticsUnavailable && <TouchableOpacity accessibilityRole="button" onPress={() => void loadAnalytics()}><Text style={styles.hint}>Statistics could not refresh. Tap to retry.</Text></TouchableOpacity>}
+          <TouchableOpacity disabled={!profile} accessibilityRole="button" accessibilityLabel="Edit emergency details" onPress={() => openEditor('emergency')} style={styles.iceCard}>
             <View style={styles.iceLeft}>
               <Text style={styles.iceIcon}>🏥</Text>
               <Text style={styles.iceBloodType}>
@@ -337,12 +362,12 @@ export default function ProfileScreen() {
               </Text>
             </View>
             <View style={styles.iceRight}>
-              <Text style={styles.iceLabel}>ICE:</Text>
+              <Text style={styles.iceLabel}>ICE: Edit emergency details</Text>
               <Text style={styles.icePhone}>
                 {profile?.emergency_contact || 'Not recorded'}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* Motorcycle Fleet Section Header */}
@@ -354,7 +379,8 @@ export default function ProfileScreen() {
           {hasMotorcycle && (
             <TouchableOpacity
               style={styles.addBikeBtn}
-              onPress={openEditor}
+              disabled={!profile}
+              onPress={() => openEditor('bike')}
               accessibilityRole="button"
               accessibilityLabel="Edit motorcycle"
             >
@@ -426,7 +452,8 @@ export default function ProfileScreen() {
             </Text>
             <TouchableOpacity
               style={styles.primaryAddBikeBtn}
-              onPress={openEditor}
+              disabled={!profile}
+              onPress={() => openEditor('bike')}
               accessibilityRole="button"
               accessibilityLabel="+ Add Motorcycle"
             >
@@ -448,7 +475,9 @@ export default function ProfileScreen() {
               <Text style={styles.addPlaceBtnText}>+ Add Place</Text>
             </TouchableOpacity>
           </View>
-          {savedPlaces.length === 0 ? (
+          {placesUnavailable && <TouchableOpacity accessibilityRole="button" onPress={() => void loadSavedPlaces()}><Text style={styles.hint}>Saved places could not refresh. Tap to retry.</Text></TouchableOpacity>}
+          {!placesUnavailable && !placesLoaded && <Text style={styles.hint}>Loading saved places…</Text>}
+          {savedPlaces.length === 0 ? placesLoaded && !placesUnavailable && (
             <Text style={styles.hint}>
               No saved destinations yet. Bookmark mountain passes, viewpoints, trusted fuel bunks, or dhabas for your tours.
             </Text>
@@ -489,9 +518,8 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Offline Topo Storage</Text>
-                <Text style={styles.systemItemSub}>Standard vector cache active</Text>
+                <Text style={styles.systemItemSub}>Offline map availability is not verified here.</Text>
               </View>
-              <Text style={styles.systemItemArrow}>›</Text>
             </View>
 
             <View style={styles.systemItemDivider} />
@@ -504,7 +532,6 @@ export default function ProfileScreen() {
                 <Text style={styles.systemItemTitle}>Emergency SOS Protocols</Text>
                 <Text style={styles.systemItemSub}>Manual SOS & Emergency Contacts</Text>
               </View>
-              <Text style={styles.systemItemArrow}>›</Text>
             </View>
 
             <View style={styles.systemItemDivider} />
@@ -517,7 +544,6 @@ export default function ProfileScreen() {
                 <Text style={styles.systemItemTitle}>Units & Telemetry</Text>
                 <Text style={styles.systemItemSub}>Metric (km/h, km, L)</Text>
               </View>
-              <Text style={styles.systemItemArrow}>›</Text>
             </View>
 
             <View style={styles.systemItemDivider} />
@@ -528,9 +554,8 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Cloud GPX & Telemetry Export</Text>
-                <Text style={[styles.systemItemSub, { color: theme.green }]}>GPX, KML & JSON export ready</Text>
+                <Text style={styles.systemItemSub}>Open a trip to view its export options.</Text>
               </View>
-              <Text style={styles.systemItemArrow}>›</Text>
             </View>
 
             <View style={styles.systemItemDivider} />
@@ -604,21 +629,25 @@ export default function ProfileScreen() {
       </ScrollView>
 
       {/* Profile & Motorcycle Editor Modal */}
-      <Modal visible={editing} transparent animationType="slide" onRequestClose={() => setEditing(false)}>
+      <Modal visible={editing} transparent animationType="slide" onRequestClose={() => !saving && setEditing(false)}>
         <View style={styles.overlay}>
-          <ScrollView style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
-            <Text style={styles.modalTitle}>Edit rider & motorcycle profile</Text>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
+            <Text style={styles.modalTitle}>{section === 'rider' ? 'Edit rider profile' : section === 'emergency' ? 'Edit emergency details' : 'Edit motorcycle'}</Text>
+            {section === 'rider' && <>
             <Text style={styles.fieldLabel}>Display name</Text>
             <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholder="Your name" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Phone number</Text>
             <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91..." placeholderTextColor={theme.subtle} />
+            <Text style={styles.fieldLabel}>Profile photo URL</Text>
+            <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
+            </>}
+            {section === 'emergency' && <>
             <Text style={styles.fieldLabel}>Emergency contact</Text>
             <TextInput style={styles.input} value={emergencyContact} onChangeText={setEmergencyContact} keyboardType="phone-pad" placeholder="Emergency contact phone (+91...)" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Blood group (ICE medical)</Text>
             <TextInput style={styles.input} value={bloodGroup} onChangeText={setBloodGroup} autoCapitalize="characters" placeholder="e.g. O+, A+, B-, AB+" placeholderTextColor={theme.subtle} />
-            <Text style={styles.fieldLabel}>Profile photo URL</Text>
-            <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
-
+            </>}
+            {section === 'bike' && <>
             <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
             <Text style={styles.fieldLabel}>Make / Manufacturer</Text>
             <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
@@ -651,11 +680,12 @@ export default function ProfileScreen() {
               </View>
             </View>
             <Text style={styles.hint}>Used for advisory fuel planning along your routes. Estimates are non-guaranteed.</Text>
+            </>}
 
             <TouchableOpacity disabled={saving} style={styles.saveButton} onPress={() => void saveProfile()}>
               <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save changes'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setEditing(false)}>
+            <TouchableOpacity disabled={saving} style={styles.cancelButton} onPress={() => setEditing(false)}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>

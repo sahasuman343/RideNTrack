@@ -36,6 +36,7 @@ export default function TripsScreen() {
   const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unavailable, setUnavailable] = useState({ rides: false, community: false, stats: false });
   const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
   const [duplicatingRideId, setDuplicatingRideId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<TripsFilter>('all');
@@ -65,9 +66,10 @@ export default function TripsScreen() {
           .eq('user_id', user.id)
           .eq('is_active', true)
           .order('joined_at', { ascending: false }),
-        supabase.rpc('get_rider_analytics').then(res => res, () => ({ data: null })),
-        supabase.rpc('get_public_trips', { p_limit: 20, p_offset: 0 }).then(res => res, () => ({ data: null })),
+        supabase.rpc('get_rider_analytics').then(res => res, error => ({ data: null, error })),
+        supabase.rpc('get_public_trips', { p_limit: 20, p_offset: 0 }).then(res => res, error => ({ data: null, error })),
       ]);
+      setUnavailable({ rides: !!ridesRes.error, community: !!communityRes.error, stats: !!analyticsRes.error });
 
       if (ridesRes.data) {
         setRides(ridesRes.data.map((p: any) => p.rides).filter(Boolean));
@@ -78,6 +80,8 @@ export default function TripsScreen() {
       if (communityRes && 'data' in communityRes && communityRes.data) {
         setCommunityTrips(communityRes.data as any[]);
       }
+    } catch {
+      setUnavailable({ rides: true, community: true, stats: true });
     } finally {
       setLoading(false);
     }
@@ -297,18 +301,23 @@ export default function TripsScreen() {
         </View>
       )}
 
-      {/* Analytics Card Banner */}
+      {(filterTab === 'community' ? unavailable.community : unavailable.rides || unavailable.stats) && (
+        <TouchableOpacity style={styles.analyticsCard} accessibilityRole="button" disabled={refreshing} onPress={() => void onRefresh()}>
+          <Text style={styles.tripName}>{refreshing ? 'Refreshing…' : 'Could not refresh. Tap to retry.'}</Text>
+          <Text style={styles.tripDesc}>Any displayed results are from the last successful load.</Text>
+        </TouchableOpacity>
+      )}
       {analytics && filterTab !== 'community' && (filterTab === 'all' || filterTab === 'past' || displayedRides.length > 0) && (
         <View style={styles.analyticsCard}>
           <View style={styles.analyticsStats}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{analytics.total_distance_km} km</Text>
-              <Text style={styles.statCaption}>TOTAL DISTANCE</Text>
+              <Text style={styles.statCaption}>EST. COMPLETED KM</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{analytics.total_hours} hrs</Text>
-              <Text style={styles.statCaption}>RIDING HOURS</Text>
+              <Text style={styles.statCaption}>EST. COMPLETED HOURS</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
@@ -346,7 +355,7 @@ export default function TripsScreen() {
           </Card>
         </View>
       ) : filterTab === 'community' ? (
-        communityTrips.length === 0 ? (
+        communityTrips.length === 0 ? !unavailable.community && (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>🌐</Text>
             <Text style={styles.emptyTitle}>No community routes yet.</Text>
@@ -421,7 +430,7 @@ export default function TripsScreen() {
             />
           </>
         )
-      ) : displayedRides.length === 0 ? (
+      ) : displayedRides.length === 0 ? !unavailable.rides && (
         <View style={styles.empty}>
           <View style={styles.emptyIconCircle}>
             <Text style={styles.emptyIcon}>🏍️</Text>

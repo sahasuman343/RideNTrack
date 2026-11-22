@@ -52,6 +52,7 @@ import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTheme, RidePalette, typography } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
+import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
 import {
   enableBackgroundLocationUpdates,
   startBackgroundLocationUpdates,
@@ -103,11 +104,12 @@ export default function LiveRideScreen() {
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const s = React.useMemo(() => makeStyles(theme), [theme]);
-  const { ride, participants, alerts, connection, error, publish, refresh, setRide } = useRide(id, userId || '');
+  const { ride, participants, alerts, error, publish, refresh, setRide } = useRide(id, userId || '');
   const sync = useOfflineSync();
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
   const [position, setPosition] = useState<LocationUpdate | null>(null);
-  const [tracking, setTracking] = useState<'waiting' | 'background' | 'foreground' | 'paused' | 'error'>('waiting');
+  const [tracking, setTracking] = useState<TrackerMode>('waiting');
+  const gpsSession = useRef(0);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(true);
   const [gpsRetry, setGpsRetry] = useState(0);
@@ -162,6 +164,7 @@ export default function LiveRideScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
+  const [mapRetry, setMapRetry] = useState(0);
   const [route, setRoute] = useState<Ride['route_geometry']>();
   const [trailCoordinates, setTrailCoordinates] = useState<[number, number][]>([]);
   const [routeDeviation, setRouteDeviation] = useState<number | null>(null);
@@ -183,6 +186,7 @@ export default function LiveRideScreen() {
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
   const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
   const [now, setNow] = useState(() => Date.now());
+  const gps = gpsStatus(active && sharing ? tracking : 'paused', position?.timestamp, now);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const lastSafetyAlertAt = useRef<Record<string, number>>({});
   const [statsModalVisible, setStatsModalVisible] = useState(false);
@@ -303,6 +307,10 @@ export default function LiveRideScreen() {
   }, [active, position, participants, route, ride?.id, ride?.admin_id, ride?.route_deviation_threshold_meters, ride?.rider_behind_threshold_meters, admin, userId, id, now, sync.flushQueue]);
 
   useEffect(() => {
+    setPosition(null);
+    setGpsError(null);
+    setBackgroundPermissionGranted(false);
+    setGpsRecoveryStatus('normal');
     if (!active || !sharing || !userId) {
       setTracking('paused');
       void stopBackgroundLocationUpdates().catch(e => setGpsError(e.message));
@@ -310,7 +318,6 @@ export default function LiveRideScreen() {
     }
     let cancelled = false;
     setTracking('waiting');
-    setGpsError(null);
     void startBackgroundLocationUpdates({
       rideId: id,
       userId,
@@ -318,7 +325,7 @@ export default function LiveRideScreen() {
       publish,
       batterySaver,
       onLocationUpdate: p => {
-        if (!cancelled) setPosition(p);
+        if (!cancelled) { setNow(Date.now()); setPosition(p); }
       },
       onError: e => {
         if (!cancelled) setGpsError(e);
@@ -331,7 +338,7 @@ export default function LiveRideScreen() {
       },
     })
       .then(result => {
-        if (!cancelled) setTracking(result.isBackgroundEnabled ? 'background' : 'foreground');
+        if (!cancelled) setTracking(result.mode === 'stopped' ? 'paused' : result.mode);
       })
       .catch(e => {
         if (!cancelled) {
@@ -341,6 +348,7 @@ export default function LiveRideScreen() {
       });
     return () => {
       cancelled = true;
+      ++gpsSession.current;
       void stopBackgroundLocationUpdates().catch(() => {});
     };
   }, [id, userId, active, sharing, publish, gpsRetry, batterySaver]);
@@ -478,7 +486,7 @@ export default function LiveRideScreen() {
     return Math.round(distanceMeters(position, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude }));
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude]);
 
-  const currentSpeedKmh = position?.speed ? Math.round(position.speed * 3.6) : 0;
+  const currentSpeedKmh = gps.state === 'fresh' && position ? Math.round(position.speed * 3.6) : '—';
 
   useEffect(() => {
     if (!position) return;
@@ -586,7 +594,8 @@ export default function LiveRideScreen() {
   }
 
   async function enableBackgroundGps() {
-    if (!userId) return;
+    if (!userId || tracking !== 'foreground' || !sharing || !active) return;
+    const session = gpsSession.current;
     setGpsError(null);
     setMessage(null);
     let startupFailed = false;
@@ -596,23 +605,30 @@ export default function LiveRideScreen() {
         userId,
         displayName: name,
         publish,
-        onLocationUpdate: setPosition,
+        batterySaver,
+        onLocationUpdate: p => {
+          if (session === gpsSession.current) { setNow(Date.now()); setPosition(p); }
+        },
         onError: error => {
+          if (session !== gpsSession.current) return;
           startupFailed = true;
           setGpsError(error);
         },
       });
-      if (result.permissionGranted) setBackgroundPermissionGranted(true);
-      if (result.isBackgroundEnabled) {
-        setTracking('background');
+      if (session !== gpsSession.current) return;
+      setTracking(result.mode === 'stopped' ? 'error' : result.mode);
+      if (result.mode === 'background') {
         setBackgroundPermissionGranted(true);
         setMessage(null);
       } else if (result.permissionGranted && !startupFailed) {
+        setBackgroundPermissionGranted(true);
         setMessage('Background permission granted. Tap Start background GPS again to activate it.');
+      } else if (!startupFailed && !result.permissionGranted) {
+        setMessage('Background permission was not granted. Keep the app open for foreground GPS.');
       }
     } catch (e) {
+      if (session !== gpsSession.current) return;
       setGpsError(e instanceof Error ? e.message : 'Android could not enable background GPS.');
-      setTracking('foreground');
     }
   }
 
@@ -887,23 +903,6 @@ export default function LiveRideScreen() {
   }
 
   const pending = sync.pendingLocationsCount + sync.pendingAlertsCount;
-  const status = !sync.isOnline
-    ? 'Offline · saved on device'
-    : connection !== 'live'
-    ? 'Reconnecting…'
-    : !active
-    ? ride?.status === 'completed'
-      ? 'Ride completed'
-      : 'Ready to ride'
-    : tracking === 'background'
-    ? 'Live · background GPS'
-    : tracking === 'foreground'
-    ? 'Live · keep app open'
-    : tracking === 'waiting'
-    ? 'Getting GPS fix…'
-    : tracking === 'error'
-    ? 'GPS unavailable'
-    : 'Location sharing paused';
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -930,18 +929,15 @@ export default function LiveRideScreen() {
   }
 
   const activeRidersCount = points.filter(p => !isStale(p.timestamp, now)).length;
-  const gpsTimestampMs = position?.timestamp
-    ? typeof position.timestamp === 'number'
-      ? position.timestamp
-      : Date.parse(position.timestamp)
-    : null;
-  const gpsAgeSec = gpsTimestampMs != null ? Math.max(0, Math.round((now - gpsTimestampMs) / 1000)) : null;
+  const gpsColor = gps.state === 'fresh' ? theme.green : gps.state === 'error' ? theme.danger : theme.textMuted;
+  const canRetryFix = gps.state === 'stale' || (gps.state === 'waiting' && (tracking === 'foreground' || tracking === 'background'));
 
   return (
     <View style={s.screen}>
       {/* Upper Area: Dark Cockpit Map Canvas Render */}
       {Mapbox && MAPBOX_TOKEN ? (
         <Mapbox.MapView
+          key={mapRetry}
           style={StyleSheet.absoluteFill}
           styleURL={theme ? (theme.text === '#F2F0E8' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12') : 'mapbox://styles/mapbox/outdoors-v12'}
           onDidFinishLoadingMap={() => {
@@ -1044,24 +1040,27 @@ export default function LiveRideScreen() {
       ) : (
         <View style={s.fallback}>
           <Text style={s.heading}>Cockpit Ride Mode Active</Text>
-          <Text style={s.muted}>The native map needs a Mapbox token. Your rider HUD, live telemetry and controls are operating.</Text>
+          <Text style={s.muted}>The native map is unavailable. GPS status and ride controls are shown below.</Text>
         </View>
       )}
 
       {/* Floating Slim Cockpit Status Strip (Top-aligned Glove Glance) */}
       <View style={[s.cockpitStatusStrip, { top: insets.top + 6 }]}>
         {/* GPS Status */}
-        <View style={s.statusPillItem}>
-          <LiveDot pulse={active && tracking !== 'error' && tracking !== 'paused'} size={6} color={tracking === 'error' ? theme.danger : theme.green} />
-          <Text style={[s.statusStripText, { color: tracking === 'error' ? theme.danger : theme.green }]}>
-            {tracking === 'error' ? 'GPS ERROR' : gpsAgeSec != null ? `GPS FRESH (${gpsAgeSec}S)` : 'GPS LOCKING'}
+        <TouchableOpacity style={s.statusPillItem}
+          disabled={!canRetryFix}
+          accessibilityRole="button" accessibilityHint="Restart GPS to request a new fix"
+          onPress={() => setGpsRetry(v => v + 1)}>
+          <LiveDot pulse={gps.state === 'fresh'} size={6} color={gpsColor} />
+          <Text style={[s.statusStripText, { color: gpsColor }]}>
+            {gps.label}{canRetryFix ? ' · Retry' : ''}
           </Text>
-        </View>
+        </TouchableOpacity>
 
         {/* Cellular / Network Link */}
         <View style={s.statusPillItem}>
           <Text style={s.statusPillIcon}>{sync.isOnline ? '📶' : '📵'}</Text>
-          <Text style={s.statusStripText}>{sync.isOnline ? '4G LOCK' : 'OFFLINE'}</Text>
+          <Text style={s.statusStripText}>{sync.isOnline ? 'ONLINE' : 'OFFLINE'}</Text>
         </View>
 
         {/* Formation Pack Count */}
@@ -1220,7 +1219,7 @@ export default function LiveRideScreen() {
       )}
 
       {/* Route Deviation Alert */}
-      {routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
+      {gps.state === 'fresh' && routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
         <View style={[s.deviationWarning, { top: insets.top + (active ? 210 : 140) }]}>
           <Text style={s.deviationWarningText}>⚠️ Route Deviation: ~{Math.round(routeDeviation)} m from planned route</Text>
         </View>
@@ -1242,9 +1241,15 @@ export default function LiveRideScreen() {
 
       {(message || gpsError || error || mapError) && (
         <View style={[s.warning, { top: insets.top + (active ? 250 : 160) }]}>
-          <Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load. GPS data is still saved locally.'}</Text>
-          <TouchableOpacity onPress={() => { setMessage(null); setGpsRetry(v => v + 1); void refresh(); }}>
-            <Text style={s.link}>Retry</Text>
+          <Text style={s.warningText}>{message || gpsError || error || 'Map tiles could not load.'}</Text>
+          <TouchableOpacity onPress={() => {
+            if (message) setMessage(null);
+            else if (gpsError && active && sharing) setGpsRetry(v => v + 1);
+            else if (gpsError) setGpsError(null);
+            else if (error) void refresh();
+            else { setMapReady(false); setMapError(false); setMapRetry(v => v + 1); }
+          }}>
+            <Text style={s.link}>{message || (gpsError && (!active || !sharing)) ? 'Dismiss' : gpsError ? 'Retry GPS' : error ? 'Retry connection' : 'Retry map'}</Text>
           </TouchableOpacity>
           {tracking === 'error' && (
             <TouchableOpacity onPress={() => void Linking.openSettings()}>
@@ -1479,9 +1484,9 @@ export default function LiveRideScreen() {
                   </TouchableOpacity>
                 </View>
 
-                {((tracking !== 'background' && sharing) || (admin && active)) && (
+                {((tracking === 'foreground' && sharing) || (admin && active)) && (
                   <View style={s.subActionsRow}>
-                    {tracking !== 'background' && sharing && (
+                    {tracking === 'foreground' && sharing && (
                       <TouchableOpacity
                         style={[s.subActionButton, admin && active ? { flex: 1 } : { width: '100%' }]}
                         onPress={() => void enableBackgroundGps()}

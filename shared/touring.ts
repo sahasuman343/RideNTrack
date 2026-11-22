@@ -33,7 +33,7 @@ export function calculateMotorcycleFuelPlan(
   const mileage = bike?.mileageKmPerLiter ?? null;
   const reserve = bike?.fuelReserveLiters ?? 0;
 
-  if (!tank || !mileage || tank <= 0 || mileage <= 0) {
+  if (!tank || !mileage || tank <= 0 || mileage <= 0 || reserve < 0 || reserve >= tank) {
     return {
       totalDistanceKm: distanceKm,
       totalTheoreticalRangeKm: null,
@@ -42,11 +42,11 @@ export function calculateMotorcycleFuelPlan(
       recommendedFuelStops: null,
       estimatedCostInr: null,
       isAdvisory: true,
-      advisoryNote: 'Configure your motorcycle profile (tank capacity & mileage) to calculate tailored fuel estimates.',
+      advisoryNote: 'Check tank capacity, mileage and reserve in your motorcycle profile. Reserve must be less than tank capacity.',
     };
   }
 
-  const usableCapacity = Math.max(0.5, tank - Math.max(0, reserve));
+  const usableCapacity = tank - reserve;
   const safeRangeKm = Math.round(usableCapacity * mileage);
   const totalTheoreticalRangeKm = Math.round(tank * mileage);
   const estimatedFuelConsumedLiters = Math.round((distanceKm / mileage) * 10) / 10;

@@ -12,6 +12,8 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  profileError: boolean;
+  reloadProfile: () => Promise<void>;
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -37,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState(false);
   const activeUserId = useRef<string | null>(null);
   const profileRequest = useRef<{ userId: string; promise: Promise<void> } | null>(null);
 
@@ -91,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // still resolving. Share one profile request per user instead of issuing
     // duplicate reads on slower devices and networks.
     if (profileRequest.current?.userId === userId) return profileRequest.current.promise;
+    setProfileError(false);
     let promise!: Promise<void>;
     promise = (async () => {
       try {
@@ -102,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) throw error;
         if (activeUserId.current === userId) setProfile(data as Profile | null);
       } catch (err) {
+        if (activeUserId.current === userId) setProfileError(true);
         console.warn('Profile fetch error:', err);
       } finally {
         if (profileRequest.current?.promise === promise) profileRequest.current = null;
@@ -146,10 +151,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
     blood_group?: string | null;
   }) {
-    if (!activeUserId.current) throw new Error('You must be signed in to edit your profile.');
-    const { data, error } = await supabase.from('profiles').update(updates).eq('id', activeUserId.current).select('*').single();
-    if (error) throw error;
-    setProfile(data as Profile);
+    const userId = activeUserId.current;
+    if (!userId || profile?.id !== userId) throw new Error('Load your rider profile before making changes.');
+    await profileRequest.current?.promise;
+    if (activeUserId.current !== userId) throw new Error('Your account has changed. Reopen your profile.');
+    const { data, error } = await supabase.from('profiles').update(updates).eq('id', userId).select('*').single();
+    if (error) throw new Error(error.message);
+    if (activeUserId.current === userId) setProfile(data as Profile);
   }
 
   async function signOut() {
@@ -187,7 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, loading, signUp, signIn, signOut, deleteAccount, updateProfile }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, profileError, reloadProfile: () => activeUserId.current ? fetchProfile(activeUserId.current) : Promise.resolve(), loading, signUp, signIn, signOut, deleteAccount, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

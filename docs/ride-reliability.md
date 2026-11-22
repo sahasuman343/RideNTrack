@@ -1,6 +1,8 @@
 # Ride reliability and map update
 
 ## Deployment order
+For the profile and ride-status update, apply all outstanding migrations through `20261123000000_profile_and_completed_estimates.sql` before releasing either client. On staging, save a name, emergency details and motorcycle settings separately, then reopen the garage and confirm that each edit preserved the other sections. Distance and time in the garage and trip list are **completed-route estimates**, not measured GPS totals.
+
 1. Back up and apply migrations 001–005 in order to a staging Supabase project.
 2. Deploy the updated web client and mobile development builds together. Migration 005 changes the batch upload contract to require a persistent client_id; old clients should be upgraded before normal use resumes.
 3. Configure the Supabase URL, publishable/anon key, and Mapbox public token in each client.

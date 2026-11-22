@@ -15,7 +15,10 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { canCreateMoreTrips, canAddMoreWaypoints, PLAN_LIMITS, PAYMENT_CONFIG } from '@ridentrack/shared';
+import {
+  canCreateMoreTrips, PLAN_LIMITS, PAYMENT_CONFIG,
+  fetchDrivingRoute, routeCoordinates, MAX_TRIP_ROUTE_POINTS, TRIP_ROUTE_LIMIT_MESSAGE,
+} from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
@@ -383,8 +386,8 @@ export default function CreateRideScreen() {
 
   // Route preview fetcher (includes origin, meetup, intermediate stops, and destination)
   useEffect(() => {
+    setPreviewRoute(null);
     if (!TOKEN || !origin || !destination) {
-      setPreviewRoute(null);
       return;
     }
     const controller = new AbortController();
@@ -394,25 +397,16 @@ export default function CreateRideScreen() {
       ...stops.filter((s) => s.place).map((s) => s.place!),
       destination,
     ];
-    const coords = orderedPreviewPoints.map((p) => `${p.longitude},${p.latitude}`).join(';');
-    const excludeParam = avoidTolls ? '&exclude=toll' : '';
-    fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?overview=false${excludeParam}&access_token=${TOKEN}`,
-      { signal: controller.signal }
-    )
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.routes?.[0]) {
-          setPreviewRoute({
-            distance: Math.round(data.routes[0].distance),
-            duration: Math.round(data.routes[0].duration),
-          });
-        }
+    fetchDrivingRoute(routeCoordinates(orderedPreviewPoints), {
+      token: TOKEN, preview: true, avoidTolls, signal: controller.signal,
+    })
+      .then((totals) => {
+        if (!controller.signal.aborted) setPreviewRoute(totals);
       })
       .catch(() => undefined);
 
     return () => controller.abort();
-  }, [origin?.id, destination?.id, meetup?.id, stops, avoidTolls]);
+  }, [origin, destination, meetup, stops, avoidTolls]);
 
   const days = useMemo(() => {
     if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -483,23 +477,11 @@ export default function CreateRideScreen() {
     }
   }
 
+  const pointCount = 2 + stops.length + (meetup ? 1 : 0);
+
   function addStop(kind: WaypointKind = 'stop') {
-    if (!canAddMoreWaypoints(stops.length, 'free')) {
-      Alert.alert(
-        '⭐️ Pro Tourer Stop Limit',
-        `Free tier allows up to ${PLAN_LIMITS.free.maxWaypointsPerTrip} stops per trip. Upgrade to Pro Tourer for up to ${PLAN_LIMITS.pro_tourer.maxWaypointsPerTrip} stops per expedition.`,
-        [
-          { text: 'Keep Current', style: 'cancel' },
-          {
-            text: 'Learn More',
-            onPress: () => Alert.alert('Pro Tourer Upgrade', 'Upgrade to Pro Tourer for ₹199/month for unlimited multi-day routes.'),
-          },
-        ]
-      );
-      return;
-    }
-    if (stops.length + 2 + (meetup ? 1 : 0) >= 25) {
-      Alert.alert('Route point limit', 'Mapbox driving directions support up to 25 points, including origin and destination.');
+    if (pointCount >= MAX_TRIP_ROUTE_POINTS) {
+      Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
       return;
     }
     setStops((current) => [...current, { key: String(Date.now()) + Math.random(), place: null, kind }]);
@@ -516,6 +498,10 @@ export default function CreateRideScreen() {
       return;
     }
     if (!user) return;
+    if (pointCount > MAX_TRIP_ROUTE_POINTS) {
+      Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+      return;
+    }
     if (startDate && endDate && days.length === 0) {
       Alert.alert('Check trip dates', 'Please ensure the end date is on or after the start date.');
       return;
@@ -561,24 +547,10 @@ export default function CreateRideScreen() {
 
       if (TOKEN && ordered.length >= 2) {
         try {
-          const coords = ordered.map((p) => p.place.longitude + ',' + p.place.latitude).join(';');
-          const excludeParam = avoidTolls ? '&exclude=toll' : '';
-          const response = await fetch(
-            'https://api.mapbox.com/directions/v5/mapbox/driving/' +
-              coords +
-              '?overview=full&geometries=geojson&steps=false' +
-              excludeParam +
-              '&access_token=' +
-              TOKEN
-          );
-          if (response.ok) {
-            const data = await response.json();
-            if (data.routes?.[0]) {
-              routeGeometry = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
-              distance = Math.round(data.routes[0].distance);
-              duration = Math.round(data.routes[0].duration);
-            }
-          }
+          const result = await fetchDrivingRoute(routeCoordinates(ordered.map(p => p.place)), { token: TOKEN, avoidTolls });
+          routeGeometry = { type: 'Feature', geometry: result.geometry, properties: {} };
+          distance = result.distance;
+          duration = result.duration;
         } catch {
           routeGeometry = null;
           distance = null;
@@ -1083,7 +1055,13 @@ export default function CreateRideScreen() {
                 label="Group Meetup Point (Optional)"
                 placeholder="Where riders gather before departure"
                 value={meetup}
-                onChange={setMeetup}
+                onChange={place => {
+                  if (place && !meetup && pointCount >= MAX_TRIP_ROUTE_POINTS) {
+                    Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+                  } else {
+                    setMeetup(place);
+                  }
+                }}
               />
 
               {/* Overnight Stay */}

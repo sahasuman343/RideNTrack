@@ -24,8 +24,6 @@ export default function JoinRideScreen() {
   const [code, setCode] = useState(params.code ? params.code.toUpperCase() : '');
   const [token, setToken] = useState(params.token || '');
   const [loading, setLoading] = useState(false);
-  const [torchActive, setTorchActive] = useState(false);
-  const [detectedClipboard, setDetectedClipboard] = useState<string | null>('ridentrack.me/join/spiti-pass-942');
   const [errorState, setErrorState] = useState<{ title: string; message: string; code: string } | null>(null);
 
   const router = useRouter();
@@ -47,7 +45,7 @@ export default function JoinRideScreen() {
 
   async function handleJoinCode(customCode?: string) {
     const targetCode = (customCode || code).trim().toUpperCase();
-    if (!targetCode || targetCode.length !== 6) {
+    if (!/^[A-Z0-9]{6}$/.test(targetCode)) {
       Alert.alert('Invalid code', 'Enter the 6-character ride code.');
       return;
     }
@@ -59,7 +57,7 @@ export default function JoinRideScreen() {
       if (!data) throw new Error('Expedition code not found or expired.');
 
       Alert.alert('Joined ride', 'You joined using the ride code.', [
-        { text: 'Open ride', onPress: () => router.push(`/ride/${data}`) },
+        { text: 'Open trip', onPress: () => router.push(`/trip/${data}`) },
       ]);
       setCode('');
     } catch (err: any) {
@@ -90,22 +88,13 @@ export default function JoinRideScreen() {
       if (!data) throw new Error('This invitation has expired.');
       setToken('');
       Alert.alert('Invitation accepted', 'You are now a member of this group ride.', [
-        { text: 'Open trip', onPress: () => router.push(`/ride/${data}`) },
+        { text: 'Open trip', onPress: () => router.push(`/trip/${data}`) },
       ]);
     } catch (error: any) {
       Alert.alert('Could not accept invitation', error.message || 'The invitation may be expired or intended for another email.');
     } finally {
       setLoading(false);
     }
-  }
-
-  function applyClipboardCode() {
-    if (!detectedClipboard) return;
-    const match = detectedClipboard.match(/([A-Z0-9]{6})/i);
-    const parsed = match ? match[1].toUpperCase() : 'SPTI90';
-    setCode(parsed);
-    setActiveTab('code');
-    setDetectedClipboard(null);
   }
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
@@ -273,13 +262,7 @@ export default function JoinRideScreen() {
                 <View style={s.viewfinderBox}>
                   {/* Top Status Pill inside Viewfinder */}
                   <View style={s.viewfinderTopStatus}>
-                    <View style={s.fpsBadge}>
-                      <LiveDot pulse color={theme.green} size={6} />
-                      <Text style={s.fpsBadgeText}>RADAR CAM • 60 FPS</Text>
-                    </View>
-                    <View style={s.isoBadge}>
-                      <Text style={s.isoBadgeText}>EXP-ISO 800</Text>
-                    </View>
+                    <Text style={s.fpsBadgeText}>USE YOUR PHONE CAMERA</Text>
                   </View>
 
                   {/* Target Reticle with Glowing Corner Brackets */}
@@ -291,7 +274,6 @@ export default function JoinRideScreen() {
                     <View style={[s.reticleCorner, s.reticleBottomRight]} />
 
                     {/* Scanning Laser Beam */}
-                    <View style={s.scanningLaserLine} />
 
                     {/* Center Crosshairs */}
                     <View style={s.crosshairHoriz} />
@@ -301,7 +283,7 @@ export default function JoinRideScreen() {
                   {/* Bottom Viewfinder Prompt */}
                   <View style={s.viewfinderBottomPrompt}>
                     <Text style={s.viewfinderPromptText}>
-                      Align expedition QR inside amber brackets
+                      Open your phone’s camera and scan the invitation QR. Or ask your leader for the ride code.
                     </Text>
                   </View>
                 </View>
@@ -310,38 +292,29 @@ export default function JoinRideScreen() {
                 <View style={s.viewfinderControlsRow}>
                   <TouchableOpacity
                     style={s.viewfinderControlBtn}
-                    onPress={() => setTorchActive(v => !v)}
+                    onPress={() => setActiveTab('code')}
                     accessibilityRole="button"
-                    accessibilityLabel="Toggle camera torch flashlight"
+                    accessibilityLabel="Enter ride code"
                   >
-                    <View style={[s.controlBtnIconBox, torchActive && s.controlBtnIconBoxActive]}>
-                      <Text style={s.controlBtnIcon}>{torchActive ? '🔦' : '💡'}</Text>
+                    <View style={s.controlBtnIconBox}>
+                      <Text style={s.controlBtnIcon}>#</Text>
                     </View>
                     <View style={s.controlBtnCol}>
-                      <Text style={s.controlBtnTitle}>TORCH</Text>
-                      <Text style={[s.controlBtnSubtitle, torchActive && { color: theme.accent }]}>
-                        {torchActive ? 'ACTIVE' : 'OFFLINE'}
-                      </Text>
+                      <Text style={s.controlBtnTitle}>Enter code</Text>
                     </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={s.viewfinderControlBtn}
-                    onPress={() => {
-                      Alert.alert('Import QR/GPX', 'Select a saved QR image from your device gallery or file storage.', [
-                        { text: 'Sample Code', onPress: () => { setCode('SPTI90'); setActiveTab('code'); } },
-                        { text: 'Cancel', style: 'cancel' },
-                      ]);
-                    }}
+                    onPress={() => setActiveTab('link')}
                     accessibilityRole="button"
-                    accessibilityLabel="Import saved QR from photos"
+                    accessibilityLabel="Paste invitation token"
                   >
                     <View style={s.controlBtnIconBox}>
                       <Text style={s.controlBtnIcon}>🖼️</Text>
                     </View>
                     <View style={s.controlBtnCol}>
-                      <Text style={s.controlBtnTitle}>IMPORT</Text>
-                      <Text style={s.controlBtnSubtitle}>SAVED GPX / QR</Text>
+                      <Text style={s.controlBtnTitle}>Use token</Text>
                     </View>
                   </TouchableOpacity>
                 </View>
@@ -353,7 +326,7 @@ export default function JoinRideScreen() {
               <View style={s.passcodeSection}>
                 <View style={s.passcodeHeader}>
                   <Text style={s.passcodeSectionLabel}>DIRECT EXPEDITION CODE</Text>
-                  <Text style={s.passcodeSubPill}>6-DIGIT PASS</Text>
+                  <Text style={s.passcodeSubPill}>6 CHARACTERS</Text>
                 </View>
 
                 {/* 6 Tactile PIN Digit Boxes */}
@@ -382,33 +355,17 @@ export default function JoinRideScreen() {
                 <TextInput
                   style={s.hiddenCodeInput}
                   value={code}
-                  onChangeText={t => setCode(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
-                  maxLength={6}
+                  onChangeText={t => setCode(t.trim().toUpperCase())}
+                  accessibilityLabel="Type or paste your six-character ride code"
                   autoCapitalize="characters"
                   autoCorrect={false}
-                  placeholder="Tap here to type code"
+                  placeholder="Type or paste code"
                   placeholderTextColor={theme.textMuted}
                 />
 
-                {/* Smart Clipboard Detection Chip */}
-                {detectedClipboard && (
-                  <View style={s.clipboardChip}>
-                    <View style={s.clipboardLeftCol}>
-                      <Text style={s.clipboardIcon}>📋</Text>
-                      <Text style={s.clipboardText} numberOfLines={1}>
-                        Detected: <Text style={s.clipboardTextBold}>{detectedClipboard}</Text>
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={s.clipboardApplyBtn}
-                      onPress={applyClipboardCode}
-                      accessibilityRole="button"
-                      accessibilityLabel="Apply detected clipboard code"
-                    >
-                      <Text style={s.clipboardApplyText}>APPLY</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <Text style={s.clipboardText}>{code && !/^[A-Z0-9]{1,6}$/.test(code)
+                  ? 'Use the six letters or numbers from your ride leader, not the full message.'
+                  : 'To paste, press and hold the code field and choose Paste.'}</Text>
               </View>
             )}
 
@@ -417,11 +374,11 @@ export default function JoinRideScreen() {
               <View style={s.linkSection}>
                 <Text style={s.linkLabel}>PRIVATE EXPEDITION INVITATION LINK</Text>
                 <Text style={s.linkSubtitle}>
-                  Paste the private invitation token or URL shared by the expedition leader.
+                  Paste the private invitation token shared by the expedition leader.
                 </Text>
                 <TextInput
                   style={s.tokenInput}
-                  placeholder="Paste invitation token (UUID or URL)"
+                  placeholder="Paste invitation token (UUID)"
                   placeholderTextColor={theme.textMuted}
                   value={token}
                   onChangeText={setToken}
@@ -442,14 +399,8 @@ export default function JoinRideScreen() {
                   <View style={s.meshDot} />
                 </View>
                 <Text style={s.meshBody}>
-                  Pass altitudes frequently drop satellite broadband. Enable offline Bluetooth Mesh pairing to tether formation telemetry directly with your pack leader.
+                  Joining a group requires an internet connection. Keep your invitation and try again when you are back online.
                 </Text>
-                <TouchableOpacity
-                  style={s.meshActionRow}
-                  onPress={() => Alert.alert('Offline Mesh', 'Bluetooth Low Energy discovery will scan nearby RideNTrack beacons within 150m.')}
-                >
-                  <Text style={s.meshActionText}>Scan Nearby Mesh Nodes ›</Text>
-                </TouchableOpacity>
               </View>
             </View>
           </>
@@ -462,7 +413,9 @@ export default function JoinRideScreen() {
           style={[s.primaryVerifyBtn, loading && { opacity: 0.7 }]}
           disabled={loading}
           onPress={() => {
-            if (activeTab === 'link') {
+            if (activeTab === 'qr') {
+              setActiveTab('code');
+            } else if (activeTab === 'link') {
               void handleAcceptInvitation();
             } else {
               void handleJoinCode();
@@ -476,7 +429,7 @@ export default function JoinRideScreen() {
           ) : (
             <View style={s.primaryBtnRow}>
               <Text style={s.primaryBtnIcon}>🧭</Text>
-              <Text style={s.primaryBtnTitle}>VERIFY & JOIN RIDE</Text>
+              <Text style={s.primaryBtnTitle}>{activeTab === 'qr' ? 'USE RIDE CODE' : 'VERIFY & JOIN RIDE'}</Text>
               <Text style={s.primaryBtnArrow}>→</Text>
             </View>
           )}

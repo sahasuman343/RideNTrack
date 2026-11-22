@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Platform,
   RefreshControl,
@@ -11,30 +11,33 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Ride } from '@ridentrack/shared';
-import { supabase } from '../../src/lib/supabase';
+import { loadHomeData, nextPlannedTrip } from '../../src/lib/homeData';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import {
   Card,
-  LiveDot,
   Button,
   RouteLine,
   Avatar,
-  AvatarStack,
   Skeleton,
   FallbackTripCover,
 } from '../../src/components/ui';
 
 export default function HomeScreen() {
-  const [ongoingTrip, setOngoingTrip] = useState<Ride | null>(null);
-  const [nextTrip, setNextTrip] = useState<Ride | null>(null);
-  const [activePackCount, setActivePackCount] = useState<number>(0);
-  const [lastUpdatedSec, setLastUpdatedSec] = useState<number>(12);
+  const { user, profile } = useAuth();
+  return <HomeContent key={user?.id ?? 'signed-out'} userId={user?.id} profile={profile} />;
+}
+
+function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType<typeof useAuth>['profile'] }) {
+  const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof loadHomeData>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const request = useRef(0);
+  const ongoingTrip = snapshot?.ongoingTrip;
+  const next = snapshot && nextPlannedTrip(snapshot.planned, new Date(now));
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const { user, profile } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
   const insets = useSafeAreaInsets();
@@ -58,83 +61,36 @@ export default function HomeScreen() {
     return 'No bike added';
   }, [profile?.motorcycle_make, profile?.motorcycle_model]);
 
-  // Relative last updated timer
-  useEffect(() => {
-    if (!ongoingTrip) return;
-    const interval = setInterval(() => {
-      setLastUpdatedSec(prev => (prev >= 60 ? 5 : prev + 5));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [ongoingTrip]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void fetchHomeData();
-    }, [user?.id])
-  );
-
-  async function fetchHomeData() {
-    if (!user) return;
+  const fetchHomeData = useCallback(async () => {
+    const version = ++request.current;
     try {
-      const { data: participantsData } = await supabase
-        .from('ride_participants')
-        .select('ride_id, rides(*)')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('joined_at', { ascending: false });
-
-      if (participantsData) {
-        const userRides: Ride[] = participantsData
-          .map((p: any) => p.rides)
-          .filter(Boolean);
-
-        // Find active/ongoing trip as hero
-        const live = userRides.find(r => r.status === 'active') || null;
-        setOngoingTrip(live);
-
-        // Fetch pack count for live trip
-        if (live) {
-          const { count } = await supabase
-            .from('ride_participants')
-            .select('*', { count: 'exact', head: true })
-            .eq('ride_id', live.id)
-            .eq('is_active', true);
-          setActivePackCount(count || 1);
-        }
-
-        // Find next planned trip
-        const todayStr = new Date().toISOString().split('T')[0];
-        const upcoming = userRides
-          .filter(r => r.status === 'planned')
-          .sort((a, b) => {
-            const dateA = a.start_date || '9999';
-            const dateB = b.start_date || '9999';
-            return dateA.localeCompare(dateB);
-          });
-
-        setNextTrip(upcoming[0] || null);
+      if (!userId) throw new Error('Sign in to load your trips.');
+      const data = await loadHomeData(userId);
+      if (version === request.current) {
+        setSnapshot(data);
+        setError(data.ongoingTrip && data.members === null ? 'Member count unavailable.' : null);
       }
+    } catch (e) {
+      if (version === request.current) setError(`Could not load trips. ${e instanceof Error ? e.message : 'Please retry.'}`);
     } finally {
-      setLoading(false);
+      if (version === request.current) {
+        setLoading(false);
+        setRefreshing(false);
+        setNow(Date.now());
+      }
     }
-  }
+  }, [userId]);
+
+  useFocusEffect(useCallback(() => {
+    void fetchHomeData();
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => { ++request.current; clearInterval(timer); };
+  }, [fetchHomeData]));
 
   async function onRefresh() {
     setRefreshing(true);
     await fetchHomeData();
-    setLastUpdatedSec(2);
-    setRefreshing(false);
   }
-
-  // Next trip days calculation
-  const nextTripDaysText = useMemo(() => {
-    if (!nextTrip?.start_date) return 'in upcoming days';
-    const start = new Date(nextTrip.start_date).getTime();
-    const diffDays = Math.ceil((start - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diffDays <= 0) return 'today';
-    if (diffDays === 1) return 'tomorrow';
-    return `in ${diffDays} days`;
-  }, [nextTrip?.start_date]);
 
   return (
     <View style={styles.container}>
@@ -185,20 +141,23 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Loading Skeleton */}
+        {error && (
+          <Card variant="raised">
+            <Text accessibilityRole="alert" style={styles.emptySubtitle}>{error}</Text>
+            {snapshot && <Text style={styles.emptySubtitle}>Showing trip data from {new Date(snapshot.checkedAt).toLocaleString()}.</Text>}
+            <Button title="Retry" onPress={onRefresh} />
+          </Card>
+        )}
         {loading ? (
           <View style={{ marginTop: 20 }}>
             <Skeleton height={280} borderRadius={24} />
           </View>
-        ) : ongoingTrip ? (
-          /* ======================================================== */
-          /* 1. ONGOING TRIP HERO (Large, green blinking LED, LIVE HUD) */
-          /* ======================================================== */
+        ) : !snapshot ? null : ongoingTrip ? (
           <Card
             variant="activeGlow"
             style={styles.heroCard}
             onPress={() => router.push(`/trip/${ongoingTrip.id}`)}
-            accessibilityLabel={`Ongoing live trip: ${ongoingTrip.name}. Tap to open trip details.`}
+            accessibilityLabel={`Active trip: ${ongoingTrip.name}. Tap to open trip details.`}
           >
             {/* Scenic Cover Banner & Elevation Header */}
             <View style={styles.heroCoverWrap}>
@@ -206,24 +165,18 @@ export default function HomeScreen() {
                 tripId={ongoingTrip.id}
                 name={ongoingTrip.name}
                 status="active"
-                stageInfo="Live Sector"
-                elevation={
-                  ongoingTrip.estimated_distance_meters
-                    ? `${Math.round(ongoingTrip.estimated_distance_meters / 1000)}km`
-                    : 'Tracked'
-                }
+                stageInfo="Active trip"
               />
             </View>
 
             {/* Live Indicator Top Row */}
             <View style={styles.heroTopRow}>
               <View style={styles.liveBadgeRow}>
-                <LiveDot size={8} color={theme.green} />
-                <Text style={styles.liveBadgeText}>LIVE HUD</Text>
+                <Text style={styles.liveBadgeText}>TRIP ACTIVE</Text>
               </View>
               <View style={styles.lastUpdatedPill}>
                 <Text style={styles.lastUpdatedText}>
-                  Updated {lastUpdatedSec}s ago
+                  Trip data checked {new Date(snapshot.checkedAt).toLocaleString()}
                 </Text>
               </View>
             </View>
@@ -246,35 +199,20 @@ export default function HomeScreen() {
             {/* Telemetry Progress Info */}
             <View style={styles.telemetryStrip}>
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>DISTANCE</Text>
+                <Text style={styles.telemetryLabel}>EST. DISTANCE</Text>
                 <Text style={styles.telemetryValue}>
-                  {ongoingTrip.estimated_distance_meters
+                  {ongoingTrip.estimated_distance_meters != null
                     ? `${Math.round(ongoingTrip.estimated_distance_meters / 1000)} km`
-                    : 'Tracked'}
+                    : 'Unavailable'}
                 </Text>
               </View>
               <View style={styles.telemetryDivider} />
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>PACK STATUS</Text>
-                <Text style={[styles.telemetryValue, { color: theme.green }]}>
-                  {activePackCount} {activePackCount === 1 ? 'Rider' : 'Riders'} Live
+                <Text style={styles.telemetryLabel}>TRIP MEMBERS</Text>
+                <Text style={styles.telemetryValue}>
+                  {snapshot.members ?? 'Unavailable'}
                 </Text>
               </View>
-              <View style={styles.telemetryDivider} />
-              <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>DRIFT</Text>
-                <Text style={[styles.telemetryValue, { color: theme.textMuted }]}>
-                  On Track
-                </Text>
-              </View>
-            </View>
-
-            {/* Pack Avatar Stack */}
-            <View style={styles.packRow}>
-              <AvatarStack totalCount={activePackCount} maxDisplay={4} size={28} />
-              <Text style={styles.packSummaryText}>
-                {activePackCount} RIDERS PACK · All Connected
-              </Text>
             </View>
 
             {/* Direct Primary Action: Resume Live Tracking */}
@@ -323,42 +261,23 @@ export default function HomeScreen() {
             </Card>
 
             {/* Next Scheduled Trip Line (Quiet, non-intrusive) */}
-            {nextTrip && (
+            {next && (
               <TouchableOpacity
                 style={styles.nextTripPill}
-                onPress={() => router.push(`/trip/${nextTrip.id}`)}
+                onPress={() => router.push(`/trip/${next.trip.id}`)}
                 accessibilityRole="button"
-                accessibilityLabel={`Next trip: ${nextTrip.name} ${nextTripDaysText}. Tap to view.`}
+                accessibilityLabel={`${next.title}: ${next.trip.name}, ${next.when}. Tap to view.`}
               >
                 <View style={styles.nextTripDot} />
                 <Text style={styles.nextTripIcon}>🗓️</Text>
                 <Text style={styles.nextTripText} numberOfLines={1}>
-                  Next trip: <Text style={styles.nextTripBold}>{nextTrip.name}</Text>{' '}
-                  {nextTripDaysText}
+                  {next.title}: <Text style={styles.nextTripBold}>{next.trip.name}</Text>{' '}
+                  {next.when}
                 </Text>
                 <Text style={styles.nextTripChevron}>›</Text>
               </TouchableOpacity>
             )}
 
-            {/* Fast Standby Telemetry Status Band */}
-            <View style={styles.standbyBand}>
-              <View style={styles.standbyTile}>
-                <Text style={styles.standbyLabel}>Sat Comms</Text>
-                <Text style={[styles.standbyVal, { color: theme.green }]}>
-                  LOCKED
-                </Text>
-              </View>
-              <View style={styles.standbyTile}>
-                <Text style={styles.standbyLabel}>Telemetry</Text>
-                <Text style={styles.standbyVal}>STANDBY</Text>
-              </View>
-              <View style={styles.standbyTile}>
-                <Text style={styles.standbyLabel}>Pack Sync</Text>
-                <Text style={[styles.standbyVal, { color: theme.accent }]}>
-                  Ready
-                </Text>
-              </View>
-            </View>
           </View>
         )}
       </ScrollView>
@@ -518,18 +437,6 @@ const makeStyles = (c: RidePalette) =>
       height: 24,
       backgroundColor: c.border,
     },
-    packRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-    },
-    packSummaryText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: c.textMuted,
-      letterSpacing: 0.3,
-    },
     emptyContainer: {
       gap: 16,
     },
@@ -615,32 +522,5 @@ const makeStyles = (c: RidePalette) =>
       fontSize: 16,
       color: c.textMuted,
       fontWeight: 'bold',
-    },
-    standbyBand: {
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 8,
-    },
-    standbyTile: {
-      flex: 1,
-      backgroundColor: c.surfaceRaised,
-      borderWidth: 1,
-      borderColor: c.border,
-      borderRadius: 12,
-      paddingVertical: 10,
-      alignItems: 'center',
-    },
-    standbyLabel: {
-      fontSize: 10,
-      fontWeight: '700',
-      color: c.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    standbyVal: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: c.text,
-      marginTop: 2,
     },
   });

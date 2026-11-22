@@ -51,8 +51,8 @@ test('route validation requires ordered origin and destination with valid coordi
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,latitude:91}:p)),/coordinates/i);
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,name:' '}:p)),/name/i);
   assert.match(routeTools.validateRoutePoints([points[0],{...points[1],waypoint_type:'destination'},points[2]]),/first and last/i);
-  const tooMany=Array.from({length:26},(_,i)=>({sequence:i,waypoint_type:i===0?'origin':i===25?'destination':'stop',name:'P'+i,latitude:12,longitude:77}));
-  assert.match(routeTools.validateRoutePoints(tooMany),/25 route points/i);
+  const tooMany=Array.from({length:201},(_,i)=>({sequence:i,waypoint_type:i===0?'origin':i===200?'destination':'stop',name:'P'+i,latitude:12,longitude:77}));
+  assert.match(routeTools.validateRoutePoints(tooMany),/200 route points/i);
 });
 test('route coordinate order is longitude then latitude', () => {
   assert.deepEqual(routeTools.routeCoordinates(routeFixture()),[[77.5946,12.9716],[77.1173,13.3379],[74.3188,14.5479]]);
@@ -67,6 +67,48 @@ test('Mapbox directions response is normalized and estimates are formatted', () 
   assert.throws(()=>routeTools.parseDirectionsRoute({routes:[]}),/valid route/i);
   assert.throws(()=>routeTools.parseDirectionsRoute({routes:[{geometry:{type:'LineString',coordinates:[[200,12],[78,13]]},distance:1,duration:1}]}),/invalid route coordinates/i);
   assert.throws(()=>routeTools.parseDirectionsRoute({routes:[{geometry:{type:'LineString',coordinates:[[77,12],[78,13]]},distance:-1,duration:1}]}),/invalid distance/i);
+});
+
+test('driving route joins ordered road geometry and totals across the provider boundary', async t => {
+  const points = Array.from({length:200}, (_, i) => [i - 100, 10]);
+  const batches = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    const request = new URL(url);
+    const batch = request.pathname.split('/').pop().split(';').map(p => p.split(',').map(Number));
+    assert.equal(request.searchParams.get('exclude'), 'toll');
+    assert.equal(request.searchParams.get('geometries'), 'geojson');
+    assert.equal(request.searchParams.get('access_token'), 'a&b');
+    batches.push(batch);
+    const coordinates = [batch[0], [batch[0][0] + 0.5, 11], ...batch.slice(1)];
+    return { ok:true, json:async () => ({routes:[{geometry:{type:'LineString', coordinates}, distance:12.4, duration:3.6}]}) };
+  });
+  const result = await routeTools.fetchDrivingRoute(points, {token:'a&b', avoidTolls:true});
+  assert.deepEqual(batches.map(b => b.length), [25,25,25,25,25,25,25,25,8]);
+  batches.forEach((batch, i) => assert.deepEqual(batch, points.slice(i*24, i*24+25)));
+  const expected = points.flatMap(([x,y], i) => i % 24 === 0 && i < points.length - 1 ? [[x,y],[x+0.5,11]] : [[x,y]]);
+  assert.deepEqual(result, {geometry:{type:'LineString', coordinates:expected}, distance:112, duration:32});
+});
+
+test('preview needs no geometry and never returns a partial estimate after a failed batch', async t => {
+  const points = Array.from({length:26}, (_, i) => [i, 10]);
+  const signal = new AbortController().signal;
+  const options = {token:'test', preview:true, avoidTolls:true, signal};
+  let failLast = false;
+  const fetch = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const request = new URL(url);
+    assert.equal(init.signal, signal);
+    assert.equal(request.searchParams.get('overview'), 'false');
+    assert.equal(request.searchParams.get('exclude'), 'toll');
+    const final = request.pathname.endsWith('/24,10;25,10');
+    return {ok:true, json:async () => final && failLast ? {code:'NoRoute'} : {routes:[{distance:10.4, duration:5.4}]}};
+  });
+  assert.deepEqual(await routeTools.fetchDrivingRoute(points.slice(0,25), options), {distance:10, duration:5});
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.deepEqual(await routeTools.fetchDrivingRoute(points, options), {distance:21, duration:11});
+  failLast = true;
+  await assert.rejects(routeTools.fetchDrivingRoute(points, options), /no driving route/i);
+  await assert.rejects(routeTools.fetchDrivingRoute(Array(201).fill(points[0]), options), /200 route points/i);
+  assert.equal(fetch.mock.callCount(), 5);
 });
 
 const signupInput = { email:' new@example.test ',password:'test-only',username:' new-rider ',displayName:' New Rider ' };
@@ -260,6 +302,79 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
   await service.stopBackgroundLocationUpdates();
 });
 
+test('foreground GPS subscription failure is not a successful start and a retry can acquire a fix', async () => {
+  let listener, attempts = 0, stored;
+  const service = loader({
+    'expo-constants': { default:{executionEnvironment:'go'},ExecutionEnvironment:{StoreClient:'go'},__esModule:true },
+    'expo-task-manager': { isTaskDefined:()=>true },
+    'expo-location': {
+      Accuracy:{High:4}, requestForegroundPermissionsAsync:async()=>({status:'granted'}),
+      watchPositionAsync:async(_options, callback)=>{
+        if (++attempts === 1) throw Error('GPS disabled');
+        listener = callback; return {remove(){}};
+      },
+    },
+    '@react-native-async-storage/async-storage': {
+      setItem:async(_,value)=>{stored=value;}, removeItem:async()=>{stored=null;},
+    },
+    '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
+    '../lib/offlineQueue':{enqueueLocation:async()=>{}}, './syncQueue':{syncQueue:async()=>{}},
+  })('mobile/src/services/backgroundLocation.ts');
+  const {gpsStatus} = loader()('mobile/src/lib/gpsStatus.ts');
+  let fix;
+  const params = {rideId:'r', userId:'u', displayName:'U', onLocationUpdate: p=>{fix=p;}};
+  await assert.rejects(service.startBackgroundLocationUpdates(params), /GPS disabled/);
+  assert.equal(stored,null);
+  const {mode} = await service.startBackgroundLocationUpdates(params);
+  const coords = {latitude:0,longitude:0,accuracy:5,speed:0,heading:0}, now = Date.now();
+  listener({coords});
+  await tick();
+  assert.equal(fix,undefined);
+  assert.equal(gpsStatus(mode, fix?.timestamp, now).state,'waiting');
+  listener({coords,timestamp:now});
+  await tick();
+  assert.equal(gpsStatus(mode, fix.timestamp, now + 30000).state,'fresh');
+  assert.equal(gpsStatus(mode, fix.timestamp, now + 30001).state,'stale');
+  assert.equal(gpsStatus('paused', fix.timestamp, now).state,'paused');
+  await service.stopBackgroundLocationUpdates();
+});
+
+test('Home treats failed trip loads as errors and distinguishes zero members from unknown', async () => {
+  let list = {data:null,error:{message:'Offline'}}, count;
+  const query = {
+    select:()=>query, eq:()=>query, order:()=>Promise.resolve(list),
+    then:(resolve,reject)=>Promise.resolve(count).then(resolve,reject),
+  };
+  const {loadHomeData} = loader({'./supabase':{supabase:{from:()=>query}}})('mobile/src/lib/homeData.ts');
+  await assert.rejects(loadHomeData('u'), /Offline/);
+  list = {data:[{rides:{id:'r',status:'active'}}],error:null};
+  count = {count:0,error:null};
+  const before = Date.now(), snapshot = await loadHomeData('u');
+  assert.equal(snapshot.members,0);
+  assert.ok(snapshot.checkedAt >= before && snapshot.checkedAt <= Date.now());
+  count = {count:null,error:{message:'count failed'}};
+  const partial = await loadHomeData('u');
+  assert.equal(partial.ongoingTrip.id,'r');
+  assert.equal(partial.members,null);
+});
+
+test('Home chooses the next local-calendar trip before overdue plans, even across DST', () => {
+  const {nextPlannedTrip} = loader({'./supabase':{}})('mobile/src/lib/homeData.ts');
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ='America/Los_Angeles';
+    const today = new Date('2026-11-01T06:45:00Z'); // Oct 31 locally, on the eve of the fall-back.
+    const planned = ['2026-10-29','2026-11-02','2026-10-30','2026-11-01'].map(start_date=>({start_date}));
+    assert.equal(nextPlannedTrip(planned,today).when,'tomorrow');
+    assert.equal(nextPlannedTrip([planned[1]],today).when,'in 2 days');
+    assert.equal(nextPlannedTrip([{start_date:'2026-10-31'}],today).when,'today');
+    const overdue = nextPlannedTrip([planned[0],planned[2]],today);
+    assert.equal(overdue.trip.start_date,'2026-10-30');
+    assert.equal(overdue.when,'1 day overdue');
+    assert.equal(nextPlannedTrip([{start_date:null}],today).when,'date unavailable');
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ=previous; }
+});
+
 test('Android background permission and native GPS service start are separate user actions', async () => {
   const storage = new Map();
   let requested = 0, started = 0, startedOptions, permissionGranted = false, foregroundWatch = 0;
@@ -292,20 +407,20 @@ test('Android background permission and native GPS service start are separate us
   })('mobile/src/services/backgroundLocation.ts');
   const params={rideId:'ride',userId:'u',displayName:'Rider'};
   const foreground = await service.startBackgroundLocationUpdates(params);
-  assert.equal(foreground.isBackgroundEnabled,false);
+  assert.equal(foreground.mode,'foreground');
   assert.equal(foregroundWatch,1);
   assert.equal(requested,0);
   assert.equal(started,0);
 
   const permissionStep = await service.enableBackgroundLocationUpdates(params);
   assert.equal(permissionStep.permissionGranted,true);
-  assert.equal(permissionStep.isBackgroundEnabled,false);
+  assert.equal(permissionStep.mode,'foreground');
   assert.equal(requested,1);
   assert.equal(started,0);
 
   const serviceStep = await service.enableBackgroundLocationUpdates(params);
   assert.equal(serviceStep.permissionGranted,true);
-  assert.equal(serviceStep.isBackgroundEnabled,true);
+  assert.equal(serviceStep.mode,'background');
   assert.equal(started,1);
   assert.equal(startedOptions.timeInterval,5000);
   assert.equal(startedOptions.distanceInterval,15);
@@ -317,7 +432,7 @@ test('Android background permission and native GPS service start are separate us
   await hasStarted;
   const stop = service.stopBackgroundLocationUpdates();
   releaseStart();
-  assert.equal((await enable).isBackgroundEnabled, false);
+  assert.equal((await enable).mode, 'stopped');
   await stop;
   assert.equal(storage.size, 0, 'cancelled enable must not persist context');
   assert.equal(nativeStarted, false);
@@ -518,9 +633,8 @@ test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, a
     });
   }, /valid geographic coordinates/);
 
-  // Enforces 25-point limit
   let fullPoints = [...initialPoints];
-  for (let i = 0; i < 23; i++) {
+  for (let i = 0; i < 198; i++) {
     fullPoints = insertRouteStop(fullPoints, {
       waypoint_type: 'stop',
       name: `Stop ${i + 1}`,
@@ -528,17 +642,17 @@ test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, a
       longitude: 77.0,
     });
   }
-  assert.equal(fullPoints.length, 25);
+  assert.equal(fullPoints.length, 200);
   assert.equal(validateRoutePoints(fullPoints), null);
 
   assert.throws(() => {
     insertRouteStop(fullPoints, {
       waypoint_type: 'stop',
-      name: '26th Stop',
+      name: 'Overflow stop',
       latitude: 12.8,
       longitude: 77.1,
     });
-  }, /support up to 25 points/);
+  }, /up to 200 route points/);
 });
 
 test('removeRouteStop and moveRouteStop manage intermediate stops without corrupting origin/destination', () => {
@@ -946,8 +1060,8 @@ test('my rides screen integrates rider analytics and milestones banner', () => {
   const myRidesSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(myRidesSource, /get_rider_analytics/);
   assert.match(myRidesSource, /analyticsCard/);
-  assert.match(myRidesSource, /TOTAL DISTANCE/);
-  assert.match(myRidesSource, /RIDING HOURS/);
+  assert.match(myRidesSource, /EST\. COMPLETED KM/);
+  assert.match(myRidesSource, /EST\. COMPLETED HOURS/);
   assert.match(myRidesSource, /TOURS DONE/);
   assert.match(myRidesSource, /milestonePill/);
 });
@@ -1764,7 +1878,7 @@ test('navigation architecture defines exactly three bottom tabs with Home as def
   assert.match(tripsSource, /leave_ride[\s\S]*stopBackgroundLocationUpdates/);
 });
 
-test('Home screen renders time-based greeting, default motorcycle, hero ongoing trip with live LED, and quiet next-trip line for empty state', () => {
+test('Home screen renders time-based greeting, default motorcycle, active trip details, and next planned trip', () => {
   const homeSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
 
   // Time-based greeting & steed pill
@@ -1774,20 +1888,17 @@ test('Home screen renders time-based greeting, default motorcycle, hero ongoing 
   assert.match(homeSource, /Good evening/);
   assert.match(homeSource, /motorcycleName/);
 
-  // Hero card with live LED, last updated time, and rider pack count
   assert.match(homeSource, /ongoingTrip/);
-  assert.match(homeSource, /LIVE HUD/);
-  assert.match(homeSource, /LiveDot/);
-  assert.match(homeSource, /lastUpdatedSec/);
-  assert.match(homeSource, /activePackCount/);
+  assert.match(homeSource, /Trip data checked/);
+  assert.match(homeSource, /TRIP MEMBERS/);
+  assert.doesNotMatch(homeSource, /All Connected|On Track|LOCKED|Riders Live/);
   assert.match(homeSource, /Resume Live Tracking/);
   assert.match(homeSource, /RouteLine/);
 
   // Polished empty state with next trip line
   assert.match(homeSource, /No ride in progress/);
   assert.match(homeSource, /nextTrip/);
-  assert.match(homeSource, /Next trip:/);
-  assert.match(homeSource, /nextTripDaysText/);
+  assert.match(homeSource, /next\.when/);
   assert.match(homeSource, /Plan a trip/);
   assert.match(homeSource, /Join a ride/);
 
@@ -1836,8 +1947,8 @@ test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm off
 
   // Cockpit HUD status strip: GPS freshness, cellular lock, pack count
   assert.match(rideSource, /cockpitStatusStrip/);
-  assert.match(rideSource, /GPS FRESH|NO FIX/);
-  assert.match(rideSource, /4G LOCK|OFFLINE/);
+  assert.match(rideSource, /gps\.label/);
+  assert.match(rideSource, /ONLINE.*OFFLINE/);
   assert.match(rideSource, /PACK/);
 
   // Calm offline queue indicator (never alarming, clear sync explanation)
@@ -1915,18 +2026,16 @@ test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboa
   assert.match(joinSource, /viewfinderBox/);
   assert.match(joinSource, /reticleBox/);
   assert.match(joinSource, /scanningLaserLine/);
-  assert.match(joinSource, /RADAR CAM • 60 FPS/);
-  assert.match(joinSource, /TORCH/);
-  assert.match(joinSource, /IMPORT/);
+  assert.match(joinSource, /USE YOUR PHONE CAMERA/);
+  assert.doesNotMatch(joinSource, /RADAR CAM • 60 FPS|Sample Code/);
 
   // Tactile 6-digit code cells
   assert.match(joinSource, /codeCellsRow/);
   assert.match(joinSource, /codeCell/);
   assert.match(joinSource, /DIRECT EXPEDITION CODE/);
 
-  // Smart clipboard detection chip
-  assert.match(joinSource, /clipboardChip/);
-  assert.match(joinSource, /applyClipboardCode/);
+  assert.doesNotMatch(joinSource, /SPTI90|detectedClipboard/);
+  assert.match(joinSource, /Type or paste code/);
 
   // Error diagnostic state card (timer_off / code expired)
   assert.match(joinSource, /errorContainer/);
@@ -1957,7 +2066,7 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
   // Honest telemetry stats from get_rider_analytics (no hardcoded fake stats)
   assert.match(profileSource, /get_rider_analytics/);
   assert.match(profileSource, /telemetrySplitRow/);
-  assert.match(profileSource, /KM LOGGED/);
+  assert.match(profileSource, /EST\. KM · COMPLETED/);
   assert.match(profileSource, /APEX ALT/);
   assert.match(profileSource, /Pending GPS/);
   assert.doesNotMatch(profileSource, /M \(Khardung\)/);

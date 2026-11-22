@@ -39,9 +39,9 @@ async function record(locations: Location.LocationObject[]) {
     if (version !== generation || !location || !location.coords) return;
     const { latitude: lat, longitude: lng, speed, heading, accuracy } = location.coords;
     if (!validCoordinates(lat, lng) || (accuracy !== null && accuracy > 100)) continue;
-    const timestamp = (typeof location.timestamp === 'number' && Number.isFinite(location.timestamp))
-      ? new Date(location.timestamp).toISOString()
-      : new Date().toISOString();
+    if (!Number.isFinite(location.timestamp) || location.timestamp > Date.now()
+        || !Number.isFinite(new Date(location.timestamp).getTime())) continue;
+    const timestamp = new Date(location.timestamp).toISOString();
     const point: LocationUpdate = {
       user_id: saved.userId,
       display_name: saved.displayName,
@@ -75,10 +75,10 @@ async function record(locations: Location.LocationObject[]) {
     // Presence delivery is best-effort; it must not block saving the next breadcrumb.
     void Promise.resolve(context?.publish?.(point)).catch(() => {});
     const nowMs = Date.now();
-    if (lastFixTimestamp > 0 && nowMs - lastFixTimestamp > 30000) {
+    if (lastFixTimestamp > 0 && location.timestamp - lastFixTimestamp > 30000 && nowMs - location.timestamp <= 30000) {
       context?.onGpsRecovered?.();
     }
-    lastFixTimestamp = nowMs;
+    lastFixTimestamp = Math.max(lastFixTimestamp, location.timestamp);
   }
   if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
@@ -97,7 +97,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
   });
 }
 export interface BackgroundLocationResult {
-  isBackgroundEnabled: boolean;
+  mode: 'stopped' | 'foreground' | 'background';
   permissionGranted?: boolean;
 }
 
@@ -110,8 +110,9 @@ export interface BackgroundLocationResult {
 export function startBackgroundLocationUpdates(params: Params): Promise<BackgroundLocationResult> {
   const version = ++generation;
   return serialize(async () => {
-    if (version !== generation) return { isBackgroundEnabled: false };
+    if (version !== generation) return { mode: 'stopped' };
     const foreground = await Location.requestForegroundPermissionsAsync();
+    if (version !== generation) return { mode: 'stopped' };
     if (foreground.status !== 'granted') {
       throw new Error('Enable location permission in Settings to share your position.');
     }
@@ -121,6 +122,7 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
     }));
     fallback?.remove();
     fallback = null;
+    lastFixTimestamp = 0;
 
     const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
     const distance = params.batterySaver ? 25 : GPS_DISTANCE_METERS;
@@ -134,12 +136,19 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
         timeInterval: interval,
         distanceInterval: distance,
       }, location => {
-        void record([location]).catch(e => params.onError?.(e instanceof Error ? e.message : 'GPS update failed.'));
-      });
+        if (version === generation) void record([location]).catch(e => params.onError?.(e instanceof Error ? e.message : 'GPS update failed.'));
+      }, reason => { if (version === generation) params.onError?.(reason); });
     } catch (e) {
-      params.onError?.(e instanceof Error ? e.message : 'Unable to start foreground location tracker.');
+      context = null;
+      await AsyncStorage.removeItem(CONTEXT_KEY);
+      throw e instanceof Error ? e : new Error('Unable to start foreground location tracker.');
     }
-    return { isBackgroundEnabled: false };
+    if (version !== generation) {
+      fallback.remove();
+      fallback = null;
+      return { mode: 'stopped' };
+    }
+    return { mode: 'foreground' };
   });
 }
 
@@ -154,15 +163,15 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
 export function enableBackgroundLocationUpdates(params: Params): Promise<BackgroundLocationResult> {
   const version = generation;
   return serialize(async () => {
-    if (version !== generation) return { isBackgroundEnabled: false };
+    if (version !== generation) return { mode: 'stopped' };
     if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
       params.onError?.('Background GPS requires an installed Android development or preview build.');
-      return { isBackgroundEnabled: false, permissionGranted: false };
+      return { mode: fallback ? 'foreground' : 'stopped', permissionGranted: false };
     }
     const foreground = await Location.getForegroundPermissionsAsync();
     if (foreground.status !== 'granted') {
       params.onError?.('Allow location while using the app before enabling background GPS.');
-      return { isBackgroundEnabled: false, permissionGranted: false };
+      return { mode: fallback ? 'foreground' : 'stopped', permissionGranted: false };
     }
 
     let background = await Location.getBackgroundPermissionsAsync();
@@ -170,7 +179,7 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       background = await Location.requestBackgroundPermissionsAsync();
       // Do not start the native service in the same callback that returns
       // from Android Settings. Ask the user to tap again after the app resumes.
-      return { isBackgroundEnabled: false, permissionGranted: background.status === 'granted' };
+      return { mode: fallback ? 'foreground' : 'stopped', permissionGranted: background.status === 'granted' };
     }
 
     const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
@@ -193,33 +202,20 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
           },
         });
       }
-      if (version !== generation) return { isBackgroundEnabled: false };
+      if (version !== generation) return { mode: 'stopped' };
       fallback?.remove();
       fallback = null;
       context = params;
       await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
         rideId: params.rideId, userId: params.userId, displayName: params.displayName,
       }));
-      return { isBackgroundEnabled: true, permissionGranted: true };
+      return { mode: 'background', permissionGranted: true };
     } catch (e) {
-      if (version !== generation) return { isBackgroundEnabled: false };
+      if (version !== generation) return { mode: 'stopped' };
       // Keep foreground GPS alive if Android rejects the foreground service.
       const message = e instanceof Error ? e.message : 'Android could not start background GPS.';
       params.onError?.(message);
-      if (!fallback) {
-        try {
-          fallback = await Location.watchPositionAsync({
-            accuracy,
-            timeInterval: interval,
-            distanceInterval: distance,
-          }, location => {
-            void record([location]).catch(error => params.onError?.(error instanceof Error ? error.message : 'GPS update failed.'));
-          });
-        } catch (watchError) {
-          params.onError?.(watchError instanceof Error ? watchError.message : 'Foreground GPS fallback failed.');
-        }
-      }
-      return { isBackgroundEnabled: false, permissionGranted: true };
+      return { mode: fallback ? 'foreground' : 'stopped', permissionGranted: true };
     }
   });
 }

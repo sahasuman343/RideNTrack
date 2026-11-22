@@ -82,6 +82,18 @@ END $$;
 RESET ROLE;
 SET ROLE authenticated;
 SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $$ BEGIN
+  UPDATE public.profiles SET blood_group = 'O+', fuel_tank_capacity_liters = 12, fuel_reserve_liters = 2 WHERE id = auth.uid();
+  UPDATE public.profiles SET display_name = 'Owner' WHERE id = auth.uid();
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND blood_group = 'O+' AND fuel_reserve_liters = 2) THEN
+    RAISE EXCEPTION 'Emergency and motorcycle fields were not preserved';
+  END IF;
+  BEGIN
+    UPDATE public.profiles SET fuel_reserve_liters = 12 WHERE id = auth.uid();
+    RAISE EXCEPTION 'Accepted reserve equal to tank capacity';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
 INSERT INTO public.rides (id,name,ride_code,admin_id,origin,destination,origin_coords,destination_coords)
 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Test','ABCDEF',auth.uid(),'A','B','[77,12]','[78,13]');
 DO $$ BEGIN
@@ -568,6 +580,14 @@ BEGIN
   -- 3. Analytics RPC works for authenticated user
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   analytics := public.get_rider_analytics(owner_id);
+  UPDATE public.rides SET estimated_distance_meters = 200000, estimated_duration_seconds = 7200 WHERE id = journal_trip_id;
+  IF public.get_rider_analytics(owner_id) IS DISTINCT FROM analytics THEN
+    RAISE EXCEPTION 'Planned distance changed completed ride statistics';
+  END IF;
+  UPDATE public.rides SET status = 'completed' WHERE id = journal_trip_id;
+  IF (public.get_rider_analytics(owner_id)->>'total_distance_km')::numeric <> (analytics->>'total_distance_km')::numeric + 200 THEN
+    RAISE EXCEPTION 'Completed route estimate missing';
+  END IF;
   IF analytics IS NULL OR NOT (analytics ? 'total_distance_km') OR NOT (analytics ? 'milestones') THEN
     RAISE EXCEPTION 'get_rider_analytics failed to return expected metrics';
   END IF;
