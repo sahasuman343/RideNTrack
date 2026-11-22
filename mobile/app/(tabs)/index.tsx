@@ -1,425 +1,593 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Ride, type RiderAnalytics } from '@ridentrack/shared';
+import { Ride } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
-import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import {
+  Card,
+  LiveDot,
+  Button,
+  RouteLine,
+  Avatar,
+  AvatarStack,
+  Skeleton,
+} from '../../src/components/ui';
 
-export default function MyRidesScreen() {
-  const [rides, setRides] = useState<Ride[]>([]);
-  const [communityTrips, setCommunityTrips] = useState<any[]>([]);
-  const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
+export default function HomeScreen() {
+  const [ongoingTrip, setOngoingTrip] = useState<Ride | null>(null);
+  const [nextTrip, setNextTrip] = useState<Ride | null>(null);
+  const [activePackCount, setActivePackCount] = useState<number>(0);
+  const [lastUpdatedSec, setLastUpdatedSec] = useState<number>(12);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
-  const [duplicatingRideId, setDuplicatingRideId] = useState<string | null>(null);
-  const [filterTab, setFilterTab] = useState<'active' | 'completed' | 'archived' | 'community'>('active');
-  const { user } = useAuth();
+
+  const { user, profile } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  useFocusEffect(useCallback(() => { void fetchRides(); }, [user?.id]));
+  // Dynamic time-based greeting
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, []);
 
-  async function fetchRides() {
+  // Default motorcycle name
+  const motorcycleName = useMemo(() => {
+    const make = profile?.motorcycle_make?.trim() || '';
+    const model = profile?.motorcycle_model?.trim() || '';
+    if (make || model) return `${make} ${model}`.trim();
+    return 'Motorcycle Ready';
+  }, [profile?.motorcycle_make, profile?.motorcycle_model]);
+
+  // Relative last updated timer
+  useEffect(() => {
+    if (!ongoingTrip) return;
+    const interval = setInterval(() => {
+      setLastUpdatedSec(prev => (prev >= 60 ? 5 : prev + 5));
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [ongoingTrip]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void fetchHomeData();
+    }, [user?.id])
+  );
+
+  async function fetchHomeData() {
     if (!user) return;
-    const [ridesRes, analyticsRes, communityRes] = await Promise.all([
-      supabase
+    try {
+      const { data: participantsData } = await supabase
         .from('ride_participants')
-        .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, created_at)')
+        .select('ride_id, rides(*)')
         .eq('user_id', user.id)
         .eq('is_active', true)
-        .order('joined_at', { ascending: false }),
-      supabase.rpc('get_rider_analytics'),
-      supabase.rpc('get_public_trips', { p_limit: 20, p_offset: 0 }),
-    ]);
+        .order('joined_at', { ascending: false });
 
-    if (ridesRes.data) {
-      setRides(ridesRes.data.map((p: any) => p.rides).filter(Boolean));
-    }
-    if (analyticsRes.data) {
-      setAnalytics(analyticsRes.data as RiderAnalytics);
-    }
-    if (communityRes.data) {
-      setCommunityTrips(communityRes.data as any[]);
+      if (participantsData) {
+        const userRides: Ride[] = participantsData
+          .map((p: any) => p.rides)
+          .filter(Boolean);
+
+        // Find active/ongoing trip as hero
+        const live = userRides.find(r => r.status === 'active') || null;
+        setOngoingTrip(live);
+
+        // Fetch pack count for live trip
+        if (live) {
+          const { count } = await supabase
+            .from('ride_participants')
+            .select('*', { count: 'exact', head: true })
+            .eq('ride_id', live.id)
+            .eq('is_active', true);
+          setActivePackCount(count || 1);
+        }
+
+        // Find next planned trip
+        const todayStr = new Date().toISOString().split('T')[0];
+        const upcoming = userRides
+          .filter(r => r.status === 'planned')
+          .sort((a, b) => {
+            const dateA = a.start_date || '9999';
+            const dateB = b.start_date || '9999';
+            return dateA.localeCompare(dateB);
+          });
+
+        setNextTrip(upcoming[0] || null);
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
   async function onRefresh() {
     setRefreshing(true);
-    await fetchRides();
+    await fetchHomeData();
+    setLastUpdatedSec(2);
     setRefreshing(false);
   }
 
-  function handleDeleteTrip(item: Ride) {
-    const isLeader = item.admin_id === user?.id;
-    if (isLeader) {
-      Alert.alert(
-        'Delete Trip?',
-        `Permanently delete "${item.name}"? All routes, waypoints, stages, and records will be deleted.`,
-        [
-          { text: 'Keep Trip', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              setDeletingRideId(item.id);
-              try {
-                await stopBackgroundLocationUpdates(item.id).catch(() => {});
-                const { error } = await supabase.rpc('delete_trip', { p_ride_id: item.id });
-                if (error) throw error;
-                setRides(prev => prev.filter(r => r.id !== item.id));
-                await fetchRides();
-              } catch (err: any) {
-                Alert.alert('Could not delete trip', err?.message || 'Please try again.');
-              } finally {
-                setDeletingRideId(null);
-              }
-            },
-          },
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Leave Ride?',
-        `Remove "${item.name}" from your journeys? You can rejoin anytime with code ${item.ride_code}.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Leave',
-            style: 'destructive',
-            onPress: async () => {
-              setDeletingRideId(item.id);
-              try {
-                await stopBackgroundLocationUpdates(item.id).catch(() => {});
-                const { error } = await supabase.rpc('leave_ride', { p_ride_id: item.id });
-                if (error) throw error;
-                setRides(prev => prev.filter(r => r.id !== item.id));
-                await fetchRides();
-              } catch (err: any) {
-                Alert.alert('Could not leave ride', err?.message || 'Please try again.');
-              } finally {
-                setDeletingRideId(null);
-              }
-            },
-          },
-        ]
-      );
-    }
-  }
-
-  function handleDuplicateTrip(item: Ride) {
-    Alert.alert(
-      'Duplicate Trip?',
-      `Create a new planned copy of "${item.name}" with its complete route, waypoints, and itinerary?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Duplicate',
-          onPress: async () => {
-            setDuplicatingRideId(item.id);
-            try {
-              const { data, error } = await supabase.rpc('duplicate_trip', {
-                p_ride_id: item.id,
-              });
-              if (error) throw error;
-              await fetchRides();
-              Alert.alert('Trip Cloned', 'Your new trip is ready.', [
-                { text: 'Open Trip', onPress: () => router.push(`/trip/${data}`) },
-                { text: 'Later', style: 'cancel' },
-              ]);
-            } catch (err: any) {
-              Alert.alert('Could not duplicate trip', err?.message || 'Please try again.');
-            } finally {
-              setDuplicatingRideId(null);
-            }
-          },
-        },
-      ]
-    );
-  }
-
-  function getStatusColor(status: string) {
-    switch (status) {
-      case 'active': return '#4CAF50';
-      case 'planned': return '#FF9800';
-      case 'completed': return '#9E9E9E';
-      case 'archived': return '#607D8B';
-      default: return '#666';
-    }
-  }
-
-  const displayedRides = useMemo(() => {
-    return rides.filter(r => {
-      if (filterTab === 'active') return r.status === 'planned' || r.status === 'active';
-      if (filterTab === 'completed') return r.status === 'completed';
-      if (filterTab === 'archived') return r.status === 'archived';
-      return true;
-    });
-  }, [rides, filterTab]);
+  // Next trip days calculation
+  const nextTripDaysText = useMemo(() => {
+    if (!nextTrip?.start_date) return 'in upcoming days';
+    const start = new Date(nextTrip.start_date).getTime();
+    const diffDays = Math.ceil((start - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) return 'today';
+    if (diffDays === 1) return 'tomorrow';
+    return `in ${diffDays} days`;
+  }, [nextTrip?.start_date]);
 
   return (
     <View style={styles.container}>
-      <View style={styles.masthead}>
-        <View style={styles.mastheadBrand}>
-          <Image source={require('../../assets/RnT_logo.png')} style={styles.mastheadLogo} resizeMode="contain" />
-          <Text style={styles.kicker}>R I D E N T R A C K</Text>
-        </View>
-        <Text style={styles.pageTitle}>Your riding log.</Text>
-        <Text style={styles.intro}>Every road has a story. Pick up where you left off.</Text>
-      </View>
-      <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.actionPrimary} onPress={() => router.push('/create')}>
-          <Text style={styles.actionPrimaryText}>＋ Plan a trip</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionSecondary} onPress={() => router.push('/join')}>
-          <Text style={styles.actionSecondaryText}>Join a ride ↗</Text>
-        </TouchableOpacity>
-      </View>
-
-      {analytics && (
-        <View style={styles.analyticsCard}>
-          <View style={styles.analyticsStats}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{analytics.total_distance_km} km</Text>
-              <Text style={styles.statCaption}>TOTAL DISTANCE</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{analytics.total_hours} hrs</Text>
-              <Text style={styles.statCaption}>RIDING HOURS</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{analytics.completed_trips}</Text>
-              <Text style={styles.statCaption}>TOURS DONE</Text>
-            </View>
-          </View>
-          {Array.isArray(analytics.milestones) && analytics.milestones.length > 0 && (
-            <View style={styles.milestonesRow}>
-              {analytics.milestones.map(m => (
-                <View key={m.id} style={styles.milestonePill}>
-                  <Text style={styles.milestoneIcon}>{m.icon}</Text>
-                  <Text style={styles.milestoneTitle}>{m.title}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-
-      <View style={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'active' && styles.filterTabActive]}
-          onPress={() => setFilterTab('active')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'active' && styles.filterTabTextActive]}>Active & Planned</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'completed' && styles.filterTabActive]}
-          onPress={() => setFilterTab('completed')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'completed' && styles.filterTabTextActive]}>Completed</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'archived' && styles.filterTabActive]}
-          onPress={() => setFilterTab('archived')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'archived' && styles.filterTabTextActive]}>Archived</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'community' && styles.filterTabActive]}
-          onPress={() => setFilterTab('community')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'community' && styles.filterTabTextActive]}>🌐 Community</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.sectionLabel}>
-        {filterTab === 'community'
-          ? `PUBLIC TOURING ROUTES  ·  ${communityTrips.length}`
-          : `YOUR JOURNEYS  ·  ${displayedRides.length}`}
-      </Text>
-
-      {filterTab === 'community' ? (
-        communityTrips.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyMark}>00 / 00</Text>
-            <Text style={styles.emptyText}>No community routes yet.</Text>
-            <Text style={styles.emptySubtext}>Public itineraries published by touring captains will appear here.</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={communityTrips}
-            keyExtractor={(item) => item.id}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
-            contentContainerStyle={{ padding: 16 }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.card}
-                onPress={() => router.push(`/trip/${item.id}`)}
-              >
-                <View style={styles.cardHeader}>
-                  <Text style={styles.rideName}>{item.name}</Text>
-                  <TouchableOpacity
-                    style={styles.cardActionBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Clone route ${item.name}`}
-                    disabled={duplicatingRideId === item.id}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      handleDuplicateTrip(item);
-                    }}
-                  >
-                    {duplicatingRideId === item.id ? (
-                      <ActivityIndicator size="small" color={theme.accent} />
-                    ) : (
-                      <Text style={styles.cardActionIcon}>📋</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-                {!!item.description && <Text style={[styles.emptySubtext, { marginTop: 4, textAlign: 'left' }]}>{item.description}</Text>}
-                <Text style={styles.route}>{item.origin} → {item.destination}</Text>
-                <View style={styles.cardFooter}>
-                  <Text style={styles.code}>
-                    {item.waypoint_count} STOPS · {item.estimated_distance_meters ? `${Math.round(item.estimated_distance_meters / 1000)} KM` : 'ROUTE'}
-                  </Text>
-                  <Text style={styles.openLabel}>BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'} ↗</Text>
-                </View>
-              </TouchableOpacity>
-            )}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
           />
-        )
-      ) : displayedRides.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyMark}>01 / 00</Text>
-          <Text style={styles.emptyText}>{filterTab === 'archived' ? 'No archived trips.' : 'The road is waiting.'}</Text>
-          <Text style={styles.emptySubtext}>
-            {filterTab === 'archived'
-              ? 'Trips you archive to clean up your log will appear here.'
-              : 'Your trips and group rides will find a home here.'}
-          </Text>
+        }
+      >
+        {/* Top Header: Time-based Greeting & Steed Pill */}
+        <View style={styles.masthead}>
+          <View style={styles.greetingCol}>
+            <Text style={styles.greetingText}>
+              {greeting}, {profile?.display_name || 'Rider'}
+            </Text>
+            <View style={styles.steedPill}>
+              <Text style={styles.steedIcon}>🏍️</Text>
+              <Text style={styles.steedText} numberOfLines={1}>
+                {motorcycleName}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.avatarWrap}
+            onPress={() => router.push('/profile')}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+          >
+            <Avatar
+              uri={profile?.avatar_url}
+              name={profile?.display_name || 'Rider'}
+              size={44}
+              borderColor={theme.border}
+            />
+          </TouchableOpacity>
         </View>
-      ) : (
-        <FlatList
-          data={displayedRides}
-          keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
-          contentContainerStyle={{ padding: 16 }}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => {
-                if (item.status === 'archived' || item.status === 'planned' || item.status === 'completed') {
-                  router.push(`/trip/${item.id}`);
-                } else {
-                  router.push(`/ride/${item.id}`);
-                }
-              }}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={styles.rideName}>{item.name}</Text>
-                <View style={styles.cardHeaderRight}>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                    <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.cardActionBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Duplicate trip ${item.name}`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    disabled={duplicatingRideId === item.id}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      handleDuplicateTrip(item);
-                    }}
-                  >
-                    {duplicatingRideId === item.id ? (
-                      <ActivityIndicator size="small" color={theme.accent} />
-                    ) : (
-                      <Text style={styles.cardActionIcon}>📋</Text>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.cardDeleteBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete trip ${item.name}`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    disabled={deletingRideId === item.id}
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      handleDeleteTrip(item);
-                    }}
-                  >
-                    {deletingRideId === item.id ? (
-                      <ActivityIndicator size="small" color={theme.danger} />
-                    ) : (
-                      <Text style={styles.cardDeleteIcon}>🗑️</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
+
+        {/* Loading Skeleton */}
+        {loading ? (
+          <View style={{ marginTop: 20 }}>
+            <Skeleton height={280} borderRadius={24} />
+          </View>
+        ) : ongoingTrip ? (
+          /* ======================================================== */
+          /* 1. ONGOING TRIP HERO (Large, green blinking LED, LIVE HUD) */
+          /* ======================================================== */
+          <Card
+            variant="activeGlow"
+            style={styles.heroCard}
+            onPress={() => router.push(`/trip/${ongoingTrip.id}`)}
+            accessibilityLabel={`Ongoing live trip: ${ongoingTrip.name}. Tap to open trip details.`}
+          >
+            {/* Live Indicator Top Row */}
+            <View style={styles.heroTopRow}>
+              <View style={styles.liveBadgeRow}>
+                <LiveDot size={8} color={theme.green} />
+                <Text style={styles.liveBadgeText}>LIVE HUD</Text>
               </View>
-              <Text style={styles.route}>{item.origin} → {item.destination}</Text>
-              <View style={styles.cardFooter}>
-                <Text style={styles.code}>RIDE CODE  {item.ride_code}</Text>
-                <Text style={styles.openLabel}>
-                  {item.status === 'archived' ? 'VIEW ARCHIVE ↗' : 'OPEN JOURNEY  ↗'}
+              <View style={styles.lastUpdatedPill}>
+                <Text style={styles.lastUpdatedText}>
+                  Updated {lastUpdatedSec}s ago
                 </Text>
               </View>
-            </TouchableOpacity>
-          )}
-        />
-      )}
+            </View>
+
+            {/* Leg / Sector Tag */}
+            <Text style={styles.sectorTag}>Active Expedition Sector</Text>
+
+            {/* Trip Title */}
+            <Text style={styles.heroTripName} numberOfLines={1}>
+              {ongoingTrip.name}
+            </Text>
+
+            {/* Signature Route Line */}
+            <RouteLine
+              origin={ongoingTrip.origin}
+              destination={ongoingTrip.destination}
+              style={{ marginVertical: 14 }}
+            />
+
+            {/* Telemetry Progress Info */}
+            <View style={styles.telemetryStrip}>
+              <View style={styles.telemetryItem}>
+                <Text style={styles.telemetryLabel}>DISTANCE</Text>
+                <Text style={styles.telemetryValue}>
+                  {ongoingTrip.estimated_distance_meters
+                    ? `${Math.round(ongoingTrip.estimated_distance_meters / 1000)} km`
+                    : 'Tracked'}
+                </Text>
+              </View>
+              <View style={styles.telemetryDivider} />
+              <View style={styles.telemetryItem}>
+                <Text style={styles.telemetryLabel}>PACK STATUS</Text>
+                <Text style={[styles.telemetryValue, { color: theme.green }]}>
+                  {activePackCount} {activePackCount === 1 ? 'Rider' : 'Riders'} Live
+                </Text>
+              </View>
+              <View style={styles.telemetryDivider} />
+              <View style={styles.telemetryItem}>
+                <Text style={styles.telemetryLabel}>DRIFT</Text>
+                <Text style={[styles.telemetryValue, { color: theme.textMuted }]}>
+                  On Track
+                </Text>
+              </View>
+            </View>
+
+            {/* Pack Avatar Stack */}
+            <View style={styles.packRow}>
+              <AvatarStack totalCount={activePackCount} maxDisplay={4} size={28} />
+              <Text style={styles.packSummaryText}>
+                {activePackCount} RIDERS PACK · All Connected
+              </Text>
+            </View>
+
+            {/* Direct Primary Action: Resume Live Tracking */}
+            <View style={{ marginTop: 18 }}>
+              <Button
+                title="Resume Live Tracking"
+                variant="primary"
+                size="lg"
+                iconRight={<Text style={{ fontSize: 18, color: '#0E1013' }}>→</Text>}
+                onPress={() => router.push(`/ride/${ongoingTrip.id}`)}
+                accessibilityLabel="Resume live tracking ride mode"
+              />
+            </View>
+          </Card>
+        ) : (
+          /* ======================================================== */
+          /* 2. POLISHED EMPTY STATE (No ongoing ride)                 */
+          /* ======================================================== */
+          <View style={styles.emptyContainer}>
+            <Card variant="raised" style={styles.emptyHeroCard}>
+              <View style={styles.radarGraphic}>
+                <Text style={styles.radarIcon}>🧭</Text>
+              </View>
+              <Text style={styles.emptyTitle}>No ride in progress</Text>
+              <Text style={styles.emptySubtitle}>
+                Start a spontaneous group tracking session or plan your next expedition.
+              </Text>
+
+              {/* Action Buttons */}
+              <View style={styles.emptyActions}>
+                <Button
+                  title="Plan a trip"
+                  variant="primary"
+                  size="md"
+                  icon={<Text style={{ fontSize: 18, color: '#0E1013' }}>＋</Text>}
+                  onPress={() => router.push('/create')}
+                />
+                <Button
+                  title="Join a ride"
+                  variant="secondary"
+                  size="md"
+                  icon={<Text style={{ fontSize: 16, color: theme.text }}>↗</Text>}
+                  onPress={() => router.push('/join')}
+                />
+              </View>
+            </Card>
+
+            {/* Next Scheduled Trip Line (Quiet, non-intrusive) */}
+            {nextTrip && (
+              <TouchableOpacity
+                style={styles.nextTripPill}
+                onPress={() => router.push(`/trip/${nextTrip.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Next trip: ${nextTrip.name} ${nextTripDaysText}. Tap to view.`}
+              >
+                <View style={styles.nextTripDot} />
+                <Text style={styles.nextTripIcon}>🗓️</Text>
+                <Text style={styles.nextTripText} numberOfLines={1}>
+                  Next trip: <Text style={styles.nextTripBold}>{nextTrip.name}</Text>{' '}
+                  {nextTripDaysText}
+                </Text>
+                <Text style={styles.nextTripChevron}>›</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Fast Standby Telemetry Status Band */}
+            <View style={styles.standbyBand}>
+              <View style={styles.standbyTile}>
+                <Text style={styles.standbyLabel}>Sat Comms</Text>
+                <Text style={[styles.standbyVal, { color: theme.green }]}>
+                  LOCKED
+                </Text>
+              </View>
+              <View style={styles.standbyTile}>
+                <Text style={styles.standbyLabel}>Telemetry</Text>
+                <Text style={styles.standbyVal}>STANDBY</Text>
+              </View>
+              <View style={styles.standbyTile}>
+                <Text style={styles.standbyLabel}>Pack Sync</Text>
+                <Text style={[styles.standbyVal, { color: theme.accent }]}>
+                  Ready
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
 
-const makeStyles = (c: RidePalette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.background },
-  masthead: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 18 },
-  mastheadBrand: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  mastheadLogo: { width: 28, height: 28, borderRadius: 7 },
-  kicker: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 3 },
-  pageTitle: { color: c.text, fontSize: 32, fontWeight: '900', letterSpacing: -1.2, marginTop: 12 },
-  intro: { color: c.muted, fontSize: 13, lineHeight: 20, marginTop: 5, maxWidth: 290 },
-  quickActions: { flexDirection: 'row', gap: 10, paddingHorizontal: 22, paddingBottom: 24 },
-  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 22, paddingBottom: 16 },
-  filterTab: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
-  filterTabActive: { backgroundColor: c.accent, borderColor: c.accent },
-  filterTabText: { color: c.muted, fontSize: 11, fontWeight: '700' },
-  filterTabTextActive: { color: '#FFFFFF', fontWeight: '800' },
-  actionPrimary: { flex: 1, backgroundColor: c.accent, paddingVertical: 15, paddingHorizontal: 16, borderRadius: 8 },
-  actionPrimaryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-  actionSecondary: { paddingVertical: 15, paddingHorizontal: 16, borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.surface },
-  actionSecondaryText: { color: c.text, fontSize: 13, fontWeight: '700' },
-  sectionLabel: { color: c.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1.7, paddingHorizontal: 22, paddingBottom: 10 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'flex-start', padding: 26, margin: 22, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, borderRadius: 10 },
-  emptyMark: { color: c.accent, fontSize: 11, fontWeight: '800', letterSpacing: 2 },
-  emptyText: { color: c.text, fontSize: 24, fontWeight: '900', marginTop: 14 },
-  emptySubtext: { color: c.muted, fontSize: 14, marginTop: 8, lineHeight: 21 },
-  card: { backgroundColor: c.surface, borderRadius: 8, padding: 17, marginBottom: 10, borderWidth: 1, borderColor: c.border },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  cardHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardActionBtn: { padding: 4, borderRadius: 6, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border },
-  cardActionIcon: { fontSize: 12 },
-  cardDeleteBtn: { padding: 4, borderRadius: 6, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border },
-  cardDeleteIcon: { fontSize: 12 },
-  rideName: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },
-  statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 },
-  statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  route: { color: c.muted, fontSize: 13, marginTop: 13, lineHeight: 20 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 11, borderTopWidth: 1, borderTopColor: c.border },
-  code: { color: c.green, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  openLabel: { color: c.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  analyticsCard: { marginHorizontal: 22, marginBottom: 18, backgroundColor: c.surface, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 14 },
-  analyticsStats: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  statItem: { alignItems: 'center' },
-  statNumber: { color: c.text, fontSize: 18, fontWeight: '900' },
-  statCaption: { color: c.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 },
-  statDivider: { width: 1, height: 28, backgroundColor: c.border },
-  milestonesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border },
-  milestonePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surfaceRaised, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 4 },
-  milestoneIcon: { fontSize: 12 },
-  milestoneTitle: { color: c.text, fontSize: 11, fontWeight: '700' },
-});
+const makeStyles = (c: RidePalette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 18,
+      paddingBottom: 40,
+    },
+    masthead: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    greetingCol: {
+      flex: 1,
+      marginRight: 12,
+    },
+    greetingText: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: c.text,
+      letterSpacing: -0.3,
+    },
+    steedPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: c.surfaceRaised,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      marginTop: 6,
+      alignSelf: 'flex-start',
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    steedIcon: {
+      fontSize: 13,
+    },
+    steedText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.textMuted,
+    },
+    avatarWrap: {
+      padding: 2,
+    },
+    heroCard: {
+      padding: 20,
+      borderRadius: 24,
+      backgroundColor: c.surfaceRaised,
+      borderColor: c.green,
+      borderWidth: 1.5,
+    },
+    heroTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    liveBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: c.greenSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 9999,
+    },
+    liveBadgeText: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: c.green,
+      letterSpacing: 0.6,
+    },
+    lastUpdatedPill: {
+      backgroundColor: c.surfaceHigh,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    lastUpdatedText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: c.textMuted,
+    },
+    sectorTag: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: c.accent,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      marginTop: 14,
+    },
+    heroTripName: {
+      fontSize: 24,
+      fontWeight: '900',
+      color: c.text,
+      letterSpacing: -0.5,
+      marginTop: 4,
+    },
+    telemetryStrip: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      backgroundColor: c.surface,
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      marginVertical: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    telemetryItem: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    telemetryLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: c.textMuted,
+      letterSpacing: 0.5,
+    },
+    telemetryValue: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: c.text,
+      marginTop: 2,
+    },
+    telemetryDivider: {
+      width: 1,
+      height: 24,
+      backgroundColor: c.border,
+    },
+    packRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 8,
+    },
+    packSummaryText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.textMuted,
+      letterSpacing: 0.3,
+    },
+    emptyContainer: {
+      gap: 16,
+    },
+    emptyHeroCard: {
+      alignItems: 'center',
+      paddingVertical: 32,
+      paddingHorizontal: 20,
+      borderRadius: 24,
+    },
+    radarGraphic: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: c.surfaceHigh,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    radarIcon: {
+      fontSize: 28,
+    },
+    emptyTitle: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: c.text,
+      textAlign: 'center',
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: c.textMuted,
+      textAlign: 'center',
+      marginTop: 6,
+      lineHeight: 20,
+      maxWidth: 280,
+    },
+    emptyActions: {
+      flexDirection: 'column',
+      width: '100%',
+      gap: 10,
+      marginTop: 24,
+    },
+    nextTripPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.surfaceRaised,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 9999,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      gap: 8,
+      alignSelf: 'center',
+    },
+    nextTripDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      backgroundColor: c.tertiary,
+    },
+    nextTripIcon: {
+      fontSize: 13,
+    },
+    nextTripText: {
+      fontSize: 12,
+      color: c.textMuted,
+      fontWeight: '600',
+    },
+    nextTripBold: {
+      color: c.text,
+      fontWeight: '800',
+    },
+    nextTripChevron: {
+      fontSize: 16,
+      color: c.textMuted,
+      fontWeight: 'bold',
+    },
+    standbyBand: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    standbyTile: {
+      flex: 1,
+      backgroundColor: c.surfaceRaised,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 12,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    standbyLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: c.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
+    standbyVal: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: c.text,
+      marginTop: 2,
+    },
+  });

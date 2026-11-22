@@ -628,10 +628,13 @@ test('live ride screen offers external navigation while keeping the in-app group
 });
 
 test('my rides screen JSX is free of raw newline text strings that cause React Native invariant crashes', () => {
-  const source = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
-  // Must not have literal \n outside of text blocks/strings
-  assert.doesNotMatch(source, /<View[^>]*>\\n/);
-  assert.doesNotMatch(source, /<\/View>\\n/);
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  assert.doesNotMatch(indexSource, /<View[^>]*>\\n/);
+  assert.doesNotMatch(indexSource, /<\/View>\\n/);
+
+  const tripsSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
+  assert.doesNotMatch(tripsSource, /<View[^>]*>\\n/);
+  assert.doesNotMatch(tripsSource, /<\/View>\\n/);
 });
 
 test('profile screen validates emergency contact phone format and persists to profile', () => {
@@ -938,7 +941,7 @@ test('plan limits and payment architecture config enforce free vs pro tourer bou
 });
 
 test('my rides screen integrates rider analytics and milestones banner', () => {
-  const myRidesSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  const myRidesSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(myRidesSource, /get_rider_analytics/);
   assert.match(myRidesSource, /analyticsCard/);
   assert.match(myRidesSource, /TOTAL DISTANCE/);
@@ -971,7 +974,7 @@ test('db-regression script tests all RPC privileges and avoids unprivileged dire
 });
 
 test('trip cards expose a direct delete button with confirmation and RPC execution', () => {
-  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(indexSource, /handleDeleteTrip/);
   assert.match(indexSource, /delete_trip/);
   assert.match(indexSource, /leave_ride/);
@@ -1044,7 +1047,7 @@ test('trip archiving and duplication migration defines atomic RPCs and status en
 });
 
 test('my rides screen integrates segmented status filters and duplicate trip action', () => {
-  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(indexSource, /filterTab/);
   assert.match(indexSource, /Active & Planned/);
   assert.match(indexSource, /Completed/);
@@ -1237,7 +1240,7 @@ test('trip workspace integrates GPX export, group expenses, and settlements', ()
 });
 
 test('my rides screen integrates community touring discovery and route cloning', () => {
-  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+  const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(indexSource, /'community'/);
   assert.match(indexSource, /communityTrips/);
   assert.match(indexSource, /get_public_trips/);
@@ -1754,6 +1757,38 @@ test('navigation architecture defines exactly three bottom tabs with Home as def
   assert.match(tripsSource, /Skeleton/);
   assert.match(tripsSource, /a\.status === 'active' && b\.status !== 'active'/); // Pinned live trips
 });
+
+test('Home screen renders time-based greeting, default motorcycle, hero ongoing trip with live LED, and quiet next-trip line for empty state', () => {
+  const homeSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/index.tsx'), 'utf8');
+
+  // Time-based greeting & steed pill
+  assert.match(homeSource, /greeting/);
+  assert.match(homeSource, /Good morning/);
+  assert.match(homeSource, /Good afternoon/);
+  assert.match(homeSource, /Good evening/);
+  assert.match(homeSource, /motorcycleName/);
+
+  // Hero card with live LED, last updated time, and rider pack count
+  assert.match(homeSource, /ongoingTrip/);
+  assert.match(homeSource, /LIVE HUD/);
+  assert.match(homeSource, /LiveDot/);
+  assert.match(homeSource, /lastUpdatedSec/);
+  assert.match(homeSource, /activePackCount/);
+  assert.match(homeSource, /Resume Live Tracking/);
+  assert.match(homeSource, /RouteLine/);
+
+  // Polished empty state with next trip line
+  assert.match(homeSource, /No ride in progress/);
+  assert.match(homeSource, /nextTrip/);
+  assert.match(homeSource, /Next trip:/);
+  assert.match(homeSource, /nextTripDaysText/);
+  assert.match(homeSource, /Plan a trip/);
+  assert.match(homeSource, /Join a ride/);
+
+  // No historical trips clutter on Home
+  assert.doesNotMatch(homeSource, /filterTab/);
+});
+
 
 
 

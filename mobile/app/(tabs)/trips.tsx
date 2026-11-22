@@ -221,9 +221,10 @@ export default function TripsScreen() {
     () => [
       { key: 'all' as TripsFilter, label: 'All', count: rides.length },
       { key: 'live' as TripsFilter, label: 'Live', count: liveTripsCount },
-      { key: 'planned' as TripsFilter, label: 'Plan', count: plannedTripsCount },
-      { key: 'past' as TripsFilter, label: 'Past', count: pastTripsCount },
-      { key: 'community' as TripsFilter, label: 'Explore', count: communityTrips.length },
+      { key: 'planned' as TripsFilter, label: 'Active & Planned', count: plannedTripsCount },
+      { key: 'past' as TripsFilter, label: 'Completed', count: pastTripsCount },
+      { key: 'archived' as TripsFilter, label: 'Archived', count: pastTripsCount },
+      { key: 'community' as TripsFilter, label: 'Community', count: communityTrips.length },
     ],
     [rides.length, liveTripsCount, plannedTripsCount, pastTripsCount, communityTrips.length]
   );
@@ -288,6 +289,38 @@ export default function TripsScreen() {
         </View>
       )}
 
+      {/* Analytics Card Banner */}
+      {analytics && (
+        <View style={styles.analyticsCard}>
+          <View style={styles.analyticsStats}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.total_distance_km} km</Text>
+              <Text style={styles.statCaption}>TOTAL DISTANCE</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.total_hours} hrs</Text>
+              <Text style={styles.statCaption}>RIDING HOURS</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{analytics.completed_trips}</Text>
+              <Text style={styles.statCaption}>TOURS DONE</Text>
+            </View>
+          </View>
+          {Array.isArray(analytics.milestones) && analytics.milestones.length > 0 && (
+            <View style={styles.milestonesRow}>
+              {analytics.milestones.map(m => (
+                <View key={m.id} style={styles.milestonePill}>
+                  <Text style={styles.milestoneIcon}>{m.icon}</Text>
+                  <Text style={styles.milestoneTitle}>{m.title}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
       {/* Loading Skeletons */}
       {loading ? (
         <View style={styles.skeletonContainer}>
@@ -305,58 +338,65 @@ export default function TripsScreen() {
             </Text>
           </View>
         ) : (
-          <FlatList
-            data={communityTrips}
-            keyExtractor={item => item.id}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />
-            }
-            contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <Card
-                variant="raised"
-                style={styles.tripCard}
-                onPress={() => router.push(`/trip/${item.id}`)}
-              >
-                <View style={styles.cardHeader}>
-                  <Text style={styles.tripName}>{item.name}</Text>
-                  <TouchableOpacity
-                    style={styles.cardActionBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Clone route ${item.name}`}
-                    disabled={duplicatingRideId === item.id}
-                    onPress={e => {
-                      e.stopPropagation?.();
-                      handleDuplicateTrip(item);
-                    }}
-                  >
-                    {duplicatingRideId === item.id ? (
-                      <ActivityIndicator size="small" color={theme.accent} />
-                    ) : (
-                      <Text style={styles.cardActionIcon}>📋</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-                {!!item.description && (
-                  <Text style={styles.tripDesc} numberOfLines={2}>
-                    {item.description}
-                  </Text>
-                )}
-                <RouteLine origin={item.origin} destination={item.destination} style={{ marginVertical: 10 }} />
-                <View style={styles.cardFooter}>
-                  <Text style={styles.footerMeta}>
-                    {item.waypoint_count || 2} STOPS ·{' '}
-                    {item.estimated_distance_meters
-                      ? `${Math.round(item.estimated_distance_meters / 1000)} KM`
-                      : 'ROUTE'}
-                  </Text>
-                  <Text style={styles.openLabel}>
-                    BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'} ↗
-                  </Text>
-                </View>
-              </Card>
-            )}
-          />
+          <>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 4 }}>
+              <Text style={styles.sortLabel}>
+                PUBLIC TOURING ROUTES · {communityTrips.length}
+              </Text>
+            </View>
+            <FlatList
+              data={communityTrips}
+              keyExtractor={item => item.id}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />
+              }
+              contentContainerStyle={styles.listContent}
+              renderItem={({ item }) => (
+                <Card
+                  variant="raised"
+                  style={styles.tripCard}
+                  onPress={() => router.push(`/trip/${item.id}`)}
+                >
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.tripName}>{item.name}</Text>
+                    <TouchableOpacity
+                      style={styles.cardActionBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Clone route ${item.name}`}
+                      disabled={duplicatingRideId === item.id}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        handleDuplicateTrip(item);
+                      }}
+                    >
+                      {duplicatingRideId === item.id ? (
+                        <ActivityIndicator size="small" color={theme.accent} />
+                      ) : (
+                        <Text style={styles.cardActionIcon}>📋</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {!!item.description && (
+                    <Text style={styles.tripDesc} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  )}
+                  <RouteLine origin={item.origin} destination={item.destination} style={{ marginVertical: 10 }} />
+                  <View style={styles.cardFooter}>
+                    <Text style={styles.footerMeta}>
+                      {item.waypoint_count || 2} STOPS ·{' '}
+                      {item.estimated_distance_meters
+                        ? `${Math.round(item.estimated_distance_meters / 1000)} KM`
+                        : 'ROUTE'}
+                    </Text>
+                    <Text style={styles.openLabel}>
+                      BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'} ↗
+                    </Text>
+                  </View>
+                </Card>
+              )}
+            />
+          </>
         )
       ) : displayedRides.length === 0 ? (
         <View style={styles.empty}>
@@ -581,6 +621,69 @@ const makeStyles = (c: RidePalette) =>
       backgroundColor: c.surfaceHigh,
     },
     sortBtnText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: c.text,
+    },
+    analyticsCard: {
+      backgroundColor: c.surfaceRaised,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 16,
+      marginHorizontal: 20,
+      marginBottom: 12,
+    },
+    analyticsStats: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    statItem: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    statNumber: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: c.text,
+    },
+    statCaption: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: c.textMuted,
+      letterSpacing: 0.5,
+      marginTop: 2,
+    },
+    statDivider: {
+      width: 1,
+      height: 28,
+      backgroundColor: c.border,
+    },
+    milestonesRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+    },
+    milestonePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: c.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 9999,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    milestoneIcon: {
+      fontSize: 12,
+    },
+    milestoneTitle: {
       fontSize: 11,
       fontWeight: '700',
       color: c.text,
