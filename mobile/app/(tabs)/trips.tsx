@@ -46,6 +46,7 @@ export default function TripsScreen() {
   const theme = useRideTheme();
   const insets = useSafeAreaInsets();
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   useFocusEffect(
@@ -238,7 +239,7 @@ export default function TripsScreen() {
   return (
     <View style={styles.container}>
       {/* Top Header */}
-      <View style={[styles.header, { paddingTop: Math.max(topInset + 12, 28) }]}>
+      <View style={[styles.header, { paddingTop: safeHeaderTop }]}>
         <View style={styles.headerLeft}>
           <Text style={styles.pageTitle}>Trips</Text>
           <View style={styles.countBadge}>
@@ -627,8 +628,7 @@ const makeStyles = (c: RidePalette) =>
       color: '#0E1013',
     },
     filterSection: {
-      paddingHorizontal: 20,
-      marginBottom: 10,
+      marginBottom: 12,
     },
     sortRow: {
       flexDirection: 'row',

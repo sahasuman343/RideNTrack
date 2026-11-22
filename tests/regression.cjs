@@ -1945,17 +1945,22 @@ test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboa
 test('Profile and Garage delivers rider card, telemetry stats split, primary steed, and system sync list', () => {
   const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
 
-  // Rider profile card with GHOST handle and verified status
+  // Rider profile card with verified status and honest data
   assert.match(profileSource, /riderCard/);
-  assert.match(profileSource, /GHOST-1/);
-  assert.match(profileSource, /Apex Explorer • Level 04/);
+  assert.match(profileSource, /profile\??\.username/);
+  assert.match(profileSource, /analytics\??\.milestones/);
   assert.match(profileSource, /verifiedCheckBadge/);
 
-  // Telemetry stats split
+  // Single header edit control; duplicate pencil button removed
+  assert.doesNotMatch(profileSource, /editProfileBtn/);
+
+  // Honest telemetry stats from get_rider_analytics (no hardcoded fake stats)
+  assert.match(profileSource, /get_rider_analytics/);
   assert.match(profileSource, /telemetrySplitRow/);
   assert.match(profileSource, /KM LOGGED/);
   assert.match(profileSource, /APEX ALT/);
-  assert.match(profileSource, /M \(Khardung\)/);
+  assert.match(profileSource, /Pending GPS/);
+  assert.doesNotMatch(profileSource, /M \(Khardung\)/);
   assert.match(profileSource, /COMPLETED/);
 
   // Medical and ICE emergency tag
@@ -1965,11 +1970,17 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
   assert.doesNotMatch(profileSource, /\+91 98201 44521/);
   assert.match(profileSource, /ICE:/);
 
-  // Primary steed card
+  // Primary steed card and honest empty state
   assert.match(profileSource, /steedCard/);
   assert.match(profileSource, /Primary Steed/);
   assert.match(profileSource, /primarySteedBadge/);
   assert.match(profileSource, /steedCoverBox/);
+  assert.match(profileSource, /steedEmptyCard/);
+  assert.match(profileSource, /No motorcycle added yet/);
+  assert.match(profileSource, /\+ Add Motorcycle/);
+  assert.doesNotMatch(profileSource, /BMW R1250 GS/);
+  assert.doesNotMatch(profileSource, /MH-02-EQ-8819/);
+  assert.doesNotMatch(profileSource, /Himalayas Cached/);
 
   // System and sync settings list
   assert.match(profileSource, /systemSection/);

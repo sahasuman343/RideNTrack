@@ -696,11 +696,12 @@ export default function CreateRideScreen() {
   };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
 
   return (
     <View style={styles.screenWrapper}>
       {/* Top Header Bar matching trip_planner_route_waypoints.html */}
-      <View style={[styles.stepperHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
+      <View style={[styles.stepperHeader, { paddingTop: safeHeaderTop }]}>
         <View style={styles.topHeaderNavRow}>
           <View style={styles.topHeaderLeft}>
             <TouchableOpacity

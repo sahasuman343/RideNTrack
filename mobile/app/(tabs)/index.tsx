@@ -39,6 +39,7 @@ export default function HomeScreen() {
   const theme = useRideTheme();
   const insets = useSafeAreaInsets();
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   // Dynamic time-based greeting
@@ -54,7 +55,7 @@ export default function HomeScreen() {
     const make = profile?.motorcycle_make?.trim() || '';
     const model = profile?.motorcycle_model?.trim() || '';
     if (make || model) return `${make} ${model}`.trim();
-    return 'Motorcycle Ready';
+    return 'No bike added';
   }, [profile?.motorcycle_make, profile?.motorcycle_model]);
 
   // Relative last updated timer
@@ -138,7 +139,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(topInset + 12, 28) }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: safeHeaderTop }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -154,12 +155,20 @@ export default function HomeScreen() {
             <Text style={styles.greetingText}>
               {greeting}, {profile?.display_name || 'Rider'}
             </Text>
-            <View style={styles.steedPill}>
+            <TouchableOpacity
+              style={styles.steedPill}
+              onPress={() => router.push('/profile')}
+              accessibilityRole="button"
+              accessibilityLabel={profile?.motorcycle_model ? `Primary motorcycle: ${motorcycleName}. Tap to open garage.` : 'No motorcycle configured. Tap to add motorcycle in garage.'}
+            >
               <Text style={styles.steedIcon}>🏍️</Text>
               <Text style={styles.steedText} numberOfLines={1}>
                 {motorcycleName}
               </Text>
-            </View>
+              {!profile?.motorcycle_model && !profile?.motorcycle_make && (
+                <Text style={styles.steedAddHint}>+ Add</Text>
+              )}
+            </TouchableOpacity>
           </View>
           <TouchableOpacity
             style={styles.avatarWrap}
@@ -403,6 +412,12 @@ const makeStyles = (c: RidePalette) =>
       fontSize: 12,
       fontWeight: '700',
       color: c.textMuted,
+    },
+    steedAddHint: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: c.accent,
+      marginLeft: 2,
     },
     avatarWrap: {
       padding: 2,

@@ -1318,11 +1318,12 @@ export default function TripWorkspaceScreen() {
   const isTripOngoing = trip.status === 'active' || trip.status === 'ongoing';
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
 
   return (
     <View style={styles.screenWrapper}>
       {/* Top Header Bar */}
-      <View style={[styles.topHeader, { paddingTop: Math.max(topInset + 8, 20) }]}>
+      <View style={[styles.topHeader, { paddingTop: safeHeaderTop }]}>
         <View style={styles.topHeaderInner}>
           <TouchableOpacity
             style={styles.backButton}
@@ -1478,15 +1479,6 @@ export default function TripWorkspaceScreen() {
                   <Text style={styles.liveRadarStatLabel}>WAYPOINTS</Text>
                 </View>
               </View>
-
-              <TouchableOpacity
-                style={styles.launchRideModeBtn}
-                onPress={() => router.push('/ride/' + trip.id)}
-              >
-                <Text style={styles.launchRideModeBtnText}>
-                  {isTripOngoing ? 'Launch Ride Mode HUD →' : 'Start Live Ride Session →'}
-                </Text>
-              </TouchableOpacity>
             </Card>
           </View>
         )}
@@ -2241,9 +2233,6 @@ export default function TripWorkspaceScreen() {
 
               {isAdmin && (
                 <View style={styles.actions}>
-                  <TouchableOpacity style={styles.primary} onPress={() => router.push('/trip/' + trip.id + '/route')}>
-                    <Text style={styles.primaryText}>✎ Edit route & stops</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={styles.secondary} onPress={openTripEditor}>
                     <Text style={styles.secondaryText}>Trip details</Text>
                   </TouchableOpacity>

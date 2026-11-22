@@ -17,11 +17,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, useRideThemeSettings, RidePalette } from '../../src/theme';
 import { supabase } from '../../src/lib/supabase';
-import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES } from '@ridentrack/shared';
+import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { LiveDot } from '../../src/components/ui';
 
 export default function ProfileScreen() {
-  const { profile, signOut, deleteAccount, updateProfile } = useAuth();
+  const { user, profile, signOut, deleteAccount, updateProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const { mode, setMode } = useRideThemeSettings();
@@ -40,6 +40,9 @@ export default function ProfileScreen() {
   const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
   const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
   const [reserve, setReserve] = useState(profile?.fuel_reserve_liters != null ? String(profile.fuel_reserve_liters) : '3');
+
+  // Real Rider Analytics
+  const [analytics, setAnalytics] = useState<RiderAnalytics | null>(null);
 
   // Saved Places & Destination Lists
   const [savedPlaces, setSavedPlaces] = useState<UserSavedPlace[]>([]);
@@ -62,9 +65,20 @@ export default function ProfileScreen() {
     }
   }, []);
 
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_rider_analytics');
+      if (error) throw error;
+      if (data) setAnalytics(data as RiderAnalytics);
+    } catch {
+      // Non-critical; fallback to empty analytics
+    }
+  }, []);
+
   useEffect(() => {
     void loadSavedPlaces();
-  }, [loadSavedPlaces]);
+    void loadAnalytics();
+  }, [loadSavedPlaces, loadAnalytics]);
 
   async function handleAddSavedPlace() {
     if (!placeName.trim()) {
@@ -190,6 +204,7 @@ export default function ProfileScreen() {
         mileage_km_per_liter: mileageNum,
         fuel_reserve_liters: reserveNum,
       });
+      await loadAnalytics();
       setEditing(false);
       Alert.alert('Profile updated', 'Your rider details and motorcycle profile have been saved.');
     } catch (error) {
@@ -200,6 +215,7 @@ export default function ProfileScreen() {
   }
 
   const dark = mode === 'dark' || (mode === 'system' && theme.background === '#111317');
+  const hasMotorcycle = Boolean(profile?.motorcycle_make?.trim() || profile?.motorcycle_model?.trim());
 
   const safeRangeKm =
     profile?.fuel_tank_capacity_liters && profile?.mileage_km_per_liter
@@ -211,11 +227,12 @@ export default function ProfileScreen() {
       : null;
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
 
   return (
     <View style={styles.screen}>
       {/* Top Header Bar matching profile_garage.html */}
-      <View style={[styles.topHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
+      <View style={[styles.topHeader, { paddingTop: safeHeaderTop }]}>
         <View style={styles.headerTitleRow}>
           <Text style={styles.headerEmblemIcon}>🏍️</Text>
           <Text style={styles.headerTitleText}>GARAGE & FLEET</Text>
@@ -267,45 +284,46 @@ export default function ProfileScreen() {
             <View style={styles.riderMetaCol}>
               <View style={styles.riderNameRow}>
                 <Text style={styles.riderName} numberOfLines={1}>
-                  {profile?.display_name || 'Arjun Mehta'}
+                  {profile?.display_name || user?.email?.split('@')[0] || 'Rider'}
                 </Text>
                 <View style={styles.ghostPill}>
                   <Text style={styles.ghostPillText}>
-                    #{profile?.username ? profile.username.toUpperCase() : 'GHOST-1'}
+                    #{profile?.username ? profile.username.toUpperCase() : (user?.email ? user.email.split('@')[0].toUpperCase() : 'RIDER')}
                   </Text>
                 </View>
               </View>
               <View style={styles.careerRow}>
                 <Text style={styles.careerIcon}>🧭</Text>
-                <Text style={styles.careerSubtitle}>Apex Explorer • Level 04</Text>
+                <Text style={styles.careerSubtitle}>
+                  {analytics?.milestones && analytics.milestones.length > 0
+                    ? analytics.milestones[analytics.milestones.length - 1].title
+                    : (analytics?.completed_trips && analytics.completed_trips > 0
+                      ? `Touring Rider • ${analytics.completed_trips} ${analytics.completed_trips === 1 ? 'Tour' : 'Tours'} Done`
+                      : 'Rider • Ready to Tour')}
+                </Text>
               </View>
             </View>
-
-            <TouchableOpacity
-              style={styles.editProfileBtn}
-              onPress={openEditor}
-              accessibilityRole="button"
-              accessibilityLabel="Edit profile"
-            >
-              <Text style={styles.editProfileIcon}>✏️</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Telemetry Stats Split (Distance, Apex Alt, Expeditions) */}
           <View style={styles.telemetrySplitRow}>
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>DISTANCE</Text>
-              <Text style={styles.telemetryCellNum}>28,450</Text>
+              <Text style={styles.telemetryCellNum}>
+                {analytics?.total_distance_km != null ? analytics.total_distance_km.toLocaleString('en-IN') : '0'}
+              </Text>
               <Text style={[styles.telemetryCellSub, { color: theme.accent }]}>KM LOGGED</Text>
             </View>
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>APEX ALT</Text>
-              <Text style={styles.telemetryCellNum}>5,359</Text>
-              <Text style={[styles.telemetryCellSub, { color: theme.green }]}>M (Khardung)</Text>
+              <Text style={styles.telemetryCellNum}>—</Text>
+              <Text style={[styles.telemetryCellSub, { color: theme.green }]}>M (Pending GPS)</Text>
             </View>
             <View style={styles.telemetrySplitCell}>
               <Text style={styles.telemetryCellLabel}>EXPEDITIONS</Text>
-              <Text style={styles.telemetryCellNum}>{savedPlaces.length + 14}</Text>
+              <Text style={styles.telemetryCellNum}>
+                {analytics?.completed_trips != null ? String(analytics.completed_trips) : '0'}
+              </Text>
               <Text style={[styles.telemetryCellSub, { color: theme.tertiary }]}>COMPLETED</Text>
             </View>
           </View>
@@ -333,67 +351,89 @@ export default function ProfileScreen() {
             <Text style={styles.fleetIcon}>🏍️</Text>
             <Text style={styles.fleetTitleText}>Motorcycle profile & machine</Text>
           </View>
-          <TouchableOpacity
-            style={styles.addBikeBtn}
-            onPress={openEditor}
-            accessibilityRole="button"
-            accessibilityLabel="Add or configure motorcycle"
-          >
-            <Text style={styles.addBikeBtnText}>+ Add Bike</Text>
-          </TouchableOpacity>
+          {hasMotorcycle && (
+            <TouchableOpacity
+              style={styles.addBikeBtn}
+              onPress={openEditor}
+              accessibilityRole="button"
+              accessibilityLabel="Edit motorcycle"
+            >
+              <Text style={styles.addBikeBtnText}>Edit Bike</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Primary Steed Card */}
-        <View style={styles.steedCard}>
-          <View style={styles.steedCoverBox}>
-            <View style={styles.steedCoverBackdrop} />
-            <View style={styles.primarySteedBadge}>
-              <LiveDot pulse color="#000000" size={6} />
-              <Text style={styles.primarySteedText}>Primary Steed</Text>
+        {/* Primary Steed Card or Empty State */}
+        {hasMotorcycle ? (
+          <View style={styles.steedCard}>
+            <View style={styles.steedCoverBox}>
+              <View style={styles.steedCoverBackdrop} />
+              <View style={styles.primarySteedBadge}>
+                <LiveDot pulse color="#000000" size={6} />
+                <Text style={styles.primarySteedText}>Primary Steed</Text>
+              </View>
+              <View style={styles.steedHeroMeta}>
+                <Text style={styles.steedModelTitle}>
+                  {`${profile?.motorcycle_make || ''} ${profile?.motorcycle_model || ''}`.trim()}
+                </Text>
+                <Text style={styles.steedCategoryText}>
+                  {(profile?.motorcycle_category || 'Motorcycle').toUpperCase()}
+                </Text>
+              </View>
             </View>
-            <View style={styles.steedHeroMeta}>
-              <Text style={styles.steedModelTitle}>
-                {profile?.motorcycle_make ? `${profile.motorcycle_make} ${profile.motorcycle_model || ''}` : 'BMW R1250 GS Adv'}
-              </Text>
-              <Text style={styles.steedCategoryText}>
-                {profile?.motorcycle_category ? profile.motorcycle_category.toUpperCase() : 'ADVENTURE TOURING'} • MH-02-EQ-8819
-              </Text>
+
+            {/* Steed Metrics */}
+            <View style={styles.steedMetricsRow}>
+              <View style={styles.steedMetricCol}>
+                <Text style={styles.steedMetricLabel}>TANK CAPACITY</Text>
+                <Text style={styles.steedMetricValue}>
+                  {profile?.fuel_tank_capacity_liters ? `${profile.fuel_tank_capacity_liters} L` : '—'}
+                </Text>
+                <Text style={styles.steedMetricSub}>
+                  {profile?.fuel_reserve_liters != null ? `${profile.fuel_reserve_liters} L Reserve` : '—'}
+                </Text>
+              </View>
+
+              <View style={styles.steedMetricDivider} />
+
+              <View style={styles.steedMetricCol}>
+                <Text style={styles.steedMetricLabel}>EST. MILEAGE</Text>
+                <Text style={styles.steedMetricValue}>
+                  {profile?.mileage_km_per_liter ? `${profile.mileage_km_per_liter} km/l` : '—'}
+                </Text>
+                <Text style={styles.steedMetricSub}>Highway Cruise</Text>
+              </View>
+
+              <View style={styles.steedMetricDivider} />
+
+              <View style={styles.steedMetricCol}>
+                <Text style={styles.steedMetricLabel}>Estimated fuel range (advisory)</Text>
+                <Text style={[styles.steedMetricValue, { color: theme.green }]}>
+                  {safeRangeKm != null ? `~${safeRangeKm} KM` : 'Unavailable'}
+                </Text>
+                <Text style={styles.steedMetricSub}>Safe Range</Text>
+              </View>
             </View>
           </View>
-
-          {/* Steed Metrics */}
-          <View style={styles.steedMetricsRow}>
-            <View style={styles.steedMetricCol}>
-              <Text style={styles.steedMetricLabel}>TANK CAPACITY</Text>
-              <Text style={styles.steedMetricValue}>
-                {profile?.fuel_tank_capacity_liters ? `${profile.fuel_tank_capacity_liters} L` : '20 L'}
-              </Text>
-              <Text style={styles.steedMetricSub}>
-                {profile?.fuel_reserve_liters != null ? `${profile.fuel_reserve_liters} L Reserve` : '3 L Reserve'}
-              </Text>
+        ) : (
+          <View style={styles.steedEmptyCard}>
+            <View style={styles.steedEmptyIconBox}>
+              <Text style={styles.steedEmptyIcon}>🏍️</Text>
             </View>
-
-            <View style={styles.steedMetricDivider} />
-
-            <View style={styles.steedMetricCol}>
-              <Text style={styles.steedMetricLabel}>EST. MILEAGE</Text>
-              <Text style={styles.steedMetricValue}>
-                {profile?.mileage_km_per_liter ? `${profile.mileage_km_per_liter} km/l` : '18 km/l'}
-              </Text>
-              <Text style={styles.steedMetricSub}>Highway Cruise</Text>
-            </View>
-
-            <View style={styles.steedMetricDivider} />
-
-            <View style={styles.steedMetricCol}>
-              <Text style={styles.steedMetricLabel}>Estimated fuel range (advisory)</Text>
-              <Text style={[styles.steedMetricValue, { color: theme.green }]}>
-                {safeRangeKm != null ? `~${safeRangeKm} KM` : 'Unavailable'}
-              </Text>
-              <Text style={styles.steedMetricSub}>Safe Range</Text>
-            </View>
+            <Text style={styles.steedEmptyTitle}>No motorcycle added yet</Text>
+            <Text style={styles.steedEmptySub}>
+              Add your motorcycle specifications to get accurate safe fuel range calculations and tank stop advisories.
+            </Text>
+            <TouchableOpacity
+              style={styles.primaryAddBikeBtn}
+              onPress={openEditor}
+              accessibilityRole="button"
+              accessibilityLabel="+ Add Motorcycle"
+            >
+              <Text style={styles.primaryAddBikeBtnText}>+ Add Motorcycle</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        )}
 
         {/* Saved Places & Destinations Section */}
         <View style={styles.card}>
@@ -449,7 +489,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Offline Topo Storage</Text>
-                <Text style={styles.systemItemSub}>1.4 GB / 8.0 GB Himalayas Cached</Text>
+                <Text style={styles.systemItemSub}>Standard vector cache active</Text>
               </View>
               <Text style={styles.systemItemArrow}>›</Text>
             </View>
@@ -475,7 +515,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Units & Telemetry</Text>
-                <Text style={styles.systemItemSub}>Metric (km/h, Bar, °C)</Text>
+                <Text style={styles.systemItemSub}>Metric (km/h, km, L)</Text>
               </View>
               <Text style={styles.systemItemArrow}>›</Text>
             </View>
@@ -488,7 +528,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Cloud GPX & Telemetry Export</Text>
-                <Text style={[styles.systemItemSub, { color: theme.green }]}>Garmin • Strava Linked</Text>
+                <Text style={[styles.systemItemSub, { color: theme.green }]}>GPX, KML & JSON export ready</Text>
               </View>
               <Text style={styles.systemItemArrow}>›</Text>
             </View>
@@ -849,17 +889,6 @@ const makeStyles = (c: RidePalette) =>
       color: c.textMuted,
       fontWeight: '600',
     },
-    editProfileBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      backgroundColor: c.surfaceRaised,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    editProfileIcon: {
-      fontSize: 16,
-    },
     telemetrySplitRow: {
       flexDirection: 'row',
       backgroundColor: c.surfaceRaised,
@@ -1047,6 +1076,53 @@ const makeStyles = (c: RidePalette) =>
       height: 32,
       backgroundColor: c.border,
       marginHorizontal: 8,
+    },
+    steedEmptyCard: {
+      backgroundColor: c.surface,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 24,
+      alignItems: 'center',
+      gap: 10,
+    },
+    steedEmptyIconBox: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: c.surfaceRaised,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 2,
+    },
+    steedEmptyIcon: {
+      fontSize: 26,
+    },
+    steedEmptyTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: c.text,
+      textAlign: 'center',
+    },
+    steedEmptySub: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: c.textMuted,
+      textAlign: 'center',
+      paddingHorizontal: 12,
+      marginBottom: 4,
+    },
+    primaryAddBikeBtn: {
+      backgroundColor: c.accent,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderRadius: 12,
+      marginTop: 4,
+    },
+    primaryAddBikeBtnText: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: '#0E1013',
     },
     card: {
       backgroundColor: c.surface,

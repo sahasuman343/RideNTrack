@@ -109,11 +109,12 @@ export default function JoinRideScreen() {
   }
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
 
   return (
     <View style={s.screen}>
       {/* Top Header Bar */}
-      <View style={[s.topHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
+      <View style={[s.topHeader, { paddingTop: safeHeaderTop }]}>
         <TouchableOpacity
           style={s.headerIconButton}
           onPress={() => router.back()}

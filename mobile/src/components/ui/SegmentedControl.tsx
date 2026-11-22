@@ -26,8 +26,9 @@ export function SegmentedControl<T extends string = string>({
   scrollable,
 }: SegmentedControlProps<T>) {
   const theme = useRideTheme();
-  const styles = makeStyles(theme);
-  const isScrollable = scrollable ?? options.length > 4;
+  const isDark = theme.background === '#090B0E' || theme.background === '#050706' || theme.background === '#111317';
+  const styles = makeStyles(theme, isDark);
+  const isScrollable = scrollable ?? options.length > 3;
 
   const renderTabs = () =>
     options.map(option => {
@@ -103,12 +104,12 @@ export function SegmentedControl<T extends string = string>({
   );
 }
 
-const makeStyles = (c: RidePalette) =>
+const makeStyles = (c: RidePalette, isDark: boolean) =>
   StyleSheet.create({
     container: {
       flexDirection: 'row',
       backgroundColor: c.surfaceRaised,
-      borderRadius: 14,
+      borderRadius: 9999,
       borderWidth: 1,
       borderColor: c.border,
       padding: 3,
@@ -123,14 +124,14 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingHorizontal: 2,
+      paddingHorizontal: 20,
     },
     tab: {
       minHeight: 38,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 11,
-      paddingHorizontal: 14,
+      borderRadius: 9999,
+      paddingHorizontal: 16,
       paddingVertical: 7,
       flexDirection: 'row',
       gap: 6,
@@ -143,27 +144,39 @@ const makeStyles = (c: RidePalette) =>
       borderWidth: 1,
       borderColor: c.border,
     },
-    tabActive: {
-      backgroundColor: c.surface,
-      borderColor: c.accent,
-      borderWidth: 1.5,
-      shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.12,
-      shadowRadius: 4,
-      elevation: 2,
-    },
+    tabActive: isDark
+      ? {
+          backgroundColor: c.surfaceHigh,
+          borderColor: c.accent,
+          borderWidth: 1.5,
+          shadowColor: c.accent,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 6,
+          elevation: 3,
+        }
+      : {
+          backgroundColor: '#0F172A',
+          borderColor: '#0F172A',
+          borderWidth: 1.5,
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.15,
+          shadowRadius: 4,
+          elevation: 2,
+        },
     liveDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      marginRight: 2,
     },
     icon: {
       fontSize: 13,
       color: c.textMuted,
     },
     iconActive: {
-      color: c.accent,
+      color: isDark ? c.accent : '#FFFFFF',
     },
     label: {
       fontSize: 13,
@@ -172,27 +185,32 @@ const makeStyles = (c: RidePalette) =>
       letterSpacing: 0.2,
     },
     labelActive: {
-      color: c.text,
+      color: isDark ? c.text : '#FFFFFF',
       fontWeight: '800',
     },
     badge: {
       paddingHorizontal: 6,
       paddingVertical: 1.5,
-      borderRadius: 10,
+      borderRadius: 9999,
       backgroundColor: c.surfaceHigh,
       minWidth: 18,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    badgeActive: {
-      backgroundColor: c.accentSoft,
-    },
+    badgeActive: isDark
+      ? {
+          backgroundColor: c.accentSoft,
+        }
+      : {
+          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        },
     badgeText: {
       fontSize: 11,
       fontWeight: '700',
       color: c.textMuted,
     },
     badgeTextActive: {
-      color: c.accent,
+      color: isDark ? c.accent : '#FFFFFF',
+      fontWeight: '800',
     },
   });
