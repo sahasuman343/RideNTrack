@@ -407,6 +407,13 @@ export default function TripWorkspaceScreen() {
     return s === 'active' || s === 'planned' || s === 'ongoing';
   }, [trip]);
 
+  // Reset active tab to 'details' whenever live tracking is unavailable
+  useEffect(() => {
+    if (!canShowLiveTracker && activeTab === 'live') {
+      setActiveTab('details');
+    }
+  }, [canShowLiveTracker, activeTab]);
+
   function openJournalEditor() {
     setJournalTitle(journalEntry?.title || trip?.name || 'Motorcycle Tour');
     setJournalNotes(journalEntry?.notes || '');
@@ -1445,7 +1452,7 @@ export default function TripWorkspaceScreen() {
         )}
 
         {/* ================= DETAILS SECTION ================= */}
-        {activeTab === 'details' && (
+        {(activeTab === 'details' || !canShowLiveTracker) && (
           <>
             {/* Elevation & Technical Surface Profile Card */}
             <Card style={styles.cardSection}>
