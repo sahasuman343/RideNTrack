@@ -8,8 +8,10 @@ import {
   Modal,
   TextInput,
   Image,
-  Switch,
+  Platform,
   ScrollView,
+  StatusBar,
+  Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -205,10 +207,12 @@ export default function ProfileScreen() {
       ? Math.round(profile.fuel_tank_capacity_liters * profile.mileage_km_per_liter)
       : null;
 
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+
   return (
     <View style={styles.screen}>
       {/* Top Header Bar matching profile_garage.html */}
-      <View style={[styles.topHeader, { paddingTop: Math.max(insets.top + 8, 16) }]}>
+      <View style={[styles.topHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
         <View style={styles.headerTitleRow}>
           <Text style={styles.headerEmblemIcon}>🏍️</Text>
           <Text style={styles.headerTitleText}>GARAGE & FLEET</Text>

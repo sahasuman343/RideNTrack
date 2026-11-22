@@ -9,6 +9,7 @@ import {
   RefreshControl,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -1269,10 +1270,12 @@ export default function TripWorkspaceScreen() {
 
   const isTripOngoing = trip.status === 'active' || trip.status === 'ongoing';
 
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+
   return (
     <View style={styles.screenWrapper}>
       {/* Top Header Bar */}
-      <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 14) }]}>
+      <View style={[styles.topHeader, { paddingTop: Math.max(topInset + 8, 20) }]}>
         <View style={styles.topHeaderInner}>
           <TouchableOpacity
             style={styles.backButton}

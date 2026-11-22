@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Platform,
   RefreshControl,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ride } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
@@ -20,6 +23,7 @@ import {
   Avatar,
   AvatarStack,
   Skeleton,
+  FallbackTripCover,
 } from '../../src/components/ui';
 
 export default function HomeScreen() {
@@ -33,6 +37,8 @@ export default function HomeScreen() {
   const { user, profile } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   // Dynamic time-based greeting
@@ -132,7 +138,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(topInset + 12, 28) }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -185,6 +191,21 @@ export default function HomeScreen() {
             onPress={() => router.push(`/trip/${ongoingTrip.id}`)}
             accessibilityLabel={`Ongoing live trip: ${ongoingTrip.name}. Tap to open trip details.`}
           >
+            {/* Scenic Cover Banner & Elevation Header */}
+            <View style={styles.heroCoverWrap}>
+              <FallbackTripCover
+                tripId={ongoingTrip.id}
+                name={ongoingTrip.name}
+                status="active"
+                stageInfo="Live Sector"
+                elevation={
+                  ongoingTrip.estimated_distance_meters
+                    ? `${Math.round(ongoingTrip.estimated_distance_meters / 1000)}km`
+                    : 'Tracked'
+                }
+              />
+            </View>
+
             {/* Live Indicator Top Row */}
             <View style={styles.heroTopRow}>
               <View style={styles.liveBadgeRow}>
@@ -344,7 +365,6 @@ const makeStyles = (c: RidePalette) =>
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingTop: 18,
       paddingBottom: 40,
     },
     masthead: {
@@ -358,19 +378,19 @@ const makeStyles = (c: RidePalette) =>
       marginRight: 12,
     },
     greetingText: {
-      fontSize: 24,
+      fontSize: 26,
       fontWeight: '800',
       color: c.text,
-      letterSpacing: -0.3,
+      letterSpacing: -0.5,
     },
     steedPill: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
       backgroundColor: c.surfaceRaised,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 14,
       marginTop: 6,
       alignSelf: 'flex-start',
       borderWidth: 1,
@@ -388,11 +408,21 @@ const makeStyles = (c: RidePalette) =>
       padding: 2,
     },
     heroCard: {
-      padding: 20,
+      padding: 16,
       borderRadius: 24,
-      backgroundColor: c.surfaceRaised,
-      borderColor: c.green,
-      borderWidth: 1.5,
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      borderWidth: 1,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      elevation: 3,
+    },
+    heroCoverWrap: {
+      marginBottom: 12,
+      borderRadius: 16,
+      overflow: 'hidden',
     },
     heroTopRow: {
       flexDirection: 'row',
@@ -490,9 +520,17 @@ const makeStyles = (c: RidePalette) =>
     },
     emptyHeroCard: {
       alignItems: 'center',
-      paddingVertical: 32,
+      paddingVertical: 36,
       paddingHorizontal: 20,
       borderRadius: 24,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 12,
+      elevation: 2,
     },
     radarGraphic: {
       width: 64,

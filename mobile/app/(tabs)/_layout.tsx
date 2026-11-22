@@ -2,11 +2,13 @@ import { Redirect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRideTheme } from '../../src/theme';
 
 export default function TabsLayout() {
   const { session, loading } = useAuth();
   const theme = useRideTheme();
+  const insets = useSafeAreaInsets();
   if (loading) return null;
   if (!session) return <Redirect href="/(auth)/login" />;
 
@@ -17,9 +19,9 @@ export default function TabsLayout() {
           backgroundColor: theme.surface,
           borderTopColor: theme.border,
           borderTopWidth: 1,
-          height: 64,
-          paddingTop: 8,
-          paddingBottom: 8,
+          height: 56 + Math.max(insets.bottom, 10),
+          paddingTop: 6,
+          paddingBottom: Math.max(insets.bottom, 6),
           elevation: 0,
         },
         tabBarActiveTintColor: theme.accent,

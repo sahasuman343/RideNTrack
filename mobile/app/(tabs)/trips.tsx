@@ -3,12 +3,15 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   RefreshControl,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ride, type RiderAnalytics } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
@@ -41,6 +44,8 @@ export default function TripsScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   useFocusEffect(
@@ -222,8 +227,8 @@ export default function TripsScreen() {
     () => [
       { key: 'all' as TripsFilter, label: 'All', count: rides.length },
       { key: 'live' as TripsFilter, label: 'Live', count: liveTripsCount },
-      { key: 'planned' as TripsFilter, label: 'Active & Planned', count: plannedTripsCount },
-      { key: 'past' as TripsFilter, label: 'Completed', count: pastTripsCount },
+      { key: 'planned' as TripsFilter, label: 'Planned', accessibilityLabel: 'Active & Planned', count: plannedTripsCount },
+      { key: 'past' as TripsFilter, label: 'Past', accessibilityLabel: 'Completed', count: pastTripsCount },
       { key: 'archived' as TripsFilter, label: 'Archived', count: pastTripsCount },
       { key: 'community' as TripsFilter, label: 'Community', count: communityTrips.length },
     ],
@@ -233,7 +238,7 @@ export default function TripsScreen() {
   return (
     <View style={styles.container}>
       {/* Top Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(topInset + 12, 28) }]}>
         <View style={styles.headerLeft}>
           <Text style={styles.pageTitle}>Trips</Text>
           <View style={styles.countBadge}>
@@ -268,6 +273,7 @@ export default function TripsScreen() {
           options={filterOptions}
           selectedKey={filterTab}
           onSelect={k => setFilterTab(k as TripsFilter)}
+          scrollable={true}
         />
       </View>
 
@@ -291,7 +297,7 @@ export default function TripsScreen() {
       )}
 
       {/* Analytics Card Banner */}
-      {analytics && (
+      {analytics && filterTab !== 'community' && (filterTab === 'all' || filterTab === 'past' || displayedRides.length > 0) && (
         <View style={styles.analyticsCard}>
           <View style={styles.analyticsStats}>
             <View style={styles.statItem}>
@@ -416,7 +422,9 @@ export default function TripsScreen() {
         )
       ) : displayedRides.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🏍️</Text>
+          <View style={styles.emptyIconCircle}>
+            <Text style={styles.emptyIcon}>🏍️</Text>
+          </View>
           <Text style={styles.emptyTitle}>
             {filterTab === 'live'
               ? 'No live trips currently on road.'
@@ -431,7 +439,7 @@ export default function TripsScreen() {
               ? 'Completed and archived journeys will be cataloged here.'
               : 'Plan a solo tour or gather your riding pack for an expedition.'}
           </Text>
-          <View style={{ marginTop: 20, width: '100%', maxWidth: 260 }}>
+          <View style={{ marginTop: 22, width: '100%', maxWidth: 260 }}>
             <Button
               title="＋ Plan a Trip"
               variant="primary"
@@ -647,13 +655,18 @@ const makeStyles = (c: RidePalette) =>
       color: c.text,
     },
     analyticsCard: {
-      backgroundColor: c.surfaceRaised,
-      borderRadius: 16,
+      backgroundColor: c.surface,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
       marginHorizontal: 20,
-      marginBottom: 12,
+      marginBottom: 14,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      elevation: 2,
     },
     analyticsStats: {
       flexDirection: 'row',
@@ -807,11 +820,21 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
       alignItems: 'center',
       paddingHorizontal: 32,
-      marginTop: 40,
+      paddingVertical: 48,
+    },
+    emptyIconCircle: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      backgroundColor: c.surfaceRaised,
+      borderWidth: 1,
+      borderColor: c.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
     },
     emptyIcon: {
-      fontSize: 44,
-      marginBottom: 12,
+      fontSize: 32,
     },
     emptyTitle: {
       fontSize: 18,

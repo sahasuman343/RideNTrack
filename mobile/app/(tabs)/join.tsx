@@ -8,6 +8,8 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,10 +108,12 @@ export default function JoinRideScreen() {
     setDetectedClipboard(null);
   }
 
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+
   return (
     <View style={s.screen}>
       {/* Top Header Bar */}
-      <View style={[s.topHeader, { paddingTop: Math.max(insets.top + 8, 16) }]}>
+      <View style={[s.topHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
         <TouchableOpacity
           style={s.headerIconButton}
           onPress={() => router.back()}

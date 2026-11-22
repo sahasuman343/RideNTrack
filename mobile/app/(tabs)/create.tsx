@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Switch,
   Text,
@@ -626,10 +628,12 @@ export default function CreateRideScreen() {
     { num: 6, label: 'Review' },
   ];
 
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+
   return (
     <View style={styles.screenWrapper}>
       {/* Top Header Bar matching trip_planner_route_waypoints.html */}
-      <View style={[styles.stepperHeader, { paddingTop: Math.max(insets.top + 8, 16) }]}>
+      <View style={[styles.stepperHeader, { paddingTop: Math.max(topInset + 8, 24) }]}>
         <View style={styles.topHeaderNavRow}>
           <View style={styles.topHeaderLeft}>
             <TouchableOpacity
