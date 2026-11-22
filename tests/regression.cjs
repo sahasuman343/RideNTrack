@@ -1727,6 +1727,8 @@ test('shared UI primitives provide Card, StatusBadge, LiveDot, SegmentedControl,
   assert.match(sosSource, /durationMs\s*=\s*2000/);
   assert.match(sosSource, /onPressIn=\{handlePressIn\}/);
   assert.match(sosSource, /onPressOut=\{handlePressOut\}/);
+  assert.match(sosSource, /onPress=\{handleAccessiblePress\}/);
+  assert.match(sosSource, /Confirm Emergency SOS/);
   assert.match(sosSource, /Vibration\.vibrate/);
   assert.match(sosSource, /minHeight:\s*64/);
 

@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -39,6 +40,7 @@ export function HoldToConfirmButton({
   const progressAnim = useRef(new Animated.Value(0)).current;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasHoldCompletedRef = useRef(false);
 
   const triggerHaptic = (pattern: number | number[]) => {
     if (Platform.OS !== 'web') {
@@ -49,6 +51,7 @@ export function HoldToConfirmButton({
   };
 
   const handlePressIn = () => {
+    hasHoldCompletedRef.current = false;
     setIsHolding(true);
     setSecondsRemaining(durationMs / 1000);
     triggerHaptic(50);
@@ -69,6 +72,7 @@ export function HoldToConfirmButton({
 
     timerRef.current = setTimeout(() => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      hasHoldCompletedRef.current = true;
       triggerHaptic([100, 100, 300]);
       setIsHolding(false);
       progressAnim.setValue(0);
@@ -88,6 +92,30 @@ export function HoldToConfirmButton({
     setSecondsRemaining(durationMs / 1000);
   };
 
+  const handleAccessiblePress = () => {
+    // If the touch-hold already triggered the action, suppress the alert click
+    if (hasHoldCompletedRef.current) {
+      hasHoldCompletedRef.current = false;
+      return;
+    }
+
+    Alert.alert(
+      'Confirm Emergency SOS',
+      'Are you sure you want to broadcast an emergency SOS alert with your live GPS location to your riding group?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Broadcast SOS',
+          style: 'destructive',
+          onPress: () => {
+            triggerHaptic([100, 100, 300]);
+            onConfirm();
+          },
+        },
+      ]
+    );
+  };
+
   const fillWidth = progressAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
@@ -97,6 +125,7 @@ export function HoldToConfirmButton({
     <Pressable
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
+      onPress={handleAccessiblePress}
       style={({ pressed }) => [
         styles.container,
         pressed && styles.pressed,
@@ -104,7 +133,7 @@ export function HoldToConfirmButton({
       ]}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityHint="Hold down for 2 seconds to broadcast emergency location"
+      accessibilityHint="Hold for 2 seconds, or activate to open emergency confirmation dialog"
       testID={testID}
     >
       {/* Animated Fill Bar */}
