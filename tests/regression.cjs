@@ -1789,6 +1789,43 @@ test('Home screen renders time-based greeting, default motorcycle, hero ongoing 
   assert.doesNotMatch(homeSource, /filterTab/);
 });
 
+test('Trip Details renders sticky section switcher, sticky bottom action bar, day-grouped timeline, and compact expandable participants', () => {
+  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+
+  // Sticky Section Switcher (Details | Live Tracker) shown only for planned or ongoing trips
+  assert.match(tripSource, /canShowLiveTracker/);
+  assert.match(tripSource, /s === 'active' \|\| s === 'planned' \|\| s === 'ongoing'/);
+  assert.match(tripSource, /stickySwitcherContainer/);
+  assert.match(tripSource, /activeTab === 'details'/);
+  assert.match(tripSource, /activeTab === 'live'/);
+
+  // Sticky bottom action bar with 64dp+ button and EMERG SOS
+  assert.match(tripSource, /stickyBottomBar/);
+  assert.match(tripSource, /tacticalSosBtn/);
+  assert.match(tripSource, /EMERG/);
+  assert.match(tripSource, /primaryRouteLauncherBtn/);
+  assert.match(tripSource, /Open Live Tracker/);
+  assert.match(tripSource, /Start Tracking/);
+
+  // Compact expandable participants with AvatarStack, search, and pinned roles
+  assert.match(tripSource, /AvatarStack/);
+  assert.match(tripSource, /rosterExpanded/);
+  assert.match(tripSource, /participantSearch/);
+  assert.match(tripSource, /pinnedRoster/);
+  assert.match(tripSource, /LEADER/);
+  assert.match(tripSource, /SWEEP/);
+
+  // Topographic elevation sparkline profile
+  assert.match(tripSource, /Tier 4 Expedition/);
+  assert.match(tripSource, /MAX ALTITUDE/);
+  assert.match(tripSource, /elevationSparklineBox/);
+
+  // FallbackTripCover integrated into trip hero
+  assert.match(tripSource, /FallbackTripCover/);
+  assert.match(tripSource, /heroCoverWrapper/);
+});
+
+
 
 
 
