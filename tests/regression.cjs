@@ -1936,6 +1936,47 @@ test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboa
   assert.match(joinSource, /params\.token/);
 });
 
+test('Profile and Garage delivers rider card, telemetry stats split, primary steed, and system sync list', () => {
+  const profileSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/profile.tsx'), 'utf8');
+
+  // Rider profile card with GHOST handle and verified status
+  assert.match(profileSource, /riderCard/);
+  assert.match(profileSource, /GHOST-1/);
+  assert.match(profileSource, /Apex Explorer • Level 04/);
+  assert.match(profileSource, /verifiedCheckBadge/);
+
+  // Telemetry stats split
+  assert.match(profileSource, /telemetrySplitRow/);
+  assert.match(profileSource, /KM LOGGED/);
+  assert.match(profileSource, /APEX ALT/);
+  assert.match(profileSource, /M \(Khardung\)/);
+  assert.match(profileSource, /COMPLETED/);
+
+  // Medical and ICE emergency tag
+  assert.match(profileSource, /iceCard/);
+  assert.match(profileSource, /O\+ POSITIVE/);
+  assert.match(profileSource, /ICE:/);
+
+  // Primary steed card
+  assert.match(profileSource, /steedCard/);
+  assert.match(profileSource, /Primary Steed/);
+  assert.match(profileSource, /primarySteedBadge/);
+  assert.match(profileSource, /steedCoverBox/);
+
+  // System and sync settings list
+  assert.match(profileSource, /systemSection/);
+  assert.match(profileSource, /SYSTEM & SYNC/);
+  assert.match(profileSource, /Offline Topo Storage/);
+  assert.match(profileSource, /Emergency SOS Protocols/);
+  assert.match(profileSource, /Units & Telemetry/);
+  assert.match(profileSource, /Cloud GPX & Telemetry Export/);
+
+  // Sign out and build version footer
+  assert.match(profileSource, /signOutBtn/);
+  assert.match(profileSource, /Sign Out/);
+  assert.match(profileSource, /Apex Horizon v2\.4\.0/);
+});
+
 
 
 
