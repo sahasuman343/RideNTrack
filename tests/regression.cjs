@@ -1859,6 +1859,83 @@ test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm off
   assert.match(rideSource, /useKeepAwake/);
 });
 
+test('Trip Planner delivers 6-step full-screen flow, draft autosave, telemetry HUD, and elevation ascent profile', () => {
+  const createSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/create.tsx'), 'utf8');
+
+  // Draft autosave to AsyncStorage
+  assert.match(createSource, /@ridentrack_trip_draft/);
+  assert.match(createSource, /AsyncStorage\.setItem/);
+  assert.match(createSource, /AsyncStorage\.getItem/);
+  assert.match(createSource, /Draft Saved/);
+
+  // Stepper flow: Basics, Route, Stops, Lodging, Invite, Review
+  assert.match(createSource, /Basics/);
+  assert.match(createSource, /Route/);
+  assert.match(createSource, /Stops/);
+  assert.match(createSource, /Lodging/);
+  assert.match(createSource, /Invite/);
+  assert.match(createSource, /Review/);
+
+  // Telemetry HUD summary grid
+  assert.match(createSource, /TOTAL DISTANCE/);
+  assert.match(createSource, /MAX APEX/);
+  assert.match(createSource, /Est\. Saddle/);
+
+  // Ascent Profile Card
+  assert.match(createSource, /Ascent Profile/);
+  assert.match(createSource, /Net Climb/);
+
+  // Pass routing calibration
+  assert.match(createSource, /Prefer Technical Twisties & Passes/);
+  assert.match(createSource, /Avoid Commercial Tollways/);
+  assert.match(createSource, /Offline Vector & Radar Pack/);
+
+  // Sticky bottom footer
+  assert.match(createSource, /stickyFooter/);
+  assert.match(createSource, /footerContinueBtn/);
+  assert.match(createSource, /footerBackBtn/);
+});
+
+test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboard chip, and error diagnostic card', () => {
+  const joinSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/join.tsx'), 'utf8');
+
+  // Segmented method switcher (min 48dp)
+  assert.match(joinSource, /segmentedMethodSwitcher/);
+  assert.match(joinSource, /Scan QR/);
+  assert.match(joinSource, /Passcode/);
+  assert.match(joinSource, /Link/);
+
+  // Viewfinder zone
+  assert.match(joinSource, /viewfinderBox/);
+  assert.match(joinSource, /reticleBox/);
+  assert.match(joinSource, /scanningLaserLine/);
+  assert.match(joinSource, /RADAR CAM • 60 FPS/);
+  assert.match(joinSource, /TORCH/);
+  assert.match(joinSource, /IMPORT/);
+
+  // Tactile 6-digit code cells
+  assert.match(joinSource, /codeCellsRow/);
+  assert.match(joinSource, /codeCell/);
+  assert.match(joinSource, /DIRECT EXPEDITION CODE/);
+
+  // Smart clipboard detection chip
+  assert.match(joinSource, /clipboardChip/);
+  assert.match(joinSource, /applyClipboardCode/);
+
+  // Error diagnostic state card (timer_off / code expired)
+  assert.match(joinSource, /errorContainer/);
+  assert.match(joinSource, /errorCard/);
+  assert.match(joinSource, /Code Expired/);
+  assert.match(joinSource, /Try Another Code/);
+  assert.match(joinSource, /Scan Pack QR Pass/);
+  assert.match(joinSource, /Dismiss & Return to Solo Ride Mode/);
+
+  // Cold-start deep link support
+  assert.match(joinSource, /useLocalSearchParams/);
+  assert.match(joinSource, /params\.code/);
+  assert.match(joinSource, /params\.token/);
+});
+
 
 
 
