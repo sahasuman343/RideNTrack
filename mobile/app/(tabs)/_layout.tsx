@@ -9,13 +9,27 @@ export default function TabsLayout() {
   const theme = useRideTheme();
   if (loading) return null;
   if (!session) return <Redirect href="/(auth)/login" />;
+
   return (
     <Tabs
       screenOptions={{
-        tabBarStyle: { backgroundColor: theme.surface, borderTopColor: theme.border, height: 62, paddingTop: 7, paddingBottom: 8, elevation: 0 },
+        tabBarStyle: {
+          backgroundColor: theme.surface,
+          borderTopColor: theme.border,
+          borderTopWidth: 1,
+          height: 64,
+          paddingTop: 8,
+          paddingBottom: 8,
+          elevation: 0,
+        },
         tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.subtle,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
+        tabBarInactiveTintColor: theme.textMuted,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '700',
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+        },
         headerStyle: { backgroundColor: theme.background },
         headerTintColor: theme.text,
         headerTitleStyle: { fontWeight: '800', fontSize: 16 },
@@ -24,29 +38,50 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'My Trips',
-          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 17, fontWeight: '900' }}>⌁</Text>,
+          title: 'Home',
+          headerShown: false,
+          tabBarLabel: 'Home',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>🏍️</Text>
+          ),
         }}
       />
       <Tabs.Screen
-        name="create"
+        name="trips"
         options={{
-          title: 'Plan Trip',
-          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 19, fontWeight: '600' }}>＋</Text>,
-        }}
-      />
-      <Tabs.Screen
-        name="join"
-        options={{
-          title: 'Join Ride',
-          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 18 }}>↗</Text>,
+          title: 'Trips',
+          headerShown: false,
+          tabBarLabel: 'Trips',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>⌁</Text>
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 17 }}>◉</Text>,
+          headerShown: false,
+          tabBarLabel: 'Profile',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>◉</Text>
+          ),
+        }}
+      />
+
+      {/* Full-screen / modal routes preserved in navigation for direct navigation and deep links */}
+      <Tabs.Screen
+        name="create"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="join"
+        options={{
+          href: null,
+          headerShown: false,
         }}
       />
     </Tabs>

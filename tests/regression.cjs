@@ -1732,6 +1732,30 @@ test('shared UI primitives provide Card, StatusBadge, LiveDot, SegmentedControl,
   assert.match(segSource, /minHeight:\s*48/);
 });
 
+test('navigation architecture defines exactly three bottom tabs with Home as default and preserved modal routes', () => {
+  const tabsLayout = fs.readFileSync(path.resolve('mobile/app/(tabs)/_layout.tsx'), 'utf8');
+  // Exactly 3 visible tabs
+  assert.match(tabsLayout, /name="index"[\s\S]*title:\s*'Home'/);
+  assert.match(tabsLayout, /name="trips"[\s\S]*title:\s*'Trips'/);
+  assert.match(tabsLayout, /name="profile"[\s\S]*title:\s*'Profile'/);
+
+  // Hidden/preserved create & join routes with href: null
+  assert.match(tabsLayout, /name="create"[\s\S]*href:\s*null/);
+  assert.match(tabsLayout, /name="join"[\s\S]*href:\s*null/);
+
+  // Trips screen exists and implements segmented filtering and pinned live trips
+  const tripsSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
+  assert.match(tripsSource, /filterTab/);
+  assert.match(tripsSource, /SegmentedControl/);
+  assert.match(tripsSource, /liveTripsCount/);
+  assert.match(tripsSource, /plannedTripsCount/);
+  assert.match(tripsSource, /StatusBadge/);
+  assert.match(tripsSource, /RouteLine/);
+  assert.match(tripsSource, /Skeleton/);
+  assert.match(tripsSource, /a\.status === 'active' && b\.status !== 'active'/); // Pinned live trips
+});
+
+
 
 
 
