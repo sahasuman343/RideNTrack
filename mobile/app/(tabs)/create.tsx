@@ -1357,7 +1357,7 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel="Continue to Route"
           >
-            <Text style={styles.footerContinueText}>Next: Route</Text>
+            <Text style={styles.footerContinueText}>Next</Text>
             <Text style={styles.footerContinueArrow}>→</Text>
           </TouchableOpacity>
         ) : currentStep === 2 ? (
@@ -1367,7 +1367,7 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel="Continue to Stops"
           >
-            <Text style={styles.footerContinueText}>Next: Stops</Text>
+            <Text style={styles.footerContinueText}>Next</Text>
             <Text style={styles.footerContinueArrow}>→</Text>
           </TouchableOpacity>
         ) : isCurrentStepEmpty(currentStep) ? (
@@ -1377,9 +1377,7 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Skip ${stepsList[currentStep - 1]?.label}`}
           >
-            <Text style={styles.footerSkipText}>
-              Skip {stepsList[currentStep - 1]?.label}
-            </Text>
+            <Text style={styles.footerSkipText}>Skip</Text>
             <Text style={styles.footerSkipArrow}>→</Text>
           </TouchableOpacity>
         ) : (
@@ -1389,9 +1387,7 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Continue to ${stepsList[currentStep]?.label || 'Next'}`}
           >
-            <Text style={styles.footerContinueText}>
-              Next: {stepsList[currentStep]?.label || 'Next'}
-            </Text>
+            <Text style={styles.footerContinueText}>Next</Text>
             <Text style={styles.footerContinueArrow}>→</Text>
           </TouchableOpacity>
         )}

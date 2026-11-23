@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, useRideThemeSettings, RidePalette } from '../../src/theme';
+import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { LiveDot } from '../../src/components/ui';
@@ -252,9 +253,10 @@ export default function ProfileScreen() {
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
+  const swipeHandlers = useSwipeTab('profile');
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} {...swipeHandlers}>
       {/* Top Header Bar matching profile_garage.html */}
       <View style={[styles.topHeader, { paddingTop: safeHeaderTop }]}>
         <View style={styles.headerTitleRow}>

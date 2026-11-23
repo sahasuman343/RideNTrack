@@ -14,6 +14,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { loadHomeData, nextPlannedTrip } from '../../src/lib/homeData';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
+import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import {
   Card,
   Button,
@@ -44,6 +45,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const swipeHandlers = useSwipeTab('home');
 
   // Dynamic time-based greeting
   const greeting = useMemo(() => {
@@ -93,7 +95,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...swipeHandlers}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: safeHeaderTop }]}
         keyboardShouldPersistTaps="handled"
