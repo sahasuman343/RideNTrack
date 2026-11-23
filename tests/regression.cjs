@@ -2247,12 +2247,18 @@ test('push notifications open only valid ride IDs and are registered in ride con
   assert.match(fn, /\.neq\('user_id', alert\.user_id\)/, 'sender is not notified of their own alert');
 });
 
-test('lockfile includes the Linux Lightning CSS native binary required by CI builds', () => {
+test('lockfile includes Linux CSS native binaries required by CI builds', () => {
   const lock = JSON.parse(fs.readFileSync(path.resolve('package-lock.json'), 'utf8'));
-  const binary = lock.packages['node_modules/lightningcss-linux-x64-gnu'];
-  assert.equal(binary?.version, '1.32.0');
-  assert.ok(binary?.resolved?.includes('lightningcss-linux-x64-gnu-1.32.0.tgz'));
-  assert.deepEqual(binary?.os, ['linux']);
-  assert.deepEqual(binary?.cpu, ['x64']);
-  assert.equal(JSON.parse(fs.readFileSync(path.resolve('web/package.json'), 'utf8')).optionalDependencies?.['lightningcss-linux-x64-gnu'], '1.32.0');
+  const packageJson = JSON.parse(fs.readFileSync(path.resolve('web/package.json'), 'utf8'));
+  for (const [name, version] of [
+    ['lightningcss-linux-x64-gnu', '1.32.0'],
+    ['@tailwindcss/oxide-linux-x64-gnu', '4.3.3'],
+  ]) {
+    const binary = lock.packages['node_modules/' + name];
+    assert.equal(binary?.version, version, `${name} is missing from the resolved lockfile`);
+    assert.ok(binary?.resolved, `${name} has no resolved package URL`);
+    assert.deepEqual(binary?.os, ['linux']);
+    assert.deepEqual(binary?.cpu, ['x64']);
+    assert.equal(packageJson.optionalDependencies?.[name], version);
+  }
 });
