@@ -2,7 +2,7 @@ import { Redirect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Tabs } from 'expo-router';
 import { BottomTabBar } from 'expo-router/tabs';
-import { Text } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRideTheme } from '../../src/theme';
 import { ActiveRideBanner } from '../../src/components/ActiveRideBanner';
@@ -35,10 +35,9 @@ export default function TabsLayout() {
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '700',
-          letterSpacing: 0.8,
-          textTransform: 'uppercase',
+          fontSize: 11,
+          fontWeight: '600',
+          letterSpacing: 0.2,
         },
         headerStyle: { backgroundColor: theme.background },
         headerTintColor: theme.text,
@@ -51,8 +50,8 @@ export default function TabsLayout() {
           title: 'Home',
           headerShown: false,
           tabBarLabel: 'Home',
-          tabBarIcon: ({ color }) => (
-            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>🏍️</Text>
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'compass' : 'compass-outline'} size={22} color={color} />
           ),
         }}
       />
@@ -62,8 +61,8 @@ export default function TabsLayout() {
           title: 'Trips',
           headerShown: false,
           tabBarLabel: 'Trips',
-          tabBarIcon: ({ color }) => (
-            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>⌁</Text>
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'map' : 'map-outline'} size={22} color={color} />
           ),
         }}
       />
@@ -73,8 +72,8 @@ export default function TabsLayout() {
           title: 'Profile',
           headerShown: false,
           tabBarLabel: 'Profile',
-          tabBarIcon: ({ color }) => (
-            <Text style={{ color, fontSize: 18, fontWeight: '700' }}>◉</Text>
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'person-circle' : 'person-circle-outline'} size={22} color={color} />
           ),
         }}
       />

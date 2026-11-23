@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, Platform } from 'react-native';
-import { useRideTheme, RidePalette } from '../../theme';
+import { View, Text, Image, StyleSheet } from 'react-native';
+import { useRideTheme, RidePalette, radius } from '../../theme';
 import { StatusBadge } from './StatusBadge';
 import { LiveDot } from './LiveDot';
 
@@ -53,23 +53,17 @@ export function FallbackTripCover({
       .reduce((acc, char) => acc + char.charCodeAt(0), 0)
   );
 
-  const themeVariants = [
-    { bg: '#131A22', line: '#38BDF8', tag: '⛰️ Alpine Pass' }, // Sky blue
-    { bg: '#1E1813', line: '#FF7A1A', tag: '🏜️ Desert Dune' }, // Action amber
-    { bg: '#121F18', line: '#10B981', tag: '🌲 Forest Trail' }, // Pine green
-    { bg: '#1B1424', line: '#A855F7', tag: '🌌 Highland Pass' }, // Purple
-  ];
-
-  const variant = themeVariants[hash % themeVariants.length];
+  // Muted map-paper tones; the route line stays brand terracotta so covers read as one family.
+  const coverTones = ['#16201B', '#1A1E22', '#201C17'];
+  const coverTone = coverTones[hash % coverTones.length];
   // Live cards always feature scenic motorcycle photo; other cards prefer imageUri or scenic fallback
   const resolvedPhoto = imageUri || (isLive ? SCENIC_TOURING_PHOTOS[hash % SCENIC_TOURING_PHOTOS.length] : null);
   const shouldRenderPhoto = !!resolvedPhoto && !imageFailed;
 
-  // Completed map uses the signature RideNTrack orange route line
-  const routeLineColor = isCompleted ? '#FF7A1A' : variant.line;
+  const routeLineColor = COVER_ROUTE_COLOR;
 
   return (
-    <View style={[styles.container, { backgroundColor: variant.bg }]}>
+    <View style={[styles.container, { backgroundColor: coverTone }]}>
       {shouldRenderPhoto ? (
         <Image
           source={{ uri: resolvedPhoto }}
@@ -90,9 +84,7 @@ export function FallbackTripCover({
           <View style={[styles.curveSegment1, { borderColor: routeLineColor }]} />
           <View style={[styles.curveSegment2, { borderColor: routeLineColor }]} />
           <View style={[styles.startMarker, { backgroundColor: routeLineColor }]} />
-          <View style={[styles.endMarker, { borderColor: routeLineColor }]}>
-            {isCompleted && <Text style={styles.finishFlagIcon}>🏁</Text>}
-          </View>
+          <View style={[styles.endMarker, { borderColor: routeLineColor }]} />
         </View>
       )}
 
@@ -110,7 +102,7 @@ export function FallbackTripCover({
         <View style={styles.vignette} />
       )}
 
-      {/* Top Left: Overlaid Floating Glass Status Badge */}
+      {/* Top left: status */}
       {!hideBadges && (
         <View style={styles.statusBadgeWrap}>
           {isLive ? (
@@ -126,31 +118,25 @@ export function FallbackTripCover({
         </View>
       )}
 
-      {/* Top Right: Floating Glass Distance & Elevation Badges */}
+      {/* Top right: factual route data only */}
       {!hideBadges && (
         <View style={styles.topRightWrap}>
           {distance && (
-            <View style={styles.glassInfoPill}>
-              <Text style={styles.glassInfoPillIcon}>📏</Text>
-              <Text style={styles.glassInfoPillText}>{distance}</Text>
+            <View style={styles.infoTag}>
+              <Text style={styles.infoTagText}>{distance}</Text>
             </View>
           )}
           {elevation ? (
-            <View style={styles.glassInfoPill}>
-              <Text style={styles.glassInfoPillIcon}>⛰️</Text>
-              <Text style={styles.glassInfoPillText}>
+            <View style={styles.infoTag}>
+              <Text style={styles.infoTagText}>
                 {typeof elevation === 'number' || !String(elevation).includes('m')
                   ? `${elevation}m ELV`
                   : elevation}
               </Text>
             </View>
           ) : timeTag ? (
-            <View style={styles.glassInfoPill}>
-              <Text style={styles.glassInfoPillText}>{timeTag}</Text>
-            </View>
-          ) : !distance ? (
-            <View style={styles.glassInfoPill}>
-              <Text style={styles.glassInfoPillText}>{variant.tag}</Text>
+            <View style={styles.infoTag}>
+              <Text style={styles.infoTagText}>{timeTag}</Text>
             </View>
           ) : null}
         </View>
@@ -177,16 +163,18 @@ export function FallbackTripCover({
   );
 }
 
+const COVER_ROUTE_COLOR = '#E2804F';
+
 const makeStyles = (c: RidePalette, hero: boolean) =>
   StyleSheet.create({
     container: {
       height: hero ? 210 : 130,
       width: '100%',
-      borderRadius: 18,
+      borderRadius: radius.md,
       overflow: 'hidden',
       position: 'relative',
       borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.12)',
+      borderColor: c.border,
       marginBottom: 12,
     },
     image: {
@@ -198,7 +186,6 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       overflow: 'hidden',
       justifyContent: 'center',
       alignItems: 'center',
-      backgroundColor: '#111620',
     },
     gridLineH1: {
       position: 'absolute',
@@ -274,12 +261,6 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    finishFlagIcon: {
-      fontSize: 10,
-      position: 'absolute',
-      top: -12,
-      right: -8,
-    },
     topVignette: {
       position: 'absolute',
       top: 0,
@@ -300,7 +281,7 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       paddingHorizontal: 16,
       paddingTop: 36,
       paddingBottom: 14,
-      backgroundColor: 'rgba(9, 11, 14, 0.78)',
+      backgroundColor: 'rgba(8, 12, 10, 0.72)',
       justifyContent: 'flex-end',
     },
     heroTripName: {
@@ -308,9 +289,6 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       fontWeight: '800',
       color: '#FFFFFF',
       letterSpacing: -0.3,
-      textShadowColor: 'rgba(0, 0, 0, 0.75)',
-      textShadowOffset: { width: 0, height: 1.5 },
-      textShadowRadius: 6,
     },
     statusBadgeWrap: {
       position: 'absolute',
@@ -322,22 +300,15 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: 'rgba(11, 15, 22, 0.78)',
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: 'rgba(16, 185, 129, 0.5)',
-      shadowColor: '#00E676',
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.35,
-      shadowRadius: 6,
-      elevation: 3,
+      backgroundColor: 'rgba(8, 12, 10, 0.78)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: radius.xs,
     },
     floatingLiveText: {
       fontSize: 11,
       fontWeight: '800',
-      color: '#10B981',
+      color: '#86BFA0',
       letterSpacing: 0.8,
     },
     topRightWrap: {
@@ -348,25 +319,19 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       flexDirection: 'row',
       gap: 6,
     },
-    glassInfoPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: 'rgba(15, 23, 42, 0.72)',
-      paddingHorizontal: 9,
-      paddingVertical: 4.5,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.18)',
+    // Solid scrim tags keep data legible over any photo without blur or glass effects.
+    infoTag: {
+      backgroundColor: 'rgba(8, 12, 10, 0.72)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: radius.xs,
     },
-    glassInfoPillIcon: {
-      fontSize: 10,
-    },
-    glassInfoPillText: {
-      fontSize: 10.5,
+    infoTagText: {
+      fontSize: 11,
       fontWeight: '700',
-      color: '#F1F5F9',
+      color: '#ECEAE2',
       letterSpacing: 0.4,
+      fontVariant: ['tabular-nums'],
     },
     galleryPreviewWrap: {
       position: 'absolute',
@@ -387,7 +352,7 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
       width: 28,
       height: 28,
       borderRadius: 14,
-      backgroundColor: 'rgba(15, 23, 42, 0.85)',
+      backgroundColor: 'rgba(8, 12, 10, 0.85)',
       borderWidth: 1.5,
       borderColor: '#FFFFFF',
       justifyContent: 'center',

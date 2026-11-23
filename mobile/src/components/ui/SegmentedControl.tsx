@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { useRideTheme, RidePalette } from '../../theme';
+import { useRideTheme, RidePalette, radius, spacing } from '../../theme';
 
 export interface SegmentOption<T extends string = string> {
   key: T;
@@ -26,8 +26,7 @@ export function SegmentedControl<T extends string = string>({
   scrollable,
 }: SegmentedControlProps<T>) {
   const theme = useRideTheme();
-  const isDark = theme.background === '#090B0E' || theme.background === '#050706' || theme.background === '#111317';
-  const styles = makeStyles(theme, isDark);
+  const styles = makeStyles(theme);
   const isScrollable = scrollable ?? options.length > 3;
 
   const renderTabs = () =>
@@ -104,15 +103,15 @@ export function SegmentedControl<T extends string = string>({
   );
 }
 
-const makeStyles = (c: RidePalette, isDark: boolean) =>
+const makeStyles = (c: RidePalette) =>
   StyleSheet.create({
     container: {
       flexDirection: 'row',
-      backgroundColor: isDark ? c.surfaceRaised : '#F1F5F9',
-      borderRadius: 9999,
+      backgroundColor: c.surfaceRaised,
+      borderRadius: radius.sm + 2,
       borderWidth: 1,
       borderColor: c.border,
-      padding: 4,
+      padding: 3,
       minHeight: 48,
       alignItems: 'center',
     },
@@ -123,17 +122,17 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
     scrollContent: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 20,
-      paddingVertical: 2,
+      gap: spacing.sm,
+      paddingHorizontal: spacing.screen,
+      paddingVertical: spacing.xxs,
     },
     tab: {
-      minHeight: 38,
+      minHeight: 40,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 9999,
-      paddingHorizontal: 15,
-      paddingVertical: 7,
+      borderRadius: radius.sm,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
       flexDirection: 'row',
       gap: 6,
       flexShrink: 0,
@@ -141,47 +140,21 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
     tabFixed: {
       flex: 1,
     },
-    tabScrollable: isDark
-      ? {
-          backgroundColor: c.surfaceRaised,
-          borderWidth: 1,
-          borderColor: c.border,
-        }
-      : {
-          backgroundColor: '#FFFFFF',
-          borderWidth: 1,
-          borderColor: '#E2E8F0',
-          shadowColor: '#000000',
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.04,
-          shadowRadius: 3,
-          elevation: 1,
-        },
-    tabActive: isDark
-      ? {
-          backgroundColor: c.surfaceHigh,
-          borderColor: c.accent,
-          borderWidth: 1.5,
-          shadowColor: c.accent,
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 6,
-          elevation: 3,
-        }
-      : {
-          backgroundColor: '#0F172A',
-          borderColor: '#0F172A',
-          borderWidth: 1.5,
-          shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.18,
-          shadowRadius: 5,
-          elevation: 3,
-        },
+    tabScrollable: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    // High-contrast inverse fill gives one unambiguous selected state in every theme.
+    tabActive: {
+      backgroundColor: c.text,
+      borderColor: c.text,
+      borderWidth: 1,
+    },
     liveDot: {
       width: 7,
       height: 7,
-      borderRadius: 4,
+      borderRadius: radius.round,
       marginRight: 2,
     },
     icon: {
@@ -189,41 +162,37 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
       color: c.textMuted,
     },
     iconActive: {
-      color: isDark ? c.accent : '#FFFFFF',
+      color: c.background,
     },
     label: {
       fontSize: 13,
       fontWeight: '600',
-      color: isDark ? c.textMuted : '#475569',
-      letterSpacing: 0.2,
+      color: c.textMuted,
+      letterSpacing: 0.1,
     },
     labelActive: {
-      color: '#FFFFFF',
-      fontWeight: '800',
+      color: c.background,
+      fontWeight: '700',
     },
     badge: {
-      paddingHorizontal: 6,
-      paddingVertical: 1.5,
-      borderRadius: 9999,
-      backgroundColor: isDark ? c.surfaceHigh : '#F1F5F9',
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      borderRadius: radius.xs,
+      backgroundColor: c.surfaceHigh,
       minWidth: 18,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    badgeActive: isDark
-      ? {
-          backgroundColor: c.accentSoft,
-        }
-      : {
-          backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        },
+    badgeActive: {
+      backgroundColor: c.textMuted,
+    },
     badgeText: {
       fontSize: 11,
       fontWeight: '700',
-      color: isDark ? c.textMuted : '#64748B',
+      color: c.textMuted,
+      fontVariant: ['tabular-nums'],
     },
     badgeTextActive: {
-      color: isDark ? c.accent : '#FFFFFF',
-      fontWeight: '800',
+      color: c.background,
     },
   });

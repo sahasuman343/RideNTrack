@@ -15,7 +15,9 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../src/lib/supabase';
 import { useAuth } from '../../../src/hooks/useAuth';
-import { useRideTheme, RidePalette } from '../../../src/theme';
+import { useRideTheme, RidePalette, radius } from '../../../src/theme';
+import { Icon } from '../../../src/components/ui';
+import { WAYPOINT_ICONS } from '../../../src/icons';
 import {
   formatRouteDistance,
   formatRouteDuration,
@@ -667,7 +669,7 @@ export default function RouteEditorScreen() {
         {/* Route Status Prompt */}
         {!routeIsCurrent ? (
           <View style={styles.statusBannerPending}>
-            <Text style={styles.statusBannerIcon}>⚠️</Text>
+            <Icon name="warning-outline" size="md" color={theme.accent} />
             <View style={{ flex: 1 }}>
               <Text style={styles.statusBannerTitle}>Route modified</Text>
               <Text style={styles.statusBannerText}>
@@ -677,7 +679,7 @@ export default function RouteEditorScreen() {
           </View>
         ) : (
           <View style={styles.statusBannerReady}>
-            <Text style={styles.statusBannerIcon}>✓</Text>
+            <Icon name="checkmark-circle-outline" size="md" color={theme.green} />
             <View style={{ flex: 1 }}>
               <Text style={styles.statusBannerTitleReady}>Route up to date</Text>
               <Text style={styles.statusBannerTextReady}>
@@ -729,17 +731,17 @@ export default function RouteEditorScreen() {
                       <Text style={styles.sequenceText}>{index + 1}</Text>
                     </View>
                     <View style={styles.typeBadge}>
-                      <Text style={styles.typeBadgeText}>
-                        {meta.icon} {meta.label.toUpperCase()}
-                      </Text>
+                      <Icon name={WAYPOINT_ICONS[point.waypoint_type] ?? 'location-outline'} size="xs" color={theme.text} />
+                      <Text style={styles.typeBadgeText}>{meta.label.toUpperCase()}</Text>
                     </View>
                     {days.length > 0 && isIntermediate && (
                       <TouchableOpacity
                         style={styles.dayBadge}
                         onPress={() => openDayPicker(index)}
                       >
+                        <Icon name={assignedDay ? 'calendar-outline' : 'add'} size="xs" color={theme.accent} />
                         <Text style={styles.dayBadgeText}>
-                          {assignedDay ? `📅 Day ${assignedDay.day_number}` : '＋ Assign Day'}
+                          {assignedDay ? `Day ${assignedDay.day_number}` : 'Assign Day'}
                         </Text>
                       </TouchableOpacity>
                     )}
@@ -753,7 +755,8 @@ export default function RouteEditorScreen() {
                     )}
                     {!!point.notes && (
                       <View style={styles.pointNotesBox}>
-                        <Text style={styles.pointNotesText}>📝 {point.notes}</Text>
+                        <Icon name="document-text-outline" size="xs" color={theme.textMuted} />
+                        <Text style={styles.pointNotesText}>{point.notes}</Text>
                       </View>
                     )}
                   </View>
@@ -764,7 +767,8 @@ export default function RouteEditorScreen() {
                       style={styles.actionButton}
                       onPress={() => openEditPoint(index)}
                     >
-                      <Text style={styles.actionButtonText}>✎ Change</Text>
+                      <Icon name="pencil-outline" size="xs" color={theme.accent} />
+                      <Text style={styles.actionButtonText}>Change</Text>
                     </TouchableOpacity>
 
                     {isIntermediate && (
@@ -779,9 +783,8 @@ export default function RouteEditorScreen() {
                             handleChangeWaypointType(index, nextType);
                           }}
                         >
-                          <Text style={styles.typeSwitcherText}>
-                            Type: {meta.short} ↻
-                          </Text>
+                          <Text style={styles.typeSwitcherText}>Type: {meta.short}</Text>
+                          <Icon name="swap-horizontal-outline" size="xs" color={theme.muted} />
                         </TouchableOpacity>
 
                         {/* Reorder Buttons */}
@@ -791,14 +794,14 @@ export default function RouteEditorScreen() {
                             disabled={index === 1}
                             onPress={() => handleMoveStop(index, -1)}
                           >
-                            <Text style={[styles.arrowButtonText, index === 1 && styles.disabledText]}>▲</Text>
+                            <Icon name="chevron-up" size="sm" color={index === 1 ? theme.subtle : theme.text} />
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={[styles.arrowButton, index === points.length - 2 && styles.disabledButton]}
                             disabled={index === points.length - 2}
                             onPress={() => handleMoveStop(index, 1)}
                           >
-                            <Text style={[styles.arrowButtonText, index === points.length - 2 && styles.disabledText]}>▼</Text>
+                            <Icon name="chevron-down" size="sm" color={index === points.length - 2 ? theme.subtle : theme.text} />
                           </TouchableOpacity>
                         </View>
 
@@ -807,7 +810,8 @@ export default function RouteEditorScreen() {
                           style={styles.removeButton}
                           onPress={() => handleRemoveStop(index)}
                         >
-                          <Text style={styles.removeButtonText}>✕ Remove</Text>
+                          <Icon name="trash-outline" size="xs" color={theme.danger} />
+                          <Text style={styles.removeButtonText}>Remove</Text>
                         </TouchableOpacity>
                       </>
                     )}
@@ -821,25 +825,32 @@ export default function RouteEditorScreen() {
           <Text style={styles.addSectionLabel}>ADD WAYPOINT TO ROUTE</Text>
           <View style={styles.addButtonsRow}>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('stop')}>
-              <Text style={styles.addPillText}>🛑 ＋ Stop</Text>
+              <Icon name={WAYPOINT_ICONS.stop} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Stop</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('fuel')}>
-              <Text style={styles.addPillText}>⛽ ＋ Fuel</Text>
+              <Icon name={WAYPOINT_ICONS.fuel} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Fuel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('food')}>
-              <Text style={styles.addPillText}>🍽️ ＋ Food</Text>
+              <Icon name={WAYPOINT_ICONS.food} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Food</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('rest')}>
-              <Text style={styles.addPillText}>☕ ＋ Rest</Text>
+              <Icon name={WAYPOINT_ICONS.rest} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Rest</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('sightseeing')}>
-              <Text style={styles.addPillText}>📸 ＋ Scenic</Text>
+              <Icon name={WAYPOINT_ICONS.sightseeing} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Scenic</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('repair')}>
-              <Text style={styles.addPillText}>🔧 ＋ Repair</Text>
+              <Icon name={WAYPOINT_ICONS.repair} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Repair</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.addPill} onPress={() => openAddStop('accommodation')}>
-              <Text style={styles.addPillText}>🏨 ＋ Stay</Text>
+              <Icon name={WAYPOINT_ICONS.accommodation} size="sm" color={theme.green} />
+              <Text style={styles.addPillText}>Stay</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -852,11 +863,14 @@ export default function RouteEditorScreen() {
             onPress={() => void calculateRoute()}
           >
             {calculating ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={routeIsCurrent ? theme.accent : theme.onAccent} />
             ) : (
-              <Text style={styles.calculateButtonText}>
-                {routeIsCurrent ? '↻ Recalculate route' : '⚡ Recalculate route now'}
-              </Text>
+              <View style={styles.inlineRow}>
+                <Icon name="refresh" size="sm" color={routeIsCurrent ? theme.accent : theme.onAccent} />
+                <Text style={[styles.calculateButtonText, !routeIsCurrent && styles.calculateButtonTextHighlight]}>
+                  {routeIsCurrent ? 'Recalculate route' : 'Recalculate route now'}
+                </Text>
+              </View>
             )}
           </TouchableOpacity>
 
@@ -877,7 +891,8 @@ export default function RouteEditorScreen() {
 
         {!!error && (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>⚠️ {error}</Text>
+            <Icon name="warning-outline" size="sm" color={theme.danger} />
+            <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
 
@@ -919,7 +934,7 @@ export default function RouteEditorScreen() {
                 </Text>
               </View>
               <TouchableOpacity style={styles.modalCloseButton} onPress={closeSearchModal}>
-                <Text style={styles.modalCloseText}>✕</Text>
+                <Icon name="close" size="md" color={theme.text} />
               </TouchableOpacity>
             </View>
 
@@ -938,9 +953,8 @@ export default function RouteEditorScreen() {
                         style={[styles.categoryPill, isSelected && styles.categoryPillSelected]}
                         onPress={() => setSearchModal(curr => ({ ...curr, waypointType: type }))}
                       >
-                        <Text style={[styles.categoryPillText, isSelected && styles.categoryPillTextSelected]}>
-                          {meta.icon} {meta.label}
-                        </Text>
+                        <Icon name={WAYPOINT_ICONS[type]} size="sm" color={isSelected ? theme.onAccent : theme.textMuted} />
+                        <Text style={[styles.categoryPillText, isSelected && styles.categoryPillTextSelected]}>{meta.label}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -968,13 +982,14 @@ export default function RouteEditorScreen() {
                 style={styles.saveDetailsOnlyButton}
                 onPress={saveStopDetailsOnly}
               >
-                <Text style={styles.saveDetailsOnlyText}>💾 Save notes & category</Text>
+                <Icon name="save-outline" size="sm" color={theme.accent} />
+                <Text style={styles.saveDetailsOnlyText}>Save notes & category</Text>
               </TouchableOpacity>
             )}
 
             {/* Search Input Bar */}
             <View style={styles.searchInputContainer}>
-              <Text style={styles.searchIcon}>🔍</Text>
+              <Icon name="search-outline" size="sm" color={theme.textMuted} style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
                 value={searchQuery}
@@ -988,7 +1003,7 @@ export default function RouteEditorScreen() {
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
-                  <Text style={styles.clearSearchText}>✕</Text>
+                  <Icon name="close-circle" size="md" color={theme.muted} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1026,9 +1041,7 @@ export default function RouteEditorScreen() {
                     onPress={() => handleSelectPlace(place)}
                   >
                     <View style={styles.suggestionIconContainer}>
-                      <Text style={styles.suggestionIcon}>
-                        {WAYPOINT_META[searchModal.waypointType]?.icon || '📍'}
-                      </Text>
+                      <Icon name={WAYPOINT_ICONS[searchModal.waypointType] ?? 'location-outline'} size="md" color={theme.text} />
                     </View>
                     <View style={styles.suggestionInfo}>
                       <Text style={styles.suggestionTitle}>{place.name}</Text>
@@ -1070,7 +1083,7 @@ export default function RouteEditorScreen() {
               style={styles.dayOptionItem}
               onPress={() => handleAssignDay(null)}
             >
-              <Text style={styles.dayOptionTitle}>🔘 Unassigned</Text>
+              <Text style={styles.dayOptionTitle}>Unassigned</Text>
               <Text style={styles.dayOptionSub}>Not tied to a specific dated day</Text>
             </TouchableOpacity>
 
@@ -1081,7 +1094,7 @@ export default function RouteEditorScreen() {
                 onPress={() => handleAssignDay(day.id)}
               >
                 <Text style={styles.dayOptionTitle}>
-                  📅 Day {day.day_number}{day.title ? ` · ${day.title}` : ''}
+                  Day {day.day_number}{day.title ? ` · ${day.title}` : ''}
                 </Text>
                 {!!day.trip_date && (
                   <Text style={styles.dayOptionSub}>{day.trip_date}</Text>
@@ -1182,7 +1195,6 @@ const makeStyles = (c: RidePalette) =>
       marginTop: 14,
       gap: 10,
     },
-    statusBannerIcon: { fontSize: 18 },
     statusBannerTitle: { color: c.accent, fontSize: 13, fontWeight: '800' },
     statusBannerText: { color: c.text, fontSize: 11, lineHeight: 16, marginTop: 2 },
     statusBannerTitleReady: { color: c.green, fontSize: 13, fontWeight: '800' },
@@ -1229,6 +1241,9 @@ const makeStyles = (c: RidePalette) =>
     finishBadge: { backgroundColor: c.accentSoft },
     sequenceText: { color: c.text, fontSize: 11, fontWeight: '900' },
     typeBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -1236,6 +1251,9 @@ const makeStyles = (c: RidePalette) =>
     },
     typeBadgeText: { color: c.text, fontSize: 10, fontWeight: '800' },
     dayBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       marginLeft: 'auto',
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 8,
@@ -1250,6 +1268,9 @@ const makeStyles = (c: RidePalette) =>
     placeName: { color: c.text, fontSize: 15, fontWeight: '800' },
     placeAddress: { color: c.muted, fontSize: 12, lineHeight: 16, marginTop: 2 },
     pointNotesBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 6,
       backgroundColor: c.surfaceRaised,
       borderRadius: 6,
       paddingHorizontal: 8,
@@ -1259,6 +1280,7 @@ const makeStyles = (c: RidePalette) =>
       borderLeftColor: c.accent,
     },
     pointNotesText: {
+      flex: 1,
       color: c.text,
       fontSize: 11,
       lineHeight: 15,
@@ -1275,6 +1297,9 @@ const makeStyles = (c: RidePalette) =>
       borderTopColor: c.border,
     },
     actionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 10,
       paddingVertical: 6,
@@ -1282,6 +1307,9 @@ const makeStyles = (c: RidePalette) =>
     },
     actionButtonText: { color: c.accent, fontSize: 11, fontWeight: '800' },
     typeSwitcherButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 9,
       paddingVertical: 6,
@@ -1302,10 +1330,11 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    arrowButtonText: { color: c.text, fontSize: 12, fontWeight: '800' },
     disabledButton: { opacity: 0.25 },
-    disabledText: { color: c.subtle },
     removeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       marginLeft: 'auto',
       paddingHorizontal: 8,
       paddingVertical: 6,
@@ -1354,6 +1383,9 @@ const makeStyles = (c: RidePalette) =>
       gap: 8,
     },
     addPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
       backgroundColor: c.greenSoft,
       paddingHorizontal: 12,
       paddingVertical: 9,
@@ -1377,7 +1409,9 @@ const makeStyles = (c: RidePalette) =>
       backgroundColor: c.accent,
       borderColor: c.accent,
     },
-    calculateButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
+    inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    calculateButtonText: { color: c.accent, fontSize: 14, fontWeight: '900' },
+    calculateButtonTextHighlight: { color: c.onAccent },
     saveButton: {
       backgroundColor: c.green,
       borderRadius: 12,
@@ -1396,12 +1430,15 @@ const makeStyles = (c: RidePalette) =>
     },
     secondaryButtonText: { color: c.text, fontWeight: '800' },
     errorBox: {
-      backgroundColor: c.accentSoft,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: c.dangerSoft,
       borderRadius: 10,
       padding: 12,
       marginTop: 12,
     },
-    errorText: { color: c.danger, fontSize: 12, fontWeight: '700' },
+    errorText: { flex: 1, color: c.danger, fontSize: 12, fontWeight: '700' },
     footer: {
       color: c.subtle,
       fontSize: 10,
@@ -1436,17 +1473,19 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: 16,
       backgroundColor: c.surfaceRaised,
     },
-    modalCloseText: { color: c.text, fontSize: 14, fontWeight: '800', width: 18, textAlign: 'center' },
 
     // Category Selector in Modal
     categoryPickerSection: { marginBottom: 12 },
     categoryLabel: { color: c.subtle, fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 6 },
     categoryRow: { flexDirection: 'row', gap: 6 },
     categoryPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       backgroundColor: c.background,
       borderColor: c.border,
       borderWidth: 1,
-      borderRadius: 20,
+      borderRadius: radius.sm,
       paddingHorizontal: 12,
       paddingVertical: 7,
     },
@@ -1455,7 +1494,7 @@ const makeStyles = (c: RidePalette) =>
       borderColor: c.accent,
     },
     categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
-    categoryPillTextSelected: { color: '#FFFFFF', fontWeight: '800' },
+    categoryPillTextSelected: { color: c.onAccent, fontWeight: '800' },
 
     // Notes & Details in Modal
     notesSection: { marginBottom: 12 },
@@ -1472,6 +1511,9 @@ const makeStyles = (c: RidePalette) =>
       textAlignVertical: 'top',
     },
     saveDetailsOnlyButton: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 6,
       backgroundColor: c.surfaceRaised,
       borderWidth: 1,
       borderColor: c.accent,
@@ -1497,7 +1539,7 @@ const makeStyles = (c: RidePalette) =>
       paddingHorizontal: 12,
       marginBottom: 12,
     },
-    searchIcon: { fontSize: 14, marginRight: 8 },
+    searchIcon: { marginRight: 8 },
     searchInput: {
       flex: 1,
       paddingVertical: 12,
@@ -1506,7 +1548,6 @@ const makeStyles = (c: RidePalette) =>
       fontWeight: '600',
     },
     clearSearchButton: { padding: 6 },
-    clearSearchText: { color: c.muted, fontSize: 13, fontWeight: '800' },
 
     // Suggestions List in Modal
     suggestionsContainer: { minHeight: 180, maxHeight: 280 },
@@ -1528,7 +1569,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    suggestionIcon: { fontSize: 16 },
     suggestionInfo: { flex: 1 },
     suggestionTitle: { color: c.text, fontSize: 14, fontWeight: '700' },
     suggestionAddress: { color: c.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
@@ -1579,7 +1619,7 @@ const makeStyles = (c: RidePalette) =>
       width: '100%',
       maxWidth: 380,
       backgroundColor: c.surface,
-      borderRadius: 20,
+      borderRadius: radius.lg,
       padding: 20,
     },
     dayOptionItem: {

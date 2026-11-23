@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useRideTheme, RidePalette } from '../../theme';
+import { useRideTheme, RidePalette, radius } from '../../theme';
 import { LiveDot } from './LiveDot';
 
 export type TripStatusType = 'live' | 'active' | 'planned' | 'completed' | 'cancelled' | 'archived';
@@ -16,8 +16,6 @@ export function StatusBadge({ status, label, stageInfo, size = 'md' }: StatusBad
   const theme = useRideTheme();
   const styles = makeStyles(theme);
   const normalized = (status || '').toLowerCase();
-
-  let icon = '•';
   let title = label;
   let bg = theme.surfaceHigh;
   let fg = theme.text;
@@ -27,37 +25,31 @@ export function StatusBadge({ status, label, stageInfo, size = 'md' }: StatusBad
     case 'live':
     case 'active':
       isLive = true;
-      icon = '🟢';
       title = label || (stageInfo ? `LIVE • ${stageInfo}` : 'LIVE');
       bg = theme.greenSoft;
       fg = theme.green;
       break;
     case 'planned':
-      icon = '🗓️';
       title = label || 'Planned';
-      bg = 'rgba(56, 189, 248, 0.15)';
+      bg = theme.tertiarySoft;
       fg = theme.tertiary;
       break;
     case 'completed':
-      icon = '🏁';
       title = label || 'Completed';
       bg = theme.surfaceHigh;
       fg = theme.muted;
       break;
     case 'cancelled':
-      icon = '✖️';
       title = label || 'Cancelled';
       bg = theme.dangerSoft;
       fg = theme.danger;
       break;
     case 'archived':
-      icon = '📦';
       title = label || 'Archived';
       bg = theme.surfaceHigh;
       fg = theme.muted;
       break;
     default:
-      icon = '📍';
       title = label || status;
       break;
   }
@@ -77,7 +69,7 @@ export function StatusBadge({ status, label, stageInfo, size = 'md' }: StatusBad
       {isLive ? (
         <LiveDot size={isSmall ? 6 : 7} color={theme.green} />
       ) : (
-        <Text style={[styles.icon, isSmall && styles.iconSm]}>{icon}</Text>
+        <View style={[styles.dot, isSmall && styles.dotSm, { backgroundColor: fg }]} />
       )}
       <Text
         style={[
@@ -100,7 +92,7 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       paddingHorizontal: 10,
       paddingVertical: 5,
-      borderRadius: 9999,
+      borderRadius: radius.xs,
       gap: 6,
       alignSelf: 'flex-start',
     },
@@ -109,11 +101,14 @@ const makeStyles = (c: RidePalette) =>
       paddingVertical: 3,
       gap: 4,
     },
-    icon: {
-      fontSize: 12,
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: radius.round,
     },
-    iconSm: {
-      fontSize: 10,
+    dotSm: {
+      width: 5,
+      height: 5,
     },
     label: {
       fontSize: 12,

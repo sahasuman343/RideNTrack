@@ -53,7 +53,7 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Username"
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.subtle}
             value={username}
             onChangeText={setUsername}
             autoCapitalize="none"
@@ -61,14 +61,14 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Display Name"
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.subtle}
             value={displayName}
             onChangeText={setDisplayName}
           />
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.subtle}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -77,7 +77,7 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Password (min 6 characters)"
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.subtle}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -146,7 +146,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
     marginTop: 8,
   },
   buttonText: {
-    color: '#fff',
+    color: c.onAccent,
     fontSize: 18,
     fontWeight: '600',
   },
@@ -155,7 +155,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
     marginTop: 16,
   },
   linkText: {
-    color: '#FF6B00',
+    color: c.accent,
     fontSize: 14,
   },
 });
