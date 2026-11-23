@@ -26,5 +26,8 @@
     "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "optionalDependencies": {
+    "lightningcss-linux-x64-gnu": "1.32.0"
   }
 }
