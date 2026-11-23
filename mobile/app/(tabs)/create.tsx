@@ -672,7 +672,7 @@ export default function CreateRideScreen() {
   };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
-  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
 
   return (
     <View style={styles.screenWrapper}>

@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as Sentry from '@sentry/react-native';
 import { AuthProvider } from '../src/hooks/useAuth';
 import { OfflineSyncProvider } from '../src/hooks/useOfflineSync';
@@ -25,9 +26,11 @@ function PushNotifications() {
 
 function AppNavigator() {
   const theme = useRideTheme();
+  const isLight = theme.background === '#F8FAFC';
   return (
     <AuthProvider>
       <OfflineSyncProvider>
+        <StatusBar style={isLight ? 'dark' : 'light'} />
         <PushNotifications />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />

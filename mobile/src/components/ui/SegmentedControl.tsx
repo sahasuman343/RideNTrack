@@ -108,11 +108,11 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
   StyleSheet.create({
     container: {
       flexDirection: 'row',
-      backgroundColor: c.surfaceRaised,
+      backgroundColor: isDark ? c.surfaceRaised : '#F1F5F9',
       borderRadius: 9999,
       borderWidth: 1,
       borderColor: c.border,
-      padding: 3,
+      padding: 4,
       minHeight: 48,
       alignItems: 'center',
     },
@@ -125,25 +125,38 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
       alignItems: 'center',
       gap: 8,
       paddingHorizontal: 20,
+      paddingVertical: 2,
     },
     tab: {
       minHeight: 38,
       justifyContent: 'center',
       alignItems: 'center',
       borderRadius: 9999,
-      paddingHorizontal: 16,
+      paddingHorizontal: 15,
       paddingVertical: 7,
       flexDirection: 'row',
       gap: 6,
+      flexShrink: 0,
     },
     tabFixed: {
       flex: 1,
     },
-    tabScrollable: {
-      backgroundColor: c.surfaceRaised,
-      borderWidth: 1,
-      borderColor: c.border,
-    },
+    tabScrollable: isDark
+      ? {
+          backgroundColor: c.surfaceRaised,
+          borderWidth: 1,
+          borderColor: c.border,
+        }
+      : {
+          backgroundColor: '#FFFFFF',
+          borderWidth: 1,
+          borderColor: '#E2E8F0',
+          shadowColor: '#000000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.04,
+          shadowRadius: 3,
+          elevation: 1,
+        },
     tabActive: isDark
       ? {
           backgroundColor: c.surfaceHigh,
@@ -161,9 +174,9 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
           borderWidth: 1.5,
           shadowColor: '#0F172A',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.15,
-          shadowRadius: 4,
-          elevation: 2,
+          shadowOpacity: 0.18,
+          shadowRadius: 5,
+          elevation: 3,
         },
     liveDot: {
       width: 7,
@@ -181,18 +194,18 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
     label: {
       fontSize: 13,
       fontWeight: '600',
-      color: c.textMuted,
+      color: isDark ? c.textMuted : '#475569',
       letterSpacing: 0.2,
     },
     labelActive: {
-      color: isDark ? c.text : '#FFFFFF',
+      color: '#FFFFFF',
       fontWeight: '800',
     },
     badge: {
       paddingHorizontal: 6,
       paddingVertical: 1.5,
       borderRadius: 9999,
-      backgroundColor: c.surfaceHigh,
+      backgroundColor: isDark ? c.surfaceHigh : '#F1F5F9',
       minWidth: 18,
       alignItems: 'center',
       justifyContent: 'center',
@@ -207,7 +220,7 @@ const makeStyles = (c: RidePalette, isDark: boolean) =>
     badgeText: {
       fontSize: 11,
       fontWeight: '700',
-      color: c.textMuted,
+      color: isDark ? c.textMuted : '#64748B',
     },
     badgeTextActive: {
       color: isDark ? c.accent : '#FFFFFF',

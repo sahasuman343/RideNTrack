@@ -42,7 +42,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
   const theme = useRideTheme();
   const insets = useSafeAreaInsets();
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
-  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 44 : 20) + 12;
+  const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   // Dynamic time-based greeting
@@ -153,6 +153,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
             <Skeleton height={280} borderRadius={24} />
           </View>
         ) : !snapshot ? null : ongoingTrip ? (
+          <>
           <Card
             variant="activeGlow"
             style={styles.heroCard}
@@ -227,6 +228,49 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
               />
             </View>
           </Card>
+          {ongoingTrip && (
+            <View style={styles.toolkitSection}>
+              <Text style={styles.toolkitTitle}>RIDER TOOLKIT</Text>
+              <View style={styles.toolkitRow}>
+                <TouchableOpacity
+                  style={styles.toolkitCard}
+                  onPress={() => router.push('/create')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Plan a trip"
+                >
+                  <View style={[styles.toolkitIconCircle, { backgroundColor: theme.accentSoft }]}>
+                    <Text style={[styles.toolkitIcon, { color: theme.accent }]}>＋</Text>
+                  </View>
+                  <Text style={styles.toolkitLabel}>Plan Trip</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.toolkitCard}
+                  onPress={() => router.push('/join')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Join a ride"
+                >
+                  <View style={[styles.toolkitIconCircle, { backgroundColor: theme.greenSoft }]}>
+                    <Text style={[styles.toolkitIcon, { color: theme.green }]}>↗</Text>
+                  </View>
+                  <Text style={styles.toolkitLabel}>Join Ride</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.toolkitCard}
+                  onPress={() => router.push('/trips')}
+                  accessibilityRole="button"
+                  accessibilityLabel="View all trips"
+                >
+                  <View style={[styles.toolkitIconCircle, { backgroundColor: theme.surfaceHigh }]}>
+                    <Text style={styles.toolkitIcon}>⌁</Text>
+                  </View>
+                  <Text style={styles.toolkitLabel}>All Trips</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </>
         ) : (
           /* ======================================================== */
           /* 2. POLISHED EMPTY STATE (No ongoing ride)                 */
@@ -522,5 +566,53 @@ const makeStyles = (c: RidePalette) =>
       fontSize: 16,
       color: c.textMuted,
       fontWeight: 'bold',
+    },
+    toolkitSection: {
+      marginTop: 22,
+    },
+    toolkitTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+      color: c.textMuted,
+      marginBottom: 10,
+    },
+    toolkitRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    toolkitCard: {
+      flex: 1,
+      backgroundColor: c.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 14,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      elevation: 2,
+    },
+    toolkitIconCircle: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    toolkitIcon: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: c.text,
+    },
+    toolkitLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.text,
     },
   });
