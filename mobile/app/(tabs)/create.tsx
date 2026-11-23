@@ -659,17 +659,75 @@ export default function CreateRideScreen() {
       case 2:
         return !!origin && !!destination;
       case 3:
-        return stops.length === 0 || stops.every((s) => !!s.place);
+        return currentStep > 3 && (stops.length === 0 || stops.every((s) => !!s.place));
       case 4:
-        return !!stay;
+        return currentStep > 4;
       case 5:
-        return !!description.trim() || !!tripType;
+        return currentStep > 5;
       case 6:
         return !!name.trim() && !!origin && !!destination;
       default:
         return false;
     }
   };
+
+  const isCurrentStepEmpty = (step: number) => {
+    switch (step) {
+      case 3:
+        return stops.length === 0 && !meetup;
+      case 4:
+        return !stay;
+      case 5:
+        return !description.trim();
+      default:
+        return false;
+    }
+  };
+
+  function handleNextStep() {
+    if (currentStep === 1) {
+      if (!name.trim()) {
+        Alert.alert('Trip name required', 'Please enter a name for your expedition to continue.');
+        return;
+      }
+      setCurrentStep(2);
+    } else if (currentStep === 2) {
+      if (!origin || !destination) {
+        Alert.alert('Route required', 'Please select both a starting point (origin) and final destination.');
+        return;
+      }
+      setCurrentStep(3);
+    } else if (currentStep === 3) {
+      if (stops.some((s) => !s.place)) {
+        Alert.alert('Incomplete stop', 'Please select a location for every added stop or remove the empty stop.');
+        return;
+      }
+      setCurrentStep(4);
+    } else if (currentStep === 4) {
+      setCurrentStep(5);
+    } else if (currentStep === 5) {
+      setCurrentStep(6);
+    }
+  }
+
+  function handleSkipStep() {
+    if (currentStep >= 3 && currentStep <= 5) {
+      setCurrentStep(currentStep + 1);
+    }
+  }
+
+  function handleTapStep(targetStep: number) {
+    if (targetStep === currentStep) return;
+    if (targetStep > 1 && !name.trim()) {
+      Alert.alert('Trip name required', 'Please enter a trip name before moving to other steps.');
+      return;
+    }
+    if (targetStep > 2 && (!origin || !destination)) {
+      Alert.alert('Route required', 'Please select both your starting point and destination first.');
+      return;
+    }
+    setCurrentStep(targetStep);
+  }
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
@@ -715,10 +773,7 @@ export default function CreateRideScreen() {
               <React.Fragment key={step.num}>
                 <TouchableOpacity
                   style={styles.stepChip}
-                  onPress={() => {
-                    setCurrentStep(step.num);
-                    if (step.num >= 3) setShowCustomizations(true);
-                  }}
+                  onPress={() => handleTapStep(step.num)}
                 >
                   <View
                     style={[
@@ -771,421 +826,478 @@ export default function CreateRideScreen() {
           <View style={styles.stepKickerBadge}>
             <View style={styles.stepKickerDot} />
             <Text style={styles.stepKickerText}>
-              Step {currentStep} of 6: {stepsList[currentStep - 1]?.label || 'Route'}
+              Step {currentStep} of 6: {stepsList[currentStep - 1]?.label || 'Basics'} {currentStep >= 3 && currentStep <= 5 ? '(Optional)' : ''}
             </Text>
           </View>
           <View style={styles.telemetryLiveBadge}>
-            <Text style={styles.telemetryLiveText}>Telemetry Live</Text>
-          </View>
-        </View>
-
-        {/* Telemetry HUD Summary Grid (Total Distance & Max Apex) */}
-        <View style={styles.telemetrySummaryGrid}>
-          <View style={styles.telemetrySummaryCard}>
-            <Text style={styles.telemetrySummaryLabel}>TOTAL DISTANCE</Text>
-            <View style={styles.telemetryValueRow}>
-              <Text style={styles.telemetryValueNum}>
-                {previewRoute ? Math.round(previewRoute.distance / 1000) : '—'}
-              </Text>
-              <Text style={styles.telemetryValueUnit}>{previewRoute ? 'KM' : ''}</Text>
-            </View>
-            <View style={styles.saddleTimeRow}>
-              <Text style={styles.saddleTimeText}>
-                ⏱️ {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '— Est. Saddle'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.telemetrySummaryCard}>
-            <View style={styles.apexTopRow}>
-              <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
-              <View style={styles.reconBadge}>
-                <Text style={styles.reconBadgeText}>Advisory</Text>
-              </View>
-            </View>
-            <View style={styles.telemetryValueRow}>
-              <Text style={styles.telemetryValueNum}>4,590</Text>
-              <Text style={styles.telemetryValueUnitMuted}>M</Text>
-            </View>
-            <View style={styles.saddleTimeRow}>
-              <Text style={styles.apexPassText} numberOfLines={1}>
-                🏔️ Sample Topography
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Ascent Profile Chart Card */}
-        <View style={styles.ascentProfileCard}>
-          <View style={styles.ascentHeader}>
-            <View style={styles.ascentTitleRow}>
-              <Text style={styles.ascentChartIcon}>📈</Text>
-              <Text style={styles.ascentTitleText}>Ascent Profile</Text>
-            </View>
-            <View style={styles.ascentNetClimbBadge}>
-              <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
-            </View>
-          </View>
-          {/* Topographic Sparkline Visual */}
-          <View style={styles.sparklineBox}>
-            <View style={styles.sparklinePeakPill}>
-              <Text style={styles.sparklinePeakText}>🏔️ 4,590m Pass</Text>
-            </View>
-            <View style={styles.sparklineGuides}>
-              <View style={styles.sparklineGuideLine} />
-              <View style={styles.sparklineGuideLine} />
-            </View>
-            <View style={styles.sparklineCurveTrack}>
-              <View style={styles.sparklineRidge} />
-            </View>
-            <View style={styles.sparklineFooters}>
-              <Text style={styles.sparklineElevationLabel}>{origin ? origin.name : 'Origin'}</Text>
-              <Text style={styles.sparklineElevationLabel}>{destination ? destination.name : 'Destination'}</Text>
-            </View>
-          </View>
-          <View style={styles.cautionNotice}>
-            <Text style={styles.cautionIcon}>⚠️</Text>
-            <Text style={styles.cautionText}>
-              <Text style={{ fontWeight: '800', color: theme.text }}>Advisory:</Text> High-altitude mountain passes feature steep gradients and variable road surfaces.
+            <Text style={styles.telemetryLiveText}>
+              {currentStep <= 2 ? 'Required' : currentStep === 6 ? 'Final Review' : isCurrentStepEmpty(currentStep) ? 'Skippable' : 'Configured'}
             </Text>
           </View>
         </View>
 
-        {/* Card 1: Essentials & Quick Trip Setup */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.section}>Quick Trip Setup</Text>
-            <View style={styles.badgeEssential}>
-              <Text style={styles.badgeEssentialText}>STEP 1: ESSENTIALS</Text>
+        {/* STEP 1: BASICS */}
+        {currentStep === 1 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.section}>Quick Trip Setup</Text>
+              <View style={styles.badgeEssential}>
+                <Text style={styles.badgeEssentialText}>STEP 1: ESSENTIALS</Text>
+              </View>
+            </View>
+            <Text style={styles.stepDescription}>
+              Give your journey a name, pick your touring dates, and choose your riding style.
+            </Text>
+
+            {/* Trip Name */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Trip Name</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Spiti Valley High Passes"
+                placeholderTextColor="#77809a"
+              />
+            </View>
+
+            {/* Ride Dates / Calendar Picker */}
+            <View style={styles.field}>
+              <View style={styles.dateLabelRow}>
+                <Text style={styles.label}>Ride Dates</Text>
+                {startDate ? (
+                  <TouchableOpacity onPress={() => { setStartDate(''); setEndDate(''); }}>
+                    <Text style={styles.clearDateText}>Clear dates</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                style={[styles.datePickerCard, Boolean(startDate) && styles.datePickerCardActive]}
+                onPress={() => {
+                  setCalendarTarget('trip');
+                  setShowCalendar(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Select trip dates in calendar"
+              >
+                <Text style={styles.calendarIcon}>📅</Text>
+                <View style={styles.datePickerTextWrapper}>
+                  <Text style={styles.datePickerTitle}>
+                    {startDate
+                      ? `${formatDateNice(startDate)}${endDate && endDate !== startDate ? `  →  ${formatDateNice(endDate)}` : ''}`
+                      : 'Tap to select ride dates (Calendar)'}
+                  </Text>
+                  <Text style={styles.datePickerSubtitle}>
+                    {days.length > 0 ? `${days.length} Day(s) planned` : 'One-day ride or multi-day tour'}
+                  </Text>
+                </View>
+                <Text style={styles.datePickerArrow}>›</Text>
+              </TouchableOpacity>
+
+              {/* Quick Presets */}
+              <View style={styles.presetsRow}>
+                <TouchableOpacity style={styles.presetPill} onPress={handlePresetToday}>
+                  <Text style={styles.presetPillText}>Today</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetPill} onPress={handlePresetTomorrow}>
+                  <Text style={styles.presetPillText}>Tomorrow</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetPill} onPress={handlePresetThisWeekend}>
+                  <Text style={styles.presetPillText}>This Weekend</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetPill} onPress={handlePresetNextWeekend}>
+                  <Text style={styles.presetPillText}>Next Weekend</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Trip Category */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Trip Category</Text>
+              <View style={styles.chips}>
+                {(['group', 'weekend', 'touring', 'solo', 'expedition'] as const).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    onPress={() => setTripType(type)}
+                    style={[styles.chip, tripType === type && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, tripType === type && styles.chipTextActive]}>
+                      {type[0].toUpperCase() + type.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </View>
+        )}
 
-          {/* Trip Name */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Trip Name</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="e.g. Spiti Valley High Passes"
-              placeholderTextColor="#77809a"
+        {/* STEP 2: ROUTE */}
+        {currentStep === 2 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.section}>Route & Navigation</Text>
+              <View style={styles.badgeEssential}>
+                <Text style={styles.badgeEssentialText}>STEP 2: ROUTE</Text>
+              </View>
+            </View>
+            <Text style={styles.stepDescription}>
+              Select where your expedition starts and your destination summit or town.
+            </Text>
+
+            {/* Origin */}
+            <LocationSearch
+              label="Starting Point (Origin)"
+              placeholder="Search starting location or town"
+              value={origin}
+              onChange={setOrigin}
+              showCurrentLocation
+            />
+
+            {/* Destination */}
+            <LocationSearch
+              label="Final Destination"
+              placeholder="Search destination or summit"
+              value={destination}
+              onChange={setDestination}
+            />
+
+            {/* Route Preview Badge if available */}
+            {previewRoute ? (
+              <View style={styles.routePreviewPill}>
+                <Text style={styles.routePreviewText}>
+                  🏍️ Estimated leg: {(previewRoute.distance / 1000).toFixed(0)} km · ~{Math.round(previewRoute.duration / 3600)} hrs driving
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {/* STEP 3: STOPS (OPTIONAL) */}
+        {currentStep === 3 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.section}>Customize Trip: Stops</Text>
+              <View style={styles.badgeOptional}>
+                <Text style={styles.badgeOptionalText}>STEP 3: OPTIONAL</Text>
+              </View>
+            </View>
+            <Text style={styles.stepDescription}>
+              Add waypoints along the journey (fuel stations, food, rest stops, repairs) or an optional meetup location.
+            </Text>
+
+            {/* Intermediate Stops */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Intermediate Route Stops ({stops.length})</Text>
+              {stops.map((stop, index) => (
+                <View key={stop.key} style={styles.stopBlock}>
+                  <View style={styles.stopHeader}>
+                    <Text style={styles.label}>
+                      {stop.kind.toUpperCase()} STOP {index + 1}
+                    </Text>
+                    <TouchableOpacity onPress={() => setStops((current) => current.filter((s) => s.key !== stop.key))}>
+                      <Text style={styles.remove}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <LocationSearch
+                    label="Location"
+                    placeholder="Search a place to stop"
+                    value={stop.place}
+                    onChange={(place) => updateStop(stop.key, place)}
+                  />
+                </View>
+              ))}
+              <View style={styles.chips}>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}>
+                  <Text style={styles.addText}>🛑 ＋ Stop</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}>
+                  <Text style={styles.addText}>⛽ ＋ Fuel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('food')}>
+                  <Text style={styles.addText}>🍽️ ＋ Food</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('rest')}>
+                  <Text style={styles.addText}>☕ ＋ Rest</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('sightseeing')}>
+                  <Text style={styles.addText}>📸 ＋ Scenic</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.addButton} onPress={() => addStop('repair')}>
+                  <Text style={styles.addText}>🔧 ＋ Repair</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Meetup Point */}
+            <LocationSearch
+              label="Group Meetup Point (Optional)"
+              placeholder="Where riders gather before departure"
+              value={meetup}
+              onChange={place => {
+                if (place && !meetup && pointCount >= routePointLimit) {
+                  Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
+                } else {
+                  setMeetup(place);
+                }
+              }}
             />
           </View>
+        )}
 
-          {/* Origin */}
-          <LocationSearch
-            label="Starting Point (Origin)"
-            placeholder="Search starting location or town"
-            value={origin}
-            onChange={setOrigin}
-            showCurrentLocation
-          />
-
-          {/* Destination */}
-          <LocationSearch
-            label="Final Destination"
-            placeholder="Search destination or summit"
-            value={destination}
-            onChange={setDestination}
-          />
-
-          {/* Ride Dates / Calendar Picker */}
-          <View style={styles.field}>
-            <View style={styles.dateLabelRow}>
-              <Text style={styles.label}>Ride Dates</Text>
-              {startDate ? (
-                <TouchableOpacity onPress={() => { setStartDate(''); setEndDate(''); }}>
-                  <Text style={styles.clearDateText}>Clear dates</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-            <TouchableOpacity
-              style={[styles.datePickerCard, Boolean(startDate) && styles.datePickerCardActive]}
-              onPress={() => {
-                setCalendarTarget('trip');
-                setShowCalendar(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Select trip dates in calendar"
-            >
-              <Text style={styles.calendarIcon}>📅</Text>
-              <View style={styles.datePickerTextWrapper}>
-                <Text style={styles.datePickerTitle}>
-                  {startDate
-                    ? `${formatDateNice(startDate)}${endDate && endDate !== startDate ? `  →  ${formatDateNice(endDate)}` : ''}`
-                    : 'Tap to select ride dates (Calendar)'}
-                </Text>
-                <Text style={styles.datePickerSubtitle}>
-                  {days.length > 0 ? `${days.length} Day(s) planned` : 'One-day ride or multi-day tour'}
-                </Text>
+        {/* STEP 4: LODGING (OPTIONAL) */}
+        {currentStep === 4 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.section}>Overnight Accommodation</Text>
+              <View style={styles.badgeOptional}>
+                <Text style={styles.badgeOptionalText}>STEP 4: OPTIONAL</Text>
               </View>
-              <Text style={styles.datePickerArrow}>›</Text>
-            </TouchableOpacity>
+            </View>
+            <Text style={styles.stepDescription}>
+              Planning a multi-day expedition? Record your hotel, homestay, or campsite. You can skip this for day rides.
+            </Text>
 
-            {/* Quick Presets */}
-            <View style={styles.presetsRow}>
-              <TouchableOpacity style={styles.presetPill} onPress={handlePresetToday}>
-                <Text style={styles.presetPillText}>Today</Text>
+            {/* Overnight Stay */}
+            <View style={styles.field}>
+              <LocationSearch
+                label="Hotel / homestay / campsite"
+                placeholder="Search accommodation"
+                value={stay}
+                onChange={setStay}
+              />
+              <View style={styles.chips}>
+                {(['hotel', 'homestay', 'hostel', 'camping', 'guesthouse'] as const).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    onPress={() => setStayType(type)}
+                    style={[styles.chip, stayType === type && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, stayType === type && styles.chipTextActive]}>{type}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity
+                style={styles.stayDateButton}
+                onPress={() => {
+                  setCalendarTarget('stay');
+                  setShowCalendar(true);
+                }}
+              >
+                <Text style={styles.stayDateText}>
+                  {checkIn
+                    ? `Stay: ${formatDateNice(checkIn)} → ${formatDateNice(checkOut || checkIn)} 📅`
+                    : 'Select Stay Dates in Calendar 📅'}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.presetPill} onPress={handlePresetTomorrow}>
-                <Text style={styles.presetPillText}>Tomorrow</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.presetPill} onPress={handlePresetThisWeekend}>
-                <Text style={styles.presetPillText}>This Weekend</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.presetPill} onPress={handlePresetNextWeekend}>
-                <Text style={styles.presetPillText}>Next Weekend</Text>
-              </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                value={stayPrice}
+                onChangeText={setStayPrice}
+                keyboardType="decimal-pad"
+                placeholder="Approx. price (INR, optional)"
+                placeholderTextColor="#77809a"
+              />
             </View>
           </View>
+        )}
 
-          {/* Route Preview Badge if available */}
-          {previewRoute ? (
-            <View style={styles.routePreviewPill}>
-              <Text style={styles.routePreviewText}>
-                🏍️ Estimated leg: {(previewRoute.distance / 1000).toFixed(0)} km · ~{Math.round(previewRoute.duration / 3600)} hrs driving
-              </Text>
-            </View>
-          ) : null}
-
-          {/* Primary Create Button */}
-          <TouchableOpacity
-            style={[styles.primary, loading && { opacity: 0.65 }]}
-            onPress={handleCreate}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#000000" />
-            ) : (
-              <Text style={styles.primaryText}>Create trip plan  →</Text>
-            )}
-          </TouchableOpacity>
-          <Text style={styles.helperCentered}>
-            Create with the basics now. You can invite friends, add intermediate stops, and fine-tune stages next.
-          </Text>
-        </View>
-
-        {/* Card 2: Customizations (Stops, Stays & Notes) - Optional & Expandable */}
-        <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.customizationHeader}
-            onPress={() => setShowCustomizations(!showCustomizations)}
-            accessibilityRole="button"
-            accessibilityLabel="Toggle optional trip customizations"
-          >
-            <View style={styles.customizationHeaderLeft}>
-              <Text style={styles.section}>
-                {showCustomizations ? '▾ Customizations & Stops' : '▸ Customize Trip (Stops, Stays & Notes)'}
-              </Text>
-              <Text style={styles.helper}>
-                {showCustomizations
-                  ? 'Optional: Configure stops, stays, meetup points, or trip notes'
-                  : 'Tap to add intermediate stops, overnight stays, meetup points, or trip description'}
-              </Text>
-            </View>
-            <View style={styles.toggleBadge}>
-              <Text style={styles.toggleBadgeText}>{showCustomizations ? 'Hide' : 'Expand ＋'}</Text>
-            </View>
-          </TouchableOpacity>
-
-          {showCustomizations && (
-            <View style={styles.customizationBody}>
-              {/* Trip Type */}
-              <View style={styles.field}>
-                <Text style={styles.label}>Trip Category</Text>
-                <View style={styles.chips}>
-                  {(['group', 'weekend', 'touring', 'solo', 'expedition'] as const).map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      onPress={() => setTripType(type)}
-                      style={[styles.chip, tripType === type && styles.chipActive]}
-                    >
-                      <Text style={[styles.chipText, tripType === type && styles.chipTextActive]}>
-                        {type[0].toUpperCase() + type.slice(1)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+        {/* STEP 5: NOTES & INVITE (OPTIONAL) */}
+        {currentStep === 5 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.section}>Rider Notes & Calibration</Text>
+              <View style={styles.badgeOptional}>
+                <Text style={styles.badgeOptionalText}>STEP 5: OPTIONAL</Text>
               </View>
+            </View>
+            <Text style={styles.stepDescription}>
+              Add gear advisories and route observations for your riding pack, and configure pass routing.
+            </Text>
 
-              {/* Intermediate Stops */}
-              <View style={styles.field}>
-                <Text style={styles.label}>Intermediate Route Stops</Text>
-                <Text style={styles.helper}>
-                  Add waypoints along the journey (fuel stations, restaurants, scenic viewpoints, rest breaks, repairs).
-                </Text>
-                {stops.map((stop, index) => (
-                  <View key={stop.key} style={styles.stopBlock}>
-                    <View style={styles.stopHeader}>
-                      <Text style={styles.label}>
-                        {stop.kind.toUpperCase()} STOP {index + 1}
-                      </Text>
-                      <TouchableOpacity onPress={() => setStops((current) => current.filter((s) => s.key !== stop.key))}>
-                        <Text style={styles.remove}>Remove</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <LocationSearch
-                      label="Location"
-                      placeholder="Search a place to stop"
-                      value={stop.place}
-                      onChange={(place) => updateStop(stop.key, place)}
-                    />
-                  </View>
-                ))}
-                <View style={styles.chips}>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}>
-                    <Text style={styles.addText}>🛑 ＋ Stop</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}>
-                    <Text style={styles.addText}>⛽ ＋ Fuel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('food')}>
-                    <Text style={styles.addText}>🍽️ ＋ Food</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('rest')}>
-                    <Text style={styles.addText}>☕ ＋ Rest</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('sightseeing')}>
-                    <Text style={styles.addText}>📸 ＋ Scenic</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.addButton} onPress={() => addStop('repair')}>
-                    <Text style={styles.addText}>🔧 ＋ Repair</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Meetup Point */}
-              <LocationSearch
-                label="Group Meetup Point (Optional)"
-                placeholder="Where riders gather before departure"
-                value={meetup}
-                onChange={place => {
-                  if (place && !meetup && pointCount >= routePointLimit) {
-                    Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
-                  } else {
-                    setMeetup(place);
-                  }
-                }}
+            {/* Trip Description */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Rider Notes / Briefing (Optional)</Text>
+              <TextInput
+                style={[styles.input, styles.multiline]}
+                multiline
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Notes about packing, gear, road observations, or itinerary notes"
+                placeholderTextColor="#77809a"
               />
+            </View>
 
-              {/* Overnight Stay */}
-              <View style={styles.field}>
-                <Text style={styles.label}>Overnight Stay (Optional)</Text>
-                <LocationSearch
-                  label="Hotel / homestay / campsite"
-                  placeholder="Search accommodation"
-                  value={stay}
-                  onChange={setStay}
+            {/* Pass Routing Calibration Toggles */}
+            <View style={styles.calibrationCard}>
+              <Text style={styles.calibrationHeader}>PASS ROUTING CALIBRATION</Text>
+              <View style={styles.calibrationRow}>
+                <View style={styles.calibrationLabelCol}>
+                  <Text style={styles.calibrationTitle}>Prefer Technical Twisties & Passes</Text>
+                  <Text style={styles.calibrationSub}>Technical twisties routing (Provider unsupported - standard driving active)</Text>
+                </View>
+                <Switch
+                  value={preferTwisties}
+                  disabled={true}
+                  onValueChange={setPreferTwisties}
+                  trackColor={{ false: theme.border, true: theme.accent }}
+                  thumbColor="#FFFFFF"
                 />
-                <View style={styles.chips}>
-                  {(['hotel', 'homestay', 'hostel', 'camping', 'guesthouse'] as const).map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      onPress={() => setStayType(type)}
-                      style={[styles.chip, stayType === type && styles.chipActive]}
-                    >
-                      <Text style={[styles.chipText, stayType === type && styles.chipTextActive]}>{type}</Text>
-                    </TouchableOpacity>
-                  ))}
+              </View>
+              <View style={styles.calibrationDivider} />
+              <View style={styles.calibrationRow}>
+                <View style={styles.calibrationLabelCol}>
+                  <Text style={styles.calibrationTitle}>Avoid Commercial Tollways</Text>
+                  <Text style={styles.calibrationSub}>Prioritize high mountain bypass lines</Text>
+                </View>
+                <Switch
+                  value={avoidTolls}
+                  onValueChange={setAvoidTolls}
+                  trackColor={{ false: theme.border, true: theme.accent }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <View style={styles.calibrationDivider} />
+              <View style={styles.offlineCacheRow}>
+                <View style={styles.offlineCacheLeft}>
+                  <Text style={styles.offlineCacheIcon}>💾</Text>
+                  <View>
+                    <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
+                    <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
+                  </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.stayDateButton}
-                  onPress={() => {
-                    setCalendarTarget('stay');
-                    setShowCalendar(true);
-                  }}
+                  style={styles.syncBtn}
+                  onPress={() => Alert.alert('Offline Pack', 'Offline vector pack download is not supported in this build. Dynamic online routing will be used.')}
                 >
-                  <Text style={styles.stayDateText}>
-                    {checkIn
-                      ? `Stay: ${formatDateNice(checkIn)} → ${formatDateNice(checkOut || checkIn)} 📅`
-                      : 'Select Stay Dates in Calendar 📅'}
-                  </Text>
+                  <Text style={styles.syncBtnText}>SYNC</Text>
                 </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={stayPrice}
-                  onChangeText={setStayPrice}
-                  keyboardType="decimal-pad"
-                  placeholder="Approx. price (INR, optional)"
-                  placeholderTextColor="#77809a"
-                />
               </View>
-
-              {/* Trip Description */}
-              <View style={styles.field}>
-                <Text style={styles.label}>Rider Notes / Description (Optional)</Text>
-                <TextInput
-                  style={[styles.input, styles.multiline]}
-                  multiline
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder="Notes about packing, gear, road observations, or itinerary notes"
-                  placeholderTextColor="#77809a"
-                />
-              </View>
-
-              {/* Pass Routing Calibration Toggles */}
-              <View style={styles.calibrationCard}>
-                <Text style={styles.calibrationHeader}>PASS ROUTING CALIBRATION</Text>
-                <View style={styles.calibrationRow}>
-                  <View style={styles.calibrationLabelCol}>
-                    <Text style={styles.calibrationTitle}>Prefer Technical Twisties & Passes</Text>
-                    <Text style={styles.calibrationSub}>Technical twisties routing (Provider unsupported - standard driving active)</Text>
-                  </View>
-                  <Switch
-                    value={preferTwisties}
-                    disabled={true}
-                    onValueChange={setPreferTwisties}
-                    trackColor={{ false: theme.border, true: theme.accent }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-                <View style={styles.calibrationDivider} />
-                <View style={styles.calibrationRow}>
-                  <View style={styles.calibrationLabelCol}>
-                    <Text style={styles.calibrationTitle}>Avoid Commercial Tollways</Text>
-                    <Text style={styles.calibrationSub}>Prioritize high mountain bypass lines</Text>
-                  </View>
-                  <Switch
-                    value={avoidTolls}
-                    onValueChange={setAvoidTolls}
-                    trackColor={{ false: theme.border, true: theme.accent }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-                <View style={styles.calibrationDivider} />
-                <View style={styles.offlineCacheRow}>
-                  <View style={styles.offlineCacheLeft}>
-                    <Text style={styles.offlineCacheIcon}>💾</Text>
-                    <View>
-                      <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
-                      <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.syncBtn}
-                    onPress={() => Alert.alert('Offline Pack', 'Offline vector pack download is not supported in this build. Dynamic online routing will be used.')}
-                  >
-                    <Text style={styles.syncBtnText}>SYNC</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Bottom Create Button */}
-              <TouchableOpacity
-                style={[styles.primary, loading && { opacity: 0.65 }]}
-                onPress={handleCreate}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#000000" />
-                ) : (
-                  <Text style={styles.primaryText}>Create trip with customizations  →</Text>
-                )}
-              </TouchableOpacity>
             </View>
-          )}
-        </View>
+          </View>
+        )}
+
+        {/* STEP 6: REVIEW & LAUNCH */}
+        {currentStep === 6 && (
+          <View style={{ gap: 14 }}>
+            {/* Telemetry HUD Summary Grid */}
+            <View style={styles.telemetrySummaryGrid}>
+              <View style={styles.telemetrySummaryCard}>
+                <Text style={styles.telemetrySummaryLabel}>TOTAL DISTANCE</Text>
+                <View style={styles.telemetryValueRow}>
+                  <Text style={styles.telemetryValueNum}>
+                    {previewRoute ? Math.round(previewRoute.distance / 1000) : '—'}
+                  </Text>
+                  <Text style={styles.telemetryValueUnit}>{previewRoute ? 'KM' : ''}</Text>
+                </View>
+                <View style={styles.saddleTimeRow}>
+                  <Text style={styles.saddleTimeText}>
+                    ⏱️ {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '— Est. Saddle'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.telemetrySummaryCard}>
+                <View style={styles.apexTopRow}>
+                  <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
+                  <View style={styles.reconBadge}>
+                    <Text style={styles.reconBadgeText}>Advisory</Text>
+                  </View>
+                </View>
+                <View style={styles.telemetryValueRow}>
+                  <Text style={styles.telemetryValueNum}>4,590</Text>
+                  <Text style={styles.telemetryValueUnitMuted}>M</Text>
+                </View>
+                <View style={styles.saddleTimeRow}>
+                  <Text style={styles.apexPassText} numberOfLines={1}>
+                    🏔️ Sample Topography
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Ascent Profile Chart Card */}
+            <View style={styles.ascentProfileCard}>
+              <View style={styles.ascentHeader}>
+                <View style={styles.ascentTitleRow}>
+                  <Text style={styles.ascentChartIcon}>📈</Text>
+                  <Text style={styles.ascentTitleText}>Ascent Profile</Text>
+                </View>
+                <View style={styles.ascentNetClimbBadge}>
+                  <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
+                </View>
+              </View>
+              {/* Topographic Sparkline Visual */}
+              <View style={styles.sparklineBox}>
+                <View style={styles.sparklinePeakPill}>
+                  <Text style={styles.sparklinePeakText}>🏔️ 4,590m Pass</Text>
+                </View>
+                <View style={styles.sparklineGuides}>
+                  <View style={styles.sparklineGuideLine} />
+                  <View style={styles.sparklineGuideLine} />
+                </View>
+                <View style={styles.sparklineCurveTrack}>
+                  <View style={styles.sparklineRidge} />
+                </View>
+                <View style={styles.sparklineFooters}>
+                  <Text style={styles.sparklineElevationLabel}>{origin ? origin.name : 'Origin'}</Text>
+                  <Text style={styles.sparklineElevationLabel}>{destination ? destination.name : 'Destination'}</Text>
+                </View>
+              </View>
+              <View style={styles.cautionNotice}>
+                <Text style={styles.cautionIcon}>⚠️</Text>
+                <Text style={styles.cautionText}>
+                  <Text style={{ fontWeight: '800', color: theme.text }}>Advisory:</Text> High-altitude mountain passes feature steep gradients and variable road surfaces.
+                </Text>
+              </View>
+            </View>
+
+            {/* Expedition Summary Card */}
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.section}>Expedition Overview</Text>
+                <View style={styles.badgeEssential}>
+                  <Text style={styles.badgeEssentialText}>{tripType.toUpperCase()}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.reviewTripTitle}>{name}</Text>
+
+              <View style={styles.reviewRouteRow}>
+                <Text style={styles.reviewRoutePoint}>📍 Origin: {origin?.name || origin?.address || 'Origin'}</Text>
+                <Text style={styles.reviewRouteArrow}>↓</Text>
+                {meetup ? (
+                  <>
+                    <Text style={styles.reviewWaypoint}>🚩 Meetup: {meetup.name || meetup.address}</Text>
+                    <Text style={styles.reviewRouteArrow}>↓</Text>
+                  </>
+                ) : null}
+                {stops.filter(s => s.place).map((s, idx) => (
+                  <React.Fragment key={s.key}>
+                    <Text style={styles.reviewWaypoint}>
+                      {s.kind === 'fuel' ? '⛽' : s.kind === 'food' ? '🍽️' : s.kind === 'repair' ? '🔧' : '🛑'} Stop {idx + 1}: {s.place!.name}
+                    </Text>
+                    <Text style={styles.reviewRouteArrow}>↓</Text>
+                  </React.Fragment>
+                ))}
+                <Text style={styles.reviewRoutePoint}>🏁 Destination: {destination?.name || destination?.address || 'Destination'}</Text>
+              </View>
+
+              <View style={styles.reviewMetaGrid}>
+                <View style={styles.reviewMetaItem}>
+                  <Text style={styles.reviewMetaLabel}>DATES</Text>
+                  <Text style={styles.reviewMetaValue}>
+                    {startDate ? formatDateNice(startDate) : 'Not scheduled'}
+                    {endDate && endDate !== startDate ? ` → ${formatDateNice(endDate)}` : ''}
+                  </Text>
+                </View>
+                <View style={styles.reviewMetaItem}>
+                  <Text style={styles.reviewMetaLabel}>STAY</Text>
+                  <Text style={styles.reviewMetaValue}>{stay ? stay.name : 'No overnight stay'}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Calendar Modal */}
         <CalendarPickerModal
@@ -1204,6 +1316,7 @@ export default function CreateRideScreen() {
 
       {/* Sticky Bottom Stepper Footer */}
       <View style={[styles.stickyFooter, { paddingBottom: Math.max(insets.bottom + 10, 16) }]}>
+        {/* Option 1: Back Button */}
         <TouchableOpacity
           style={styles.footerBackBtn}
           onPress={() => {
@@ -1219,28 +1332,69 @@ export default function CreateRideScreen() {
           <Text style={styles.footerBackText}>← Back</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.footerContinueBtn, loading && { opacity: 0.6 }]}
-          disabled={loading}
-          onPress={() => {
-            if (currentStep < 6) {
-              const nextStep = currentStep + 1;
-              setCurrentStep(nextStep);
-              if (nextStep >= 3) {
-                setShowCustomizations(true);
-              }
-            } else {
-              void handleCreate();
-            }
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Continue to next step"
-        >
-          <Text style={styles.footerContinueText}>
-            {loading ? 'Creating Trip Plan…' : currentStep === 6 ? 'Create Trip Plan' : `Continue to ${stepsList[currentStep]?.label || 'Next'}`}
-          </Text>
-          <Text style={styles.footerContinueArrow}>→</Text>
-        </TouchableOpacity>
+        {/* Option 2: Step-Specific Action (Skip vs Next vs Create) */}
+        {currentStep === 6 ? (
+          <TouchableOpacity
+            style={[styles.footerContinueBtn, loading && { opacity: 0.6 }]}
+            disabled={loading}
+            onPress={() => void handleCreate()}
+            accessibilityRole="button"
+            accessibilityLabel="Create trip plan"
+          >
+            {loading ? (
+              <ActivityIndicator color="#000000" />
+            ) : (
+              <>
+                <Text style={styles.footerContinueText}>Create trip plan</Text>
+                <Text style={styles.footerContinueArrow}>→</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ) : currentStep === 1 ? (
+          <TouchableOpacity
+            style={styles.footerContinueBtn}
+            onPress={handleNextStep}
+            accessibilityRole="button"
+            accessibilityLabel="Continue to Route"
+          >
+            <Text style={styles.footerContinueText}>Next: Route</Text>
+            <Text style={styles.footerContinueArrow}>→</Text>
+          </TouchableOpacity>
+        ) : currentStep === 2 ? (
+          <TouchableOpacity
+            style={styles.footerContinueBtn}
+            onPress={handleNextStep}
+            accessibilityRole="button"
+            accessibilityLabel="Continue to Stops"
+          >
+            <Text style={styles.footerContinueText}>Next: Stops</Text>
+            <Text style={styles.footerContinueArrow}>→</Text>
+          </TouchableOpacity>
+        ) : isCurrentStepEmpty(currentStep) ? (
+          <TouchableOpacity
+            style={styles.footerSkipBtn}
+            onPress={handleSkipStep}
+            accessibilityRole="button"
+            accessibilityLabel={`Skip ${stepsList[currentStep - 1]?.label}`}
+          >
+            <Text style={styles.footerSkipText}>
+              Skip {stepsList[currentStep - 1]?.label}
+            </Text>
+            <Text style={styles.footerSkipArrow}>→</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.footerContinueBtn}
+            onPress={handleNextStep}
+            accessibilityRole="button"
+            accessibilityLabel={`Continue to ${stepsList[currentStep]?.label || 'Next'}`}
+          >
+            <Text style={styles.footerContinueText}>
+              Next: {stepsList[currentStep]?.label || 'Next'}
+            </Text>
+            <Text style={styles.footerContinueArrow}>→</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -1730,6 +1884,29 @@ const makeStyles = (c: RidePalette) =>
       fontWeight: '800',
       color: '#000000',
     },
+    footerSkipBtn: {
+      flex: 1,
+      height: 52,
+      backgroundColor: c.surfaceRaised,
+      borderRadius: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    footerSkipText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: c.textMuted,
+      letterSpacing: 0.3,
+    },
+    footerSkipArrow: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: c.textMuted,
+    },
     card: {
       backgroundColor: c.surface,
       borderColor: c.border,
@@ -1751,6 +1928,68 @@ const makeStyles = (c: RidePalette) =>
       paddingVertical: 3,
     },
     badgeEssentialText: { color: c.accent, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+    badgeOptional: {
+      backgroundColor: c.surfaceRaised,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    badgeOptionalText: { color: c.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+    stepDescription: {
+      fontSize: 13,
+      color: c.textMuted,
+      lineHeight: 19,
+    },
+    reviewTripTitle: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: c.text,
+      letterSpacing: -0.3,
+    },
+    reviewRouteRow: {
+      gap: 6,
+      paddingVertical: 10,
+    },
+    reviewRoutePoint: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: c.text,
+    },
+    reviewRouteArrow: {
+      fontSize: 13,
+      color: c.accent,
+      paddingLeft: 8,
+    },
+    reviewWaypoint: {
+      fontSize: 13,
+      color: c.textMuted,
+      paddingLeft: 8,
+    },
+    reviewMetaGrid: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: c.border,
+    },
+    reviewMetaItem: {
+      flex: 1,
+      gap: 3,
+    },
+    reviewMetaLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: c.textMuted,
+      letterSpacing: 0.8,
+    },
+    reviewMetaValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.text,
+    },
     field: { gap: 6 },
     label: { color: c.text, fontSize: 13, fontWeight: '700' },
     dateLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
