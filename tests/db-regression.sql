@@ -28,6 +28,7 @@ BEGIN
     'public.get_regroup_points(uuid)'::regprocedure,
     'public.save_trip_journal_entry(uuid,text,text,text,integer,jsonb)'::regprocedure,
     'public.get_rider_analytics(uuid)'::regprocedure,
+    'public.get_ride_ice_contacts(uuid)'::regprocedure,
     'public.delete_user_account(uuid)'::regprocedure,
     'public.archive_trip(uuid)'::regprocedure,
     'public.unarchive_trip(uuid)'::regprocedure,
@@ -41,7 +42,10 @@ BEGIN
     'public.add_trip_expense(uuid,text,numeric,text,uuid[],text)'::regprocedure,
     'public.delete_trip_expense(uuid)'::regprocedure,
     'public.get_trip_expenses(uuid)'::regprocedure,
-    'public.get_trip_expense_summary(uuid)'::regprocedure
+    'public.get_trip_expense_summary(uuid)'::regprocedure,
+    'public.get_my_ride_trail(uuid,integer)'::regprocedure,
+    'public.register_push_token(text,text)'::regprocedure,
+    'public.unregister_push_token(text)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -66,6 +70,15 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+DO $$ BEGIN
+  IF has_function_privilege('anon','public.purge_old_location_history(integer)'::regprocedure,'EXECUTE')
+     OR has_function_privilege('authenticated','public.purge_old_location_history(integer)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'client role can purge location history';
+  END IF;
+  IF has_function_privilege('anon','public.register_push_token(text,text)'::regprocedure,'EXECUTE') THEN
+    RAISE EXCEPTION 'anonymous push registration';
+  END IF;
+END $$;
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO authenticated,anon;
 GRANT SELECT,INSERT ON realtime.messages TO authenticated;
 INSERT INTO auth.users VALUES
@@ -80,8 +93,58 @@ DO $$ BEGIN
   IF (SELECT count(*) FROM public.profiles) != 0 THEN RAISE EXCEPTION 'signup preflight exposes profiles'; END IF;
 END $$;
 RESET ROLE;
+
+-- Privacy, plan-limit and retention checks (029).
+RESET ROLE;
+SET ROLE authenticated;
+SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
+DO $$
+DECLARE v_ride uuid; i integer;
+BEGIN
+  SET CONSTRAINTS ALL IMMEDIATE;
+  INSERT INTO public.rides (name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
+  VALUES ('Waypoint limit','WPL001',auth.uid(),'A','B','[0,0]','[1,1]','planned')
+  RETURNING id INTO v_ride;
+  FOR i IN 1..15 LOOP
+    INSERT INTO public.trip_waypoints (ride_id,sequence,waypoint_type,name,latitude,longitude)
+    VALUES (v_ride,i-1,CASE WHEN i=1 THEN 'origin' WHEN i=15 THEN 'destination' ELSE 'stop' END,
+            'Point ' || i,0,i::double precision / 100);
+  END LOOP;
+  BEGIN
+    INSERT INTO public.trip_waypoints (ride_id,sequence,waypoint_type,name,latitude,longitude)
+    VALUES (v_ride,15,'stop','Overflow',0,0.2);
+    RAISE EXCEPTION 'free plan accepted a sixteenth waypoint' USING ERRCODE = '23514';
+  EXCEPTION WHEN raise_exception THEN NULL;
+  END;
+  UPDATE public.rides SET status = 'completed' WHERE id = v_ride;
+
+  FOR i IN 1..5 LOOP
+    INSERT INTO public.rides (name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
+    VALUES ('Limit ' || i, 'LIM' || lpad(i::text,3,'0'), auth.uid(), 'A', 'B', '[0,0]', '[1,1]', 'planned');
+  END LOOP;
+  BEGIN
+    INSERT INTO public.rides (name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
+    VALUES ('Limit overflow','LIM006',auth.uid(),'A','B','[0,0]','[1,1]','planned');
+    RAISE EXCEPTION 'free plan accepted a sixth active trip' USING ERRCODE = '23514';
+  EXCEPTION WHEN raise_exception THEN NULL;
+  END;
+  UPDATE public.rides SET status = 'completed' WHERE admin_id = auth.uid() AND name LIKE 'Limit %';
+END $$;
+RESET ROLE;
 SET ROLE authenticated;
 SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $$ BEGIN
+  UPDATE public.profiles SET blood_group = 'O+', fuel_tank_capacity_liters = 12, fuel_reserve_liters = 2 WHERE id = auth.uid();
+  UPDATE public.profiles SET display_name = 'Owner' WHERE id = auth.uid();
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND blood_group = 'O+' AND fuel_reserve_liters = 2) THEN
+    RAISE EXCEPTION 'Emergency and motorcycle fields were not preserved';
+  END IF;
+  BEGIN
+    UPDATE public.profiles SET fuel_reserve_liters = 12 WHERE id = auth.uid();
+    RAISE EXCEPTION 'Accepted reserve equal to tank capacity';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
 INSERT INTO public.rides (id,name,ride_code,admin_id,origin,destination,origin_coords,destination_coords)
 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Test','ABCDEF',auth.uid(),'A','B','[77,12]','[78,13]');
 DO $$ BEGIN
@@ -93,6 +156,31 @@ SELECT public.join_ride_by_code(' abcdef ');
 DO $$ BEGIN
   IF (SELECT count(*) FROM public.get_ride_members('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')) != 2 THEN RAISE EXCEPTION 'member names unavailable'; END IF;
 END $$;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+UPDATE public.profiles SET emergency_contact = '+91 90000 00000', blood_group = 'O+', share_ice_with_ride = true
+ WHERE id = auth.uid();
+UPDATE public.rides SET status = 'active' WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+SET request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.get_ride_ice_contacts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    WHERE user_id = '11111111-1111-4111-8111-111111111111' AND blood_group = 'O+'
+  ) THEN RAISE EXCEPTION 'consented ICE data unavailable to a ride member'; END IF;
+END $$;
+SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
+DO $$ BEGIN
+  BEGIN
+    PERFORM public.get_ride_ice_contacts('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    RAISE EXCEPTION 'outsider read consented ICE data';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    UPDATE public.profiles SET subscription_tier = 'pro_tourer' WHERE id = auth.uid();
+    RAISE EXCEPTION 'client self-granted a premium tier';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+SET request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 SELECT public.bulk_insert_location_updates('[{"client_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","ride_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","user_id":"22222222-2222-4222-8222-222222222222","lat":0,"lng":0,"timestamp":"2026-10-01T00:00:00Z"}]');
 SELECT public.bulk_insert_location_updates('[{"client_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","ride_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","user_id":"22222222-2222-4222-8222-222222222222","lat":0,"lng":0,"timestamp":"2026-10-01T00:00:00Z"}]');
 DO $$ BEGIN
@@ -568,6 +656,14 @@ BEGIN
   -- 3. Analytics RPC works for authenticated user
   PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
   analytics := public.get_rider_analytics(owner_id);
+  UPDATE public.rides SET estimated_distance_meters = 200000, estimated_duration_seconds = 7200 WHERE id = journal_trip_id;
+  IF public.get_rider_analytics(owner_id) IS DISTINCT FROM analytics THEN
+    RAISE EXCEPTION 'Planned distance changed completed ride statistics';
+  END IF;
+  UPDATE public.rides SET status = 'completed' WHERE id = journal_trip_id;
+  IF (public.get_rider_analytics(owner_id)->>'total_distance_km')::numeric <> (analytics->>'total_distance_km')::numeric + 200 THEN
+    RAISE EXCEPTION 'Completed route estimate missing';
+  END IF;
   IF analytics IS NULL OR NOT (analytics ? 'total_distance_km') OR NOT (analytics ? 'milestones') THEN
     RAISE EXCEPTION 'get_rider_analytics failed to return expected metrics';
   END IF;
@@ -1098,8 +1194,10 @@ BEGIN
   SELECT count(*) INTO v_dir_count
   FROM public.get_breakdown_assistance_directory();
 
-  IF v_dir_count < 3 THEN
-    RAISE EXCEPTION 'get_breakdown_assistance_directory failed to return seeded breakdown services';
+  IF v_dir_count != 1 OR NOT EXISTS (
+    SELECT 1 FROM public.get_breakdown_assistance_directory() WHERE phone = '1033' AND is_verified
+  ) THEN
+    RAISE EXCEPTION 'breakdown directory must contain only the verified NHAI helpline';
   END IF;
 
   -- Cleanup
@@ -1279,3 +1377,73 @@ BEGIN
 END $$;
 
 RESET ROLE;
+
+-- Whole-ride trail and device push tokens (028)
+SET ROLE authenticated;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+INSERT INTO public.rides (id,name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
+VALUES ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','Trail','TRAIL1',auth.uid(),'A','B','[0,0]','[0.01,0]','active');
+SELECT public.bulk_insert_location_updates(jsonb_build_array(
+  jsonb_build_object('client_id','d1111111-1111-4111-8111-111111111111','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0.002,'timestamp','2026-10-01T00:02:00Z'),
+  jsonb_build_object('client_id','d2222222-2222-4222-8222-222222222222','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0,'timestamp','2026-10-01T00:00:00Z'),
+  jsonb_build_object('client_id','d3333333-3333-4333-8333-333333333333','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0.001,'timestamp','2026-10-01T00:01:00Z')));
+DO $$
+DECLARE trail jsonb;
+BEGIN
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  -- Ordered by time, not insert order: 0 -> 0.001 -> 0.002 degrees of longitude.
+  IF (trail->>'distance_meters')::numeric NOT BETWEEN 222 AND 223 THEN
+    RAISE EXCEPTION 'trail distance must cover every ordered breadcrumb: %', trail;
+  END IF;
+  IF jsonb_array_length(trail->'coordinates') != 3 OR trail->'coordinates'->2 != '[0.002, 0]'::jsonb THEN
+    RAISE EXCEPTION 'trail coordinates are not time ordered: %', trail;
+  END IF;
+  IF (trail->>'last_timestamp')::timestamptz != '2026-10-01T00:02:00Z'::timestamptz THEN
+    RAISE EXCEPTION 'trail last timestamp wrong: %', trail;
+  END IF;
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 2);
+  IF jsonb_array_length(trail->'coordinates') != 2 OR trail->'coordinates'->1 != '[0.002, 0]'::jsonb
+     OR (trail->>'distance_meters')::numeric NOT BETWEEN 222 AND 223 THEN
+    RAISE EXCEPTION 'thinned trail must keep the latest point and full distance: %', trail;
+  END IF;
+
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  IF (SELECT count(*) FROM public.push_tokens) != 1 THEN RAISE EXCEPTION 'push token not registered once'; END IF;
+  BEGIN
+    PERFORM public.register_push_token('not-a-token', 'android');
+    RAISE EXCEPTION 'malformed push token accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.push_tokens (token,user_id,platform) VALUES ('ExponentPushToken[forged]','22222222-2222-4222-8222-222222222222','android');
+    RAISE EXCEPTION 'direct push token insert accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
+DO $$
+DECLARE trail jsonb;
+BEGIN
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  IF (trail->>'distance_meters')::numeric != 0 OR jsonb_array_length(trail->'coordinates') != 0 THEN
+    RAISE EXCEPTION 'trail leaked another rider''s breadcrumbs: %', trail;
+  END IF;
+  IF (SELECT count(*) FROM public.push_tokens) != 0 THEN RAISE EXCEPTION 'push tokens readable by another user'; END IF;
+  PERFORM public.unregister_push_token('ExponentPushToken[device-1]');
+  -- Signing in on the same device moves the token to the new account.
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  IF (SELECT count(*) FROM public.push_tokens WHERE user_id = auth.uid()) != 1 THEN RAISE EXCEPTION 'device token not reassigned'; END IF;
+END $$;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.push_tokens) != 0 THEN RAISE EXCEPTION 'previous account still owns reassigned token'; END IF;
+  PERFORM public.delete_trip('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+END $$;
+RESET ROLE;
+
+INSERT INTO public.location_updates (ride_id,user_id,lat,lng,timestamp)
+VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','11111111-1111-4111-8111-111111111111',0,0,'2020-01-01T00:00:00Z');
+DO $$ BEGIN
+  IF public.purge_old_location_history(90) < 1 THEN RAISE EXCEPTION 'retention did not purge old GPS history'; END IF;
+END $$;

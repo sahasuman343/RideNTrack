@@ -63,7 +63,7 @@ jobs:
             echo "::error::Configure EXPO_TOKEN as a GitHub Actions secret."
             exit 1
           fi
-          eas build --platform android --profile preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+          eas build --platform android --profile preview --non-interactive --wait --verbose-logs --build-logger-level debug --json > "$RUNNER_TEMP/eas-build.json"
       - name: Download APK from this EAS build
         working-directory: mobile
         env:

@@ -37,9 +37,14 @@ export type DirectionsRoute = {
   duration: number;
 };
 
+// create_trip_plan (007) and save_trip_route (014) count both endpoints.
+export const MAX_TRIP_ROUTE_POINTS = 50;
+export const TRIP_ROUTE_LIMIT_MESSAGE = `A trip supports up to ${MAX_TRIP_ROUTE_POINTS} route points, including origin and destination.`;
+const MAPBOX_REQUEST_POINTS = 25;
+
 export function validateRoutePoints(points: RoutePoint[]): string | null {
   if (!Array.isArray(points) || points.length < 2) return 'A route needs an origin and a destination.';
-  if (points.length > 25) return 'Mapbox driving directions support at most 25 route points, including origin and destination.';
+  if (points.length > MAX_TRIP_ROUTE_POINTS) return TRIP_ROUTE_LIMIT_MESSAGE;
   if (points[0].waypoint_type !== 'origin') return 'The first point must be the origin.';
   if (points[points.length - 1].waypoint_type !== 'destination') return 'The last point must be the destination.';
   const ids = points.map(point => point.id).filter((id): id is string => Boolean(id));
@@ -60,7 +65,7 @@ export function validateRoutePoints(points: RoutePoint[]): string | null {
   return null;
 }
 
-export function routeCoordinates(points: RoutePoint[]): [number, number][] {
+export function routeCoordinates(points: Pick<RoutePoint, 'longitude' | 'latitude'>[]): [number, number][] {
   return points.map(point => [point.longitude, point.latitude]);
 }
 
@@ -69,8 +74,8 @@ export function insertRouteStop(
   stop: Omit<RoutePoint, 'sequence'>,
   targetIndex?: number,
 ): RoutePoint[] {
-  if (points.length >= 25) {
-    throw new Error('Mapbox driving directions support up to 25 points, including origin and destination.');
+  if (points.length >= MAX_TRIP_ROUTE_POINTS) {
+    throw new Error(TRIP_ROUTE_LIMIT_MESSAGE);
   }
   if (!stop.name || !stop.name.trim()) {
     throw new Error('A route stop must have a valid name.');
@@ -119,26 +124,73 @@ export function moveRouteStop(points: RoutePoint[], fromIndex: number, toIndex: 
   return next.map((point, index) => ({ ...point, sequence: index }));
 }
 
-export function parseDirectionsRoute(payload: unknown): DirectionsRoute {
-  const root = payload as { routes?: Array<{ geometry?: { type?: string; coordinates?: unknown }; distance?: unknown; duration?: unknown }> } | null;
-  const route = root?.routes?.[0];
+type MapboxRoute = { geometry?: { type?: string; coordinates?: unknown }; distance?: unknown; duration?: unknown };
+
+function firstDirectionsRoute(payload: unknown): MapboxRoute {
+  const root = payload as { code?: string; message?: string; routes?: MapboxRoute[] } | null;
+  if (root?.code && root.code !== 'Ok') throw new Error(root.message || 'No driving route found between these places.');
+  if (!root?.routes?.[0]) throw new Error('The routing service did not return a valid route. Try adjusting your stops.');
+  return root.routes[0];
+}
+
+function parseGeometry(route: MapboxRoute): DirectionsRoute['geometry'] {
   const geometry = route?.geometry;
   const coordinates = geometry?.coordinates;
   if (geometry?.type !== 'LineString' || !Array.isArray(coordinates) || coordinates.length < 2) {
     throw new Error('The routing service did not return a valid route. Try adjusting your stops.');
   }
   const normalized: [number, number][] = coordinates.map((pair: any) => {
-    if (!Array.isArray(pair) || pair.length < 2 || !Number.isFinite(Number(pair[0])) || !Number.isFinite(Number(pair[1]))
-      || Number(pair[0]) < -180 || Number(pair[0]) > 180 || Number(pair[1]) < -90 || Number(pair[1]) > 90) {
+    if (!Array.isArray(pair) || pair.length < 2 || !Number.isFinite(pair[0]) || !Number.isFinite(pair[1])
+      || Math.abs(pair[0]) > 180 || Math.abs(pair[1]) > 90) {
       throw new Error('The routing service returned invalid route coordinates.');
     }
-    return [Number(pair[0]), Number(pair[1])];
+    return [pair[0], pair[1]];
   });
-  const distance = Number(route?.distance), duration = Number(route?.duration);
-  if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(duration) || duration <= 0) {
+  return { type: 'LineString', coordinates: normalized };
+}
+
+function parseEstimates({ distance, duration }: MapboxRoute) {
+  if (typeof distance !== 'number' || !Number.isFinite(distance) || distance <= 0 ||
+      typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
     throw new Error('The routing service returned invalid distance or duration estimates.');
   }
-  return { geometry: { type: 'LineString', coordinates: normalized }, distance: Math.round(distance), duration: Math.round(duration) };
+  return { distance, duration };
+}
+
+export function parseDirectionsRoute(payload: unknown): DirectionsRoute {
+  const route = firstDirectionsRoute(payload);
+  const { distance, duration } = parseEstimates(route);
+  return { geometry: parseGeometry(route), distance: Math.round(distance), duration: Math.round(duration) };
+}
+
+type DirectionsOptions = { token: string; avoidTolls?: boolean; signal?: AbortSignal };
+type Coordinate = [number, number];
+export function fetchDrivingRoute(points: Coordinate[], options: DirectionsOptions & { preview: true }): Promise<Pick<DirectionsRoute, 'distance' | 'duration'>>;
+export function fetchDrivingRoute(points: Coordinate[], options: DirectionsOptions & { preview?: false }): Promise<DirectionsRoute>;
+export async function fetchDrivingRoute(points: Coordinate[], { token, preview, avoidTolls, signal }: DirectionsOptions & { preview?: boolean }) {
+  if (points.length < 2) throw new Error('A route needs an origin and a destination.');
+  if (points.length > MAX_TRIP_ROUTE_POINTS) throw new Error(TRIP_ROUTE_LIMIT_MESSAGE);
+  const coordinates: Coordinate[] = [];
+  let distance = 0, duration = 0;
+  const query = `${preview ? 'overview=false' : 'overview=full&geometries=geojson&steps=false'}${avoidTolls ? '&exclude=toll' : ''}&access_token=${encodeURIComponent(token)}`;
+  // Repeat the last waypoint in the next request so every leg is routed exactly once.
+  for (let start = 0; start < points.length - 1; start += MAPBOX_REQUEST_POINTS - 1) {
+    const batch = points.slice(start, start + MAPBOX_REQUEST_POINTS).map(pair => pair.join(',')).join(';');
+    const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${batch}?${query}`, { signal });
+    if (!response.ok) throw new Error('Could not calculate this route. Check that road connections exist between stops.');
+    const route = firstDirectionsRoute(await response.json());
+    const estimates = parseEstimates(route);
+    distance += estimates.distance;
+    duration += estimates.duration;
+    if (!preview) {
+      const segment = parseGeometry(route).coordinates;
+      const last = coordinates[coordinates.length - 1];
+      const skipSeam = last && last[0] === segment[0][0] && last[1] === segment[0][1];
+      for (let i = skipSeam ? 1 : 0; i < segment.length; i++) coordinates.push(segment[i]);
+    }
+  }
+  const totals = { distance: Math.round(distance), duration: Math.round(duration) };
+  return preview ? totals : { ...totals, geometry: { type: 'LineString' as const, coordinates } };
 }
 
 export function formatRouteDistance(meters: number | null | undefined): string {

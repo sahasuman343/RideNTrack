@@ -1,6 +1,14 @@
 # Ride reliability and map update
 
 ## Deployment order
+For the profile and ride-status update, apply all outstanding migrations through `027_profile_and_completed_estimates.sql` before releasing either client. On staging, save a name, emergency details and motorcycle settings separately, then reopen the garage and confirm that each edit preserved the other sections. Distance and time in the garage and trip list are **completed-route estimates**, not measured GPS totals.
+
+For the live-ride session update, apply `028_ride_trail_and_push_tokens.sql` before releasing the mobile client (older servers only lose trail history and push registration; live tracking still works). Then follow [push-notifications.md](push-notifications.md) for FCM credentials, the `notify-ride-alert` Edge Function and its Database Webhook. On staging verify:
+- Open a live ride, enable background GPS, go back to Home: the "Sharing your location" bar appears, the group keeps seeing your position, and reopening the ride stays in background mode without a second permission tap.
+- Tap **Stop** in that bar (or end/leave the ride): sharing ends and the Android notification disappears.
+- Lock rider B's phone and send an SOS from rider A: B receives a high-priority notification that opens the ride.
+- Reopen a long ride: the trail and "distance covered" include the whole ride, not just its start.
+
 1. Back up and apply migrations 001–005 in order to a staging Supabase project.
 2. Deploy the updated web client and mobile development builds together. Migration 005 changes the batch upload contract to require a persistent client_id; old clients should be upgraded before normal use resumes.
 3. Configure the Supabase URL, publishable/anon key, and Mapbox public token in each client.
@@ -53,3 +61,13 @@ Run the same 3–4 hour ride scenario on an entry-level device and a 6–8 GB re
 - Treat the optimization as accepted only if tracking reliability is unchanged and the low-end device shows lower CPU/network work without sustained memory growth or UI stalls.
 
 Do not use emulator-only results as evidence of low-end device compatibility. Background location and vendor battery-management behavior must be checked on physical hardware.
+
+## Error reporting
+
+Set `EXPO_PUBLIC_SENTRY_DSN` to enable JavaScript Sentry reports. The DSN is a
+public endpoint and is not an auth secret; leave it blank for local builds.
+`sendDefaultPii` is disabled, and the app has a visible crash boundary that
+preserves local/offline storage. Native symbol/source-map upload is intentionally
+not part of the build: enabling the Sentry Expo Gradle plugin requires configured
+organization, project, and auth-token secrets and was otherwise making release
+Gradle builds fail. Re-enable that plugin only after adding those EAS secrets.

@@ -19,7 +19,9 @@ import { useRideTheme, RidePalette } from '../../../src/theme';
 import {
   formatRouteDistance,
   formatRouteDuration,
-  parseDirectionsRoute,
+  fetchDrivingRoute,
+  PLAN_LIMITS,
+
   routeCoordinates,
   validateRoutePoints,
   insertRouteStop,
@@ -86,7 +88,8 @@ type DayPickerConfig = {
 export default function RouteEditorScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const routePointLimit = PLAN_LIMITS[profile?.subscription_tier ?? 'free'].maxWaypointsPerTrip;
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const camera = useRef<any>(null);
@@ -250,8 +253,11 @@ export default function RouteEditorScreen() {
     if (!Mapbox || !coords || coords.length < 2 || !camera.current) return;
     const valid = coords.filter((p: any) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
     if (valid.length < 2) return;
-    const east = Math.max(...valid.map((p: any) => p[0])), west = Math.min(...valid.map((p: any) => p[0]));
-    const north = Math.max(...valid.map((p: any) => p[1])), south = Math.min(...valid.map((p: any) => p[1]));
+    let [east, north] = valid[0], [west, south] = valid[0];
+    for (const [lng, lat] of valid) {
+      east = Math.max(east, lng); west = Math.min(west, lng);
+      north = Math.max(north, lat); south = Math.min(south, lat);
+    }
     try {
       camera.current.fitBounds([east, north], [west, south], [35, 35, 35, 35], 500);
     } catch {
@@ -261,8 +267,8 @@ export default function RouteEditorScreen() {
 
   // Open search modal to ADD a stop
   function openAddStop(type: RouteWaypointType = 'stop', targetIndex?: number) {
-    if (points.length >= 25) {
-      Alert.alert('Route point limit', 'Mapbox driving directions support up to 25 points, including origin and destination.');
+    if (points.length >= routePointLimit) {
+      Alert.alert('Route point limit', `Your plan supports up to ${routePointLimit} route points, including origin and destination.`);
       return;
     }
     const insertAt = targetIndex !== undefined ? targetIndex : points.length - 1;
@@ -471,17 +477,7 @@ export default function RouteEditorScreen() {
     setCalculating(true);
     setError('');
     try {
-      const coords = routeCoordinates(points).map(pair => pair.join(',')).join(';');
-      const url =
-        'https://api.mapbox.com/directions/v5/mapbox/driving/' +
-        coords +
-        '?overview=full&geometries=geojson&steps=false&access_token=' +
-        encodeURIComponent(TOKEN);
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Could not calculate this route. Check that road connections exist between stops.');
-      const data = await response.json();
-      if (data.code && data.code !== 'Ok') throw new Error(data.message || 'No driving route found between these places.');
-      const result = parseDirectionsRoute(data);
+      const result = await fetchDrivingRoute(routeCoordinates(points), { token: TOKEN });
       const feature = { type: 'Feature', geometry: result.geometry, properties: {} };
       setRouteGeometry(feature);
       setDistance(result.distance);

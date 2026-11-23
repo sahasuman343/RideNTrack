@@ -43,6 +43,8 @@ Do not introduce a separate FastAPI service, Redis, Kafka or microservices witho
 - Membership is checked in the database, not trusted from client UI.
 - Public discovery never exposes live GPS, private contact details or private trip metadata.
 - Leaving/completing a trip stops location publication.
+- Closing the live-ride screen does not stop sharing; the app shows a persistent "Sharing your location" bar with a Stop action until sharing ends.
+- Only the ride leader broadcasts rider-behind alerts; a lagging rider sees a local notice.
 - Stale positions are visibly stale; never present cached coordinates as live.
 - Users can stop sharing and delete their trip data.
 
@@ -53,3 +55,19 @@ Do not introduce a separate FastAPI service, Redis, Kafka or microservices witho
 - Use transactions for aggregate writes.
 - Add regression tests for RLS, idempotency, date boundaries and offline recovery.
 - Document each feature's state model, permissions, failure modes and acceptance criteria in `docs/features/`.
+
+## Consent, plan limits and retention (migration 029)
+
+- Emergency contact and blood group remain private until the owner enables
+  **Share with active ride members** in Profile. The `get_ride_ice_contacts` RPC
+  verifies that the caller is a member of a currently active ride.
+- Free users are limited to 5 active trips and 15 route points; Pro Tourer is
+  limited to 100 active trips and 50 route points. These checks are database
+  constraint triggers, so direct Supabase clients cannot bypass them.
+- `subscription_tier` cannot be changed by an authenticated app client. It must
+  be updated by a service-role payment webhook after payment verification.
+- Location breadcrumbs are retained for 90 days by the
+  `purge-location-history` scheduled Edge Function. See the deployment section
+  in [push-notifications.md](push-notifications.md).
+- Only verified national emergency services remain in the breakdown directory;
+  merchant and regional phone numbers are not presented as verified by default.
