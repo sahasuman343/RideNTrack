@@ -28,7 +28,6 @@
           ]
         }
       ],
-      "@sentry/react-native",
       "expo-sqlite"
     ],
     "ios": {

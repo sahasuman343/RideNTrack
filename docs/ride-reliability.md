@@ -64,9 +64,10 @@ Do not use emulator-only results as evidence of low-end device compatibility. Ba
 
 ## Error reporting
 
-Set `EXPO_PUBLIC_SENTRY_DSN` to enable Sentry. The DSN is a public endpoint and is
-not an auth secret; leave it blank for local builds. `sendDefaultPii` is disabled,
-and the app has a visible crash boundary that preserves local/offline storage.
-Native crashes and JavaScript exceptions are captured after an APK/AAB is built
-with the Sentry Expo config plugin. Source-map upload credentials stay in EAS/CI
-secrets and must not be added to `app.json` or a committed `.env` file.
+Set `EXPO_PUBLIC_SENTRY_DSN` to enable JavaScript Sentry reports. The DSN is a
+public endpoint and is not an auth secret; leave it blank for local builds.
+`sendDefaultPii` is disabled, and the app has a visible crash boundary that
+preserves local/offline storage. Native symbol/source-map upload is intentionally
+not part of the build: enabling the Sentry Expo Gradle plugin requires configured
+organization, project, and auth-token secrets and was otherwise making release
+Gradle builds fail. Re-enable that plugin only after adding those EAS secrets.
