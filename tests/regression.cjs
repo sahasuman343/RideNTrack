@@ -496,6 +496,7 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
   const provider = loader({
     react,
     '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
+    '../services/pushNotifications': { unregisterPushToken: async () => {} },
     '../lib/offlineQueue': { clearQueuedItemsForUser: async () => {} },
     '../lib/tripCache': { clearAllCachedTripsForUser: async () => {} },
     '../lib/supabase': { supabase: {
@@ -2117,3 +2118,132 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
 
 
 
+
+test('ride trail distance is incremental, ignores jitter and stale fixes, and survives thinning', () => {
+  const { EMPTY_TRAIL, appendTrailPoint, mergeTrailHistory } = loader()('shared/trail.ts');
+  const at = (lng, second) => ({ lat: 0, lng, timestamp: new Date(Date.UTC(2026, 9, 1, 0, 0, second)).toISOString() });
+  let trail = appendTrailPoint(EMPTY_TRAIL, at(0, 0));
+  trail = appendTrailPoint(trail, at(0.001, 5));
+  assert.ok(Math.abs(trail.distanceMeters - 111.2) < 1);
+  assert.equal(appendTrailPoint(trail, at(0.00102, 10)), trail, 'sub-5 m jitter is ignored');
+  assert.equal(appendTrailPoint(trail, at(0.5, 4)), trail, 'out-of-order fix is ignored');
+
+  let long = EMPTY_TRAIL;
+  for (let i = 0; i <= 10; i++) long = appendTrailPoint(long, at(i * 0.001, i), 6);
+  assert.ok(long.coords.length <= 6);
+  assert.deepEqual(long.coords.at(-1), [0.01, 0], 'thinning keeps the latest position');
+  assert.ok(Math.abs(long.distanceMeters - 1112) < 2, 'thinning never changes accumulated distance');
+
+  const live = appendTrailPoint(appendTrailPoint(EMPTY_TRAIL, at(0.002, 1)), at(0.003, 30));
+  const merged = mergeTrailHistory({ coordinates: [[0, 0], [0.002, 0]], distance_meters: 222, last_timestamp: at(0, 20).timestamp }, live);
+  assert.deepEqual(merged.coords, [[0, 0], [0.002, 0], [0.003, 0]], 'live fixes already persisted are not duplicated');
+  assert.ok(Math.abs(merged.distanceMeters - 333.2) < 1);
+});
+
+function trackingFixture({ nativeStarted = false, savedContext = null } = {}) {
+  const storage = new Map(savedContext ? [['@ridentrack/active-ride', JSON.stringify(savedContext)]] : []);
+  const calls = { watch: 0, started: [], stopped: 0 };
+  let listener;
+  const native = { running: nativeStarted };
+  const service = loader({
+    'expo-constants': { default: { executionEnvironment: 'standalone' }, ExecutionEnvironment: { StoreClient: 'storeClient' }, __esModule: true },
+    'expo-task-manager': { isTaskDefined: () => true },
+    'expo-location': {
+      Accuracy: { High: 4, Balanced: 3 },
+      requestForegroundPermissionsAsync: async () => ({ status: 'granted' }),
+      hasStartedLocationUpdatesAsync: async () => native.running,
+      startLocationUpdatesAsync: async (_task, options) => { calls.started.push(options); native.running = true; },
+      stopLocationUpdatesAsync: async () => { calls.stopped++; native.running = false; },
+      watchPositionAsync: async (_options, callback) => { calls.watch++; listener = callback; return { remove() {} }; },
+    },
+    '@react-native-async-storage/async-storage': {
+      getItem: async key => storage.get(key) || null,
+      setItem: async (key, value) => { storage.set(key, value); },
+      removeItem: async key => { storage.delete(key); },
+    },
+    '../lib/supabase': { supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } } },
+    '../lib/offlineQueue': { enqueueLocation: async () => {} },
+    './syncQueue': { syncQueue: async () => {} },
+  })('mobile/src/services/backgroundLocation.ts');
+  return { service, calls, storage, native, fix: () => listener({ coords: { latitude: 1, longitude: 2, speed: 0, heading: 0, accuracy: 5 }, timestamp: Date.now() }) };
+}
+
+test('leaving the live-ride screen keeps location sharing and only explicit stop ends it', async () => {
+  const { service, calls, storage, fix } = trackingFixture();
+  const announced = [];
+  service.subscribeActiveTracking(t => announced.push(t && t.rideId));
+  const seen = [];
+  await service.startBackgroundLocationUpdates({ rideId: 'ride', userId: 'u', displayName: 'R', onLocationUpdate: p => seen.push(p) });
+  assert.deepEqual(service.getActiveTracking(), { rideId: 'ride', userId: 'u' });
+
+  service.detachBackgroundLocationCallbacks('other-ride');
+  service.detachBackgroundLocationCallbacks('ride');
+  fix(); await tick();
+  assert.equal(seen.length, 0, 'unmounted screen callbacks are not invoked');
+  assert.ok(storage.has('@ridentrack/active-ride'), 'tracking context survives the screen');
+  assert.deepEqual(service.getActiveTracking(), { rideId: 'ride', userId: 'u' });
+
+  await service.stopBackgroundLocationUpdates('other-ride');
+  assert.deepEqual(service.getActiveTracking(), { rideId: 'ride', userId: 'u' }, 'stopping another ride is a no-op');
+  await service.stopBackgroundLocationUpdates('ride');
+  assert.equal(service.getActiveTracking(), null);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(announced, ['ride', null]);
+  assert.equal(calls.watch, 1);
+
+  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  assert.match(rideSource, /detachBackgroundLocationCallbacks\(id\)/);
+  assert.doesNotMatch(rideSource, /stopBackgroundLocationUpdates\(\)/, 'the ride screen must only stop its own ride');
+});
+
+test('reopening the ride screen reattaches to the running background service instead of downgrading it', async () => {
+  const saved = { rideId: 'ride', userId: 'u', displayName: 'R' };
+  const { service, calls } = trackingFixture({ nativeStarted: true, savedContext: saved });
+  assert.deepEqual(await service.restoreActiveTracking(), { rideId: 'ride', userId: 'u' }, 'restart surfaces the running ride');
+
+  const result = await service.startBackgroundLocationUpdates({ ...saved });
+  assert.equal(result.mode, 'background');
+  assert.equal(calls.watch, 0, 'no duplicate foreground watcher');
+  assert.equal(calls.started.length, 1, 'options unknown after restart, so the service restarts once with current settings');
+
+  const saver = await service.startBackgroundLocationUpdates({ ...saved, batterySaver: true });
+  assert.equal(saver.mode, 'background');
+  assert.equal(calls.started.at(-1).timeInterval, 15000, 'battery saver applies without dropping background mode');
+  const again = await service.startBackgroundLocationUpdates({ ...saved, batterySaver: true });
+  assert.equal(again.mode, 'background');
+  assert.equal(calls.started.length, 2, 'unchanged options do not restart the service');
+
+  const other = await service.startBackgroundLocationUpdates({ rideId: 'second', userId: 'u', displayName: 'R' });
+  assert.equal(other.mode, 'foreground', 'a different ride never inherits the previous ride\'s service');
+  assert.equal(calls.watch, 1);
+  await service.stopBackgroundLocationUpdates();
+});
+
+test('stale tracking context without a running service is cleared on restart', async () => {
+  const { service, storage } = trackingFixture({ savedContext: { rideId: 'ride', userId: 'u', displayName: 'R' } });
+  assert.equal(await service.restoreActiveTracking(), null);
+  assert.equal(storage.size, 0);
+});
+
+test('push notifications open only valid ride IDs and are registered in ride context', () => {
+  const { rideIdFromNotification } = loader({
+    'react-native': { Platform: { OS: 'android' } },
+    'expo-constants': { default: {}, ExecutionEnvironment: {}, __esModule: true },
+    '@react-native-async-storage/async-storage': {},
+    'expo-notifications': {},
+    '../lib/supabase': { supabase: {} },
+  })('mobile/src/services/pushNotifications.ts');
+  const response = data => ({ notification: { request: { content: { data } } } });
+  assert.equal(rideIdFromNotification(response({ rideId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  assert.equal(rideIdFromNotification(response({ rideId: '../profile' })), null);
+  assert.equal(rideIdFromNotification(response({})), null);
+  assert.equal(rideIdFromNotification(null), null);
+
+  const fn = fs.readFileSync(path.resolve('supabase/functions/notify-ride-alert/index.ts'), 'utf8');
+  const client = fs.readFileSync(path.resolve('mobile/src/services/pushNotifications.ts'), 'utf8');
+  for (const channel of ['sos-alerts', 'ride-alerts']) {
+    assert.ok(fn.includes(`'${channel}'`) && client.includes(`'${channel}'`), `channel ${channel} must match client and server`);
+  }
+  assert.match(fn, /x-webhook-secret/);
+  assert.match(fn, /\.neq\('user_id', alert\.user_id\)/, 'sender is not notified of their own alert');
+});

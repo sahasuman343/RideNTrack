@@ -19,12 +19,80 @@ interface Params extends Context {
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
 let generation = 0, lastSync = 0, lastFixTimestamp = 0;
+let nativeOptionsKey: string | null = null;
 const GPS_INTERVAL_MS = 5000;
 const GPS_DISTANCE_METERS = 15;
 const QUEUE_SYNC_INTERVAL_MS = 30000;
 let operations: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
+}
+
+export interface ActiveTracking { rideId: string; userId: string }
+const trackingListeners = new Set<(tracking: ActiveTracking | null) => void>();
+let announced: ActiveTracking | null = null;
+function setContext(next: Params | null) {
+  context = next;
+  const tracking = next ? { rideId: next.rideId, userId: next.userId } : null;
+  if (tracking?.rideId === announced?.rideId && tracking?.userId === announced?.userId) return;
+  announced = tracking;
+  for (const listener of trackingListeners) {
+    try { listener(tracking); } catch { /* Listener errors must not affect GPS */ }
+  }
+}
+
+/** Ride whose location is currently being shared, or null. */
+export function getActiveTracking(): ActiveTracking | null {
+  return announced;
+}
+
+export function subscribeActiveTracking(listener: (tracking: ActiveTracking | null) => void): () => void {
+  trackingListeners.add(listener);
+  return () => { trackingListeners.delete(listener); };
+}
+
+/**
+ * Screen unmount must not stop location sharing: riders routinely leave the
+ * live map to check the itinerary. Drop only the screen's UI callbacks; the
+ * tracker keeps saving and syncing breadcrumbs until an explicit stop.
+ */
+export function detachBackgroundLocationCallbacks(rideId: string) {
+  if (!context || context.rideId !== rideId) return;
+  setContext({ rideId: context.rideId, userId: context.userId, displayName: context.displayName });
+}
+
+function trackingOptions(params: Pick<Params, 'batterySaver'>) {
+  return {
+    accuracy: params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High,
+    timeInterval: params.batterySaver ? 15000 : GPS_INTERVAL_MS,
+    distanceInterval: params.batterySaver ? 25 : GPS_DISTANCE_METERS,
+  };
+}
+
+const optionsKey = (params: Pick<Params, 'batterySaver'>) => (params.batterySaver ? 'saver' : 'normal');
+
+async function startNativeUpdates(params: Params, restart = false) {
+  if (restart) await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+    ...trackingOptions(params),
+    pausesUpdatesAutomatically: false,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: 'RideNTrack · Sharing location',
+      notificationBody: 'Your group can see your position.',
+      notificationColor: '#FF6B00',
+    },
+  });
+  nativeOptionsKey = optionsKey(params);
+}
+
+async function nativeUpdatesRunning() {
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return false;
+  try {
+    return await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  } catch {
+    return false;
+  }
 }
 async function record(locations: Location.LocationObject[]) {
   const version = generation;
@@ -85,7 +153,7 @@ async function record(locations: Location.LocationObject[]) {
     void (async () => {
       await syncQueue();
       const { data } = await supabase.from('rides').select('status').eq('id', saved.rideId).maybeSingle();
-      if (version === generation && data?.status === 'completed') await stopBackgroundLocationUpdates();
+      if (version === generation && data?.status === 'completed') await stopBackgroundLocationUpdates(saved.rideId);
     })().catch(e => context?.onError?.(e.message));
   }
 }
@@ -116,7 +184,29 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
     if (foreground.status !== 'granted') {
       throw new Error('Enable location permission in Settings to share your position.');
     }
-    context = params;
+
+    // The native service survives screen unmounts and app restarts. Reattach
+    // the screen to it instead of downgrading the rider to foreground GPS.
+    if (await nativeUpdatesRunning()) {
+      if (version !== generation) return { mode: 'stopped' };
+      const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+      if (saved?.rideId === params.rideId && saved.userId === params.userId) {
+        if (nativeOptionsKey !== optionsKey(params)) await startNativeUpdates(params, true);
+        if (version !== generation) return { mode: 'stopped' };
+        fallback?.remove();
+        fallback = null;
+        setContext(params);
+        await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
+          rideId: params.rideId, userId: params.userId, displayName: params.displayName,
+        }));
+        return { mode: 'background', permissionGranted: true };
+      }
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      nativeOptionsKey = null;
+      if (version !== generation) return { mode: 'stopped' };
+    }
+
+    setContext(params);
     await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
       rideId: params.rideId, userId: params.userId, displayName: params.displayName,
     }));
@@ -124,22 +214,14 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
     fallback = null;
     lastFixTimestamp = 0;
 
-    const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
-    const distance = params.batterySaver ? 25 : GPS_DISTANCE_METERS;
-    const accuracy = params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High;
-
     // Keep ride tracking useful while background permission is optional.
     // Background permission is requested only from an explicit user action.
     try {
-      fallback = await Location.watchPositionAsync({
-        accuracy,
-        timeInterval: interval,
-        distanceInterval: distance,
-      }, location => {
+      fallback = await Location.watchPositionAsync(trackingOptions(params), location => {
         if (version === generation) void record([location]).catch(e => params.onError?.(e instanceof Error ? e.message : 'GPS update failed.'));
       }, reason => { if (version === generation) params.onError?.(reason); });
     } catch (e) {
-      context = null;
+      setContext(null);
       await AsyncStorage.removeItem(CONTEXT_KEY);
       throw e instanceof Error ? e : new Error('Unable to start foreground location tracker.');
     }
@@ -182,30 +264,13 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       return { mode: fallback ? 'foreground' : 'stopped', permissionGranted: background.status === 'granted' };
     }
 
-    const interval = params.batterySaver ? 15000 : GPS_INTERVAL_MS;
-    const distance = params.batterySaver ? 25 : GPS_DISTANCE_METERS;
-    const accuracy = params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High;
-
     try {
       const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-      if (!alreadyStarted) {
-        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-          accuracy,
-          timeInterval: interval,
-          distanceInterval: distance,
-          pausesUpdatesAutomatically: false,
-          showsBackgroundLocationIndicator: true,
-          foregroundService: {
-            notificationTitle: 'RideNTrack · Sharing location',
-            notificationBody: 'Your group can see your position.',
-            notificationColor: '#FF6B00',
-          },
-        });
-      }
+      if (!alreadyStarted || nativeOptionsKey !== optionsKey(params)) await startNativeUpdates(params, alreadyStarted);
       if (version !== generation) return { mode: 'stopped' };
       fallback?.remove();
       fallback = null;
-      context = params;
+      setContext(params);
       await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
         rideId: params.rideId, userId: params.userId, displayName: params.displayName,
       }));
@@ -225,19 +290,35 @@ export function stopBackgroundLocationUpdates(targetRideId?: string): Promise<vo
   }
   if (!targetRideId || (context?.rideId && context.rideId === targetRideId)) {
     ++generation;
-    context = null;
+    setContext(null);
   }
   return serialize(async () => {
     if (targetRideId) {
       const saved = JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
       if (saved?.rideId && saved.rideId !== targetRideId) return;
       ++generation;
-      context = null;
+      setContext(null);
     }
     fallback?.remove(); fallback = null;
     await AsyncStorage.removeItem(CONTEXT_KEY);
     if (Constants.executionEnvironment !== ExecutionEnvironment.StoreClient
       && await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK))
       await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    nativeOptionsKey = null;
+  });
+}
+
+/**
+ * After an app restart the native service may still be sharing a ride while
+ * no screen has attached. Surface it so the rider can see and stop it.
+ */
+export function restoreActiveTracking(): Promise<ActiveTracking | null> {
+  return serialize(async () => {
+    if (context) return announced;
+    const saved = JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+    if (!saved || context) return announced;
+    if (await nativeUpdatesRunning()) setContext(saved);
+    else await AsyncStorage.removeItem(CONTEXT_KEY);
+    return announced;
   });
 }

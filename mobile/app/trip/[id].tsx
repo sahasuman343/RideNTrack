@@ -322,6 +322,9 @@ export default function TripWorkspaceScreen() {
       if (stayResult.error) throw stayResult.error;
       if (rosterResult.error) throw rosterResult.error;
       if (regroupResult.error) throw regroupResult.error;
+      // Stages are cached with the itinerary; a failed read must not be
+      // shown (or cached) as "no stages".
+      if (stageResult.error) throw stageResult.error;
       setTrip(tripResult.data as Trip);
       setWaypoints((waypointResult.data || []) as Waypoint[]);
       setDays((dayResult.data || []) as Day[]);
@@ -340,13 +343,18 @@ export default function TripWorkspaceScreen() {
       setDeviationLimit(String((tripResult.data as Trip).route_deviation_threshold_meters || 500));
       setBehindLimit(String((tripResult.data as Trip).rider_behind_threshold_meters || 1000));
 
-      let clData = (checklistResult.data || []) as TripChecklistItem[];
-      if (clData.length === 0 && tripResult.data?.admin_id === user?.id) {
-        await supabase.rpc('seed_default_trip_checklists', { p_ride_id: id });
-        const { data: refetched } = await supabase.rpc('get_trip_checklists', { p_ride_id: id });
-        if (refetched) clData = refetched as TripChecklistItem[];
+      if (checklistResult.error) {
+        // Keep the current checklist and never seed defaults over a failed read.
+        setError('Checklist unavailable: ' + checklistResult.error.message);
+      } else {
+        let clData = (checklistResult.data || []) as TripChecklistItem[];
+        if (clData.length === 0 && tripResult.data?.admin_id === user?.id) {
+          await supabase.rpc('seed_default_trip_checklists', { p_ride_id: id });
+          const { data: refetched } = await supabase.rpc('get_trip_checklists', { p_ride_id: id });
+          if (refetched) clData = refetched as TripChecklistItem[];
+        }
+        if (generation === loadGeneration.current) setChecklists(clData);
       }
-      setChecklists(clData);
 
       if (generation === loadGeneration.current && user?.id) {
         void saveCachedTrip(id, {

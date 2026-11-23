@@ -1,7 +1,13 @@
 # Ride reliability and map update
 
 ## Deployment order
-For the profile and ride-status update, apply all outstanding migrations through `20261123000000_profile_and_completed_estimates.sql` before releasing either client. On staging, save a name, emergency details and motorcycle settings separately, then reopen the garage and confirm that each edit preserved the other sections. Distance and time in the garage and trip list are **completed-route estimates**, not measured GPS totals.
+For the profile and ride-status update, apply all outstanding migrations through `027_profile_and_completed_estimates.sql` before releasing either client. On staging, save a name, emergency details and motorcycle settings separately, then reopen the garage and confirm that each edit preserved the other sections. Distance and time in the garage and trip list are **completed-route estimates**, not measured GPS totals.
+
+For the live-ride session update, apply `028_ride_trail_and_push_tokens.sql` before releasing the mobile client (older servers only lose trail history and push registration; live tracking still works). Then follow [push-notifications.md](push-notifications.md) for FCM credentials, the `notify-ride-alert` Edge Function and its Database Webhook. On staging verify:
+- Open a live ride, enable background GPS, go back to Home: the "Sharing your location" bar appears, the group keeps seeing your position, and reopening the ride stays in background mode without a second permission tap.
+- Tap **Stop** in that bar (or end/leave the ride): sharing ends and the Android notification disappears.
+- Lock rider B's phone and send an SOS from rider A: B receives a high-priority notification that opens the ride.
+- Reopen a long ride: the trail and "distance covered" include the whole ride, not just its start.
 
 1. Back up and apply migrations 001–005 in order to a staging Supabase project.
 2. Deploy the updated web client and mobile development builds together. Migration 005 changes the batch upload contract to require a persistent client_id; old clients should be upgraded before normal use resumes.

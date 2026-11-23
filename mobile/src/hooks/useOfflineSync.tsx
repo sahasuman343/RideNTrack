@@ -1,10 +1,29 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from './useAuth';
 import { getQueueCounts } from '../lib/offlineQueue';
 import { syncQueue } from '../services/syncQueue';
-export function useOfflineSync(_rideId?: string) {
+
+type OfflineSync = ReturnType<typeof useOfflineSyncState>;
+const OfflineSyncContext = createContext<OfflineSync | null>(null);
+
+/**
+ * One app-wide sync loop: breadcrumbs and alerts queued offline must upload
+ * when connectivity returns even if the live-ride screen is never reopened.
+ */
+export function OfflineSyncProvider({ children }: { children: React.ReactNode }) {
+  const value = useOfflineSyncState();
+  return <OfflineSyncContext.Provider value={value}>{children}</OfflineSyncContext.Provider>;
+}
+
+export function useOfflineSync() {
+  const context = useContext(OfflineSyncContext);
+  if (!context) throw new Error('useOfflineSync must be used within OfflineSyncProvider');
+  return context;
+}
+
+function useOfflineSyncState() {
   const { user } = useAuth();
   const userId = user?.id;
   const [isOnline, setIsOnline] = useState(false);
@@ -43,5 +62,8 @@ export function useOfflineSync(_rideId?: string) {
     const app = AppState.addEventListener('change', state => { if (state === 'active') check(); });
     return () => { unsubscribe(); clearInterval(timer); app.remove(); };
   }, [flushQueue, updateCounts]);
-  return { isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, isSyncing, syncError, updateCounts, flushQueue };
+  return useMemo(
+    () => ({ isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, isSyncing, syncError, updateCounts, flushQueue }),
+    [isOnline, counts, isSyncing, syncError, updateCounts, flushQueue],
+  );
 }

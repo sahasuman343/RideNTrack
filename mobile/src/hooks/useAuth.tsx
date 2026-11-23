@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
+import { unregisterPushToken } from '../services/pushNotifications';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
@@ -162,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     await stopBackgroundLocationUpdates();
+    await unregisterPushToken().catch(() => {});
     const userId = activeUserId.current;
     if (userId) {
       await clearAllCachedTripsForUser(userId).catch(() => {});
@@ -186,6 +188,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw new Error(error.message || 'Account deletion failed.');
     await clearAllCachedTripsForUser(userId).catch(() => {});
     await clearQueuedItemsForUser(userId).catch(() => {});
+    // Server rows were removed with the profile; drop the local token record.
+    await unregisterPushToken().catch(() => {});
     if (activeUserId.current === userId) {
       await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
       activeUserId.current = null;

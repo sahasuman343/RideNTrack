@@ -45,6 +45,11 @@ import {
   NATIONAL_EMERGENCY_HELPLINES,
   SEEDED_BREAKDOWN_DIRECTORY,
   type VerifiedBreakdownService,
+  type RideTrail,
+  type TrailHistory,
+  EMPTY_TRAIL,
+  appendTrailPoint,
+  mergeTrailHistory,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -54,11 +59,13 @@ import { useRideTheme, RidePalette, typography } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
 import {
+  detachBackgroundLocationCallbacks,
   enableBackgroundLocationUpdates,
   startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
 } from '../../src/services/backgroundLocation';
 import { playAlertSound } from '../../src/services/alertSound';
+import { registerPushToken } from '../../src/services/pushNotifications';
 import { HoldToConfirmButton, LiveDot } from '../../src/components/ui';
 
 // Graceful keep-awake in ride mode
@@ -91,6 +98,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     /* ignore */
   }
 }
+
+const SAFETY_ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+const safetyAlertCooldowns = new Map<string, number>();
 
 export default function LiveRideScreen() {
   useKeepAwake();
@@ -145,6 +155,7 @@ export default function LiveRideScreen() {
   const [sheetHeight, setSheetHeight] = useState(320);
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
+  const rideLoaded = Boolean(ride);
 
   const cameraPadding = useMemo(() => {
     const maxTop = Math.max(20, Math.floor(windowHeight * 0.25));
@@ -166,7 +177,7 @@ export default function LiveRideScreen() {
   const [mapError, setMapError] = useState(false);
   const [mapRetry, setMapRetry] = useState(0);
   const [route, setRoute] = useState<Ride['route_geometry']>();
-  const [trailCoordinates, setTrailCoordinates] = useState<[number, number][]>([]);
+  const [trail, setTrail] = useState<RideTrail>(EMPTY_TRAIL);
   const [routeDeviation, setRouteDeviation] = useState<number | null>(null);
   const [lastArrivedWaypoint, setLastArrivedWaypoint] = useState<string | null>(null);
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
@@ -188,7 +199,7 @@ export default function LiveRideScreen() {
   const [now, setNow] = useState(() => Date.now());
   const gps = gpsStatus(active && sharing ? tracking : 'paused', position?.timestamp, now);
   const [dismissed, setDismissed] = useState<string[]>([]);
-  const lastSafetyAlertAt = useRef<Record<string, number>>({});
+  const gpsRecoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [statsModalVisible, setStatsModalVisible] = useState(false);
   const [batterySaver, setBatterySaver] = useState(false);
   const [gpsRecoveryStatus, setGpsRecoveryStatus] = useState<'normal' | 'recovered'>('normal');
@@ -243,44 +254,63 @@ export default function LiveRideScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  // Ask for notification permission in context: SOS and regroup alerts must
+  // reach this rider while the phone is locked in a tank bag.
+  useEffect(() => {
+    if (!active || !userId) return;
+    void registerPushToken(userId, { prompt: true }).catch(e => console.warn('Push registration failed:', e));
+  }, [active, userId]);
+
+  // Reserve the cooldown synchronously and keep it outside the component so
+  // reopening the ride screen cannot re-send the same safety alert.
+  const publishSafetyAlert = async (key: string, type: AlertType, lat: number, lng: number, alertMsg: string) => {
+    if (!userId) return;
+    const cooldownKey = id + ':' + userId + ':' + key;
+    const nowMs = Date.now();
+    if (nowMs - (safetyAlertCooldowns.get(cooldownKey) || 0) < SAFETY_ALERT_COOLDOWN_MS) return;
+    safetyAlertCooldowns.set(cooldownKey, nowMs);
+    try {
+      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat, lng, message: alertMsg, created_at: new Date(nowMs).toISOString() });
+      void sync.flushQueue();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not publish a group safety alert.');
+    }
+  };
+
+  // Route deviation depends only on this rider's own fix; it does not need to
+  // rerun on clock ticks or other riders' presence updates.
+  useEffect(() => {
+    if (!active || !position || !userId || isStale(position.timestamp) || !ride) return;
+    const routeCoordinates = route?.geometry?.coordinates;
+    if (!Array.isArray(routeCoordinates) || routeCoordinates.length < 2) {
+      setRouteDeviation(null);
+      return;
+    }
+    const deviation = distanceToRouteMeters(position, routeCoordinates);
+    const limit = ride.route_deviation_threshold_meters || 500;
+    setRouteDeviation(deviation);
+    if (deviation > limit) {
+      void publishSafetyAlert(
+        'route-deviation',
+        'route_deviation',
+        position.lat,
+        position.lng,
+        'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).'
+      );
+    }
+  }, [active, position, route, ride?.id, ride?.route_deviation_threshold_meters, userId, id]);
+
+  // Only the leader broadcasts "rider behind" so each gap produces one group
+  // alert. It also covers riders whose app is backgrounded. A lagging rider
+  // gets a local notice instead of a duplicate broadcast.
   useEffect(() => {
     if (!active || !position || !userId || isStale(position.timestamp, now) || !ride) return;
-    const publishSafetyAlert = async (key: string, type: AlertType, lat: number, lng: number, alertMsg: string) => {
-      const last = lastSafetyAlertAt.current[key] || 0;
-      if (now - last < 5 * 60 * 1000) return;
-      lastSafetyAlertAt.current[key] = now;
-      try {
-        await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat, lng, message: alertMsg, created_at: new Date(now).toISOString() });
-        void sync.flushQueue();
-      } catch (e) {
-        setMessage(e instanceof Error ? e.message : 'Could not publish a group safety alert.');
-      }
-    };
-
-    const routeCoordinates = route?.geometry?.coordinates;
-    if (Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
-      const deviation = distanceToRouteMeters(position, routeCoordinates);
-      const limit = ride.route_deviation_threshold_meters || 500;
-      setRouteDeviation(deviation);
-      if (deviation > limit) {
-        void publishSafetyAlert(
-          'route-deviation',
-          'route_deviation',
-          position.lat,
-          position.lng,
-          'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).'
-        );
-      }
-    } else {
-      setRouteDeviation(null);
-    }
-
-    const leader = admin ? position : participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now));
-    if (admin && leader && Number.isFinite(leader.lat) && Number.isFinite(leader.lng)) {
+    const limit = ride.rider_behind_threshold_meters || 1000;
+    if (admin) {
       for (const rider of participants) {
-        if (rider.user_id === ride.admin_id || isStale(rider.timestamp, now)) continue;
-        const gap = distanceMeters(leader, rider);
-        const limit = ride.rider_behind_threshold_meters || 1000;
+        if (rider.user_id === ride.admin_id || rider.user_id === userId || isStale(rider.timestamp, now)) continue;
+        if (!Number.isFinite(rider.lat) || !Number.isFinite(rider.lng)) continue;
+        const gap = distanceMeters(position, rider);
         if (gap > limit) {
           void publishSafetyAlert(
             'rider-behind-' + rider.user_id,
@@ -291,29 +321,32 @@ export default function LiveRideScreen() {
           );
         }
       }
-    } else if (!admin && leader && Number.isFinite(leader.lat) && Number.isFinite(leader.lng)) {
-      const gap = distanceMeters(leader, position);
-      const limit = ride.rider_behind_threshold_meters || 1000;
-      if (gap > limit) {
-        void publishSafetyAlert(
-          'rider-behind-self',
-          'rider_behind',
-          position.lat,
-          position.lng,
-          'You are approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).'
-        );
-      }
+      return;
     }
-  }, [active, position, participants, route, ride?.id, ride?.admin_id, ride?.route_deviation_threshold_meters, ride?.rider_behind_threshold_meters, admin, userId, id, now, sync.flushQueue]);
+    const leader = participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now));
+    if (!leader || !Number.isFinite(leader.lat) || !Number.isFinite(leader.lng)) return;
+    const gap = distanceMeters(leader, position);
+    const cooldownKey = id + ':' + userId + ':rider-behind-self';
+    if (gap > limit && now - (safetyAlertCooldowns.get(cooldownKey) || 0) >= SAFETY_ALERT_COOLDOWN_MS) {
+      safetyAlertCooldowns.set(cooldownKey, now);
+      setMessage('You are approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
+    }
+  }, [active, position, participants, ride?.id, ride?.admin_id, ride?.rider_behind_threshold_meters, admin, userId, id, now]);
 
   useEffect(() => {
     setPosition(null);
     setGpsError(null);
     setBackgroundPermissionGranted(false);
     setGpsRecoveryStatus('normal');
-    if (!active || !sharing || !userId) {
+    // Wait for the ride to load: a null ride is "unknown", not "inactive",
+    // and must not stop a tracker that is already sharing this ride.
+    if (!userId || !rideLoaded) {
+      setTracking('waiting');
+      return;
+    }
+    if (!active || !sharing) {
       setTracking('paused');
-      void stopBackgroundLocationUpdates().catch(e => setGpsError(e.message));
+      void stopBackgroundLocationUpdates(id).catch(e => setGpsError(e.message));
       return;
     }
     let cancelled = false;
@@ -333,12 +366,18 @@ export default function LiveRideScreen() {
       onGpsRecovered: () => {
         if (!cancelled) {
           setGpsRecoveryStatus('recovered');
-          setTimeout(() => setGpsRecoveryStatus('normal'), 6000);
+          if (gpsRecoveryTimer.current) clearTimeout(gpsRecoveryTimer.current);
+          gpsRecoveryTimer.current = setTimeout(() => {
+            gpsRecoveryTimer.current = null;
+            if (!cancelled) setGpsRecoveryStatus('normal');
+          }, 6000);
         }
       },
     })
       .then(result => {
-        if (!cancelled) setTracking(result.mode === 'stopped' ? 'paused' : result.mode);
+        if (cancelled) return;
+        setTracking(result.mode === 'stopped' ? 'paused' : result.mode);
+        if (result.mode === 'background') setBackgroundPermissionGranted(true);
       })
       .catch(e => {
         if (!cancelled) {
@@ -349,9 +388,14 @@ export default function LiveRideScreen() {
     return () => {
       cancelled = true;
       ++gpsSession.current;
-      void stopBackgroundLocationUpdates().catch(() => {});
+      if (gpsRecoveryTimer.current) {
+        clearTimeout(gpsRecoveryTimer.current);
+        gpsRecoveryTimer.current = null;
+      }
+      // Leaving the screen keeps sharing; only explicit actions stop it.
+      detachBackgroundLocationCallbacks(id);
     };
-  }, [id, userId, active, sharing, publish, gpsRetry, batterySaver]);
+  }, [id, userId, rideLoaded, active, sharing, publish, gpsRetry, batterySaver]);
 
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
@@ -411,52 +455,34 @@ export default function LiveRideScreen() {
   useEffect(() => {
     if (!id || !userId) return;
     let cancelled = false;
-    supabase
-      .from('location_updates')
-      .select('lat,lng')
-      .eq('ride_id', id)
-      .eq('user_id', userId)
-      .order('timestamp', { ascending: true })
-      .limit(500)
-      .then(({ data, error }) => {
-        if (cancelled || error || !Array.isArray(data)) return;
-        const historical: [number, number][] = data
-          .filter(d => typeof d.lng === 'number' && typeof d.lat === 'number' && Number.isFinite(d.lng) && Number.isFinite(d.lat))
-          .map(d => [Number(d.lng), Number(d.lat)]);
-        if (historical.length > 0) {
-          setTrailCoordinates(curr => {
-            if (curr.length === 0) return historical;
-            return [...historical, ...curr];
-          });
-        }
-      });
+    setTrail(EMPTY_TRAIL);
+    // Server computes whole-ride distance and a thinned trail; fetching raw
+    // rows here would load only part of a long ride.
+    void supabase.rpc('get_my_ride_trail', { p_ride_id: id }).then(({ data, error }) => {
+      if (cancelled || error || !data) return;
+      setTrail(live => mergeTrailHistory(data as TrailHistory, live));
+    });
     return () => {
       cancelled = true;
     };
   }, [id, userId]);
 
   useEffect(() => {
-    if (!position || typeof position.lng !== 'number' || typeof position.lat !== 'number' || !Number.isFinite(position.lng) || !Number.isFinite(position.lat)) return;
-    setTrailCoordinates(prev => {
-      const last = prev[prev.length - 1];
-      if (last && Math.abs(last[0] - position.lng) < 0.00005 && Math.abs(last[1] - position.lat) < 0.00005) {
-        return prev;
-      }
-      return [...prev, [position.lng, position.lat]];
-    });
-  }, [position?.lng, position?.lat]);
+    if (!position || !Number.isFinite(position.lng) || !Number.isFinite(position.lat)) return;
+    setTrail(prev => appendTrailPoint(prev, position));
+  }, [position]);
 
   const actualTrailGeoJson = useMemo(() => {
-    if (trailCoordinates.length < 2) return null;
+    if (trail.coords.length < 2) return null;
     return {
       type: 'Feature' as const,
       geometry: {
         type: 'LineString' as const,
-        coordinates: trailCoordinates,
+        coordinates: trail.coords,
       },
       properties: {},
     };
-  }, [trailCoordinates]);
+  }, [trail.coords]);
 
   useEffect(() => {
     if (!position || !nextWaypoint || targetWaypointIndex >= upcomingWaypoints.length - 1) return;
@@ -470,16 +496,7 @@ export default function LiveRideScreen() {
     }
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude, targetWaypointIndex, upcomingWaypoints.length]);
 
-  const distanceCoveredMeters = useMemo(() => {
-    if (trailCoordinates.length < 2) return 0;
-    let sum = 0;
-    for (let i = 1; i < trailCoordinates.length; i++) {
-      const prev = trailCoordinates[i - 1];
-      const curr = trailCoordinates[i];
-      sum += distanceMeters({ lat: prev[1], lng: prev[0] }, { lat: curr[1], lng: curr[0] });
-    }
-    return Math.round(sum);
-  }, [trailCoordinates]);
+  const distanceCoveredMeters = Math.round(trail.distanceMeters);
 
   const distanceToNextStopMeters = useMemo(() => {
     if (!position || !nextWaypoint) return null;
@@ -640,7 +657,7 @@ export default function LiveRideScreen() {
       if (error) throw error;
       setRide(data as Ride);
       if (status === 'completed') {
-        await stopBackgroundLocationUpdates();
+        await stopBackgroundLocationUpdates(id);
         await sync.flushQueue();
       }
     } catch (e) {

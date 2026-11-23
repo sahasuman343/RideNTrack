@@ -43,6 +43,8 @@ Do not introduce a separate FastAPI service, Redis, Kafka or microservices witho
 - Membership is checked in the database, not trusted from client UI.
 - Public discovery never exposes live GPS, private contact details or private trip metadata.
 - Leaving/completing a trip stops location publication.
+- Closing the live-ride screen does not stop sharing; the app shows a persistent "Sharing your location" bar with a Stop action until sharing ends.
+- Only the ride leader broadcasts rider-behind alerts; a lagging rider sees a local notice.
 - Stale positions are visibly stale; never present cached coordinates as live.
 - Users can stop sharing and delete their trip data.
 

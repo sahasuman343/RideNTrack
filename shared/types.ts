@@ -377,6 +377,7 @@ export * from './gpx';
 export * from './expenses';
 export * from './stats';
 export * from './safety';
+export * from './trail';
 
 
 

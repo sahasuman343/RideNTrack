@@ -17,7 +17,15 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "@rnmapbox/maps"
+      "@rnmapbox/maps",
+      [
+        "expo-notifications",
+        {
+          "color": "#FF6B00",
+          "defaultChannel": "ride-alerts",
+          "sounds": ["./assets/sounds/alert_chime.wav"]
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,

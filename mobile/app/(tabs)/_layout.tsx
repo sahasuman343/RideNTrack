@@ -1,9 +1,11 @@
 import { Redirect } from 'expo-router';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Tabs } from 'expo-router';
+import { BottomTabBar } from 'expo-router/tabs';
 import { Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRideTheme } from '../../src/theme';
+import { ActiveRideBanner } from '../../src/components/ActiveRideBanner';
 
 export default function TabsLayout() {
   const { session, loading } = useAuth();
@@ -14,6 +16,12 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      tabBar={props => (
+        <>
+          <ActiveRideBanner />
+          <BottomTabBar {...props} />
+        </>
+      )}
       screenOptions={{
         tabBarStyle: {
           backgroundColor: theme.surface,

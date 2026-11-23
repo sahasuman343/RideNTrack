@@ -41,7 +41,10 @@ BEGIN
     'public.add_trip_expense(uuid,text,numeric,text,uuid[],text)'::regprocedure,
     'public.delete_trip_expense(uuid)'::regprocedure,
     'public.get_trip_expenses(uuid)'::regprocedure,
-    'public.get_trip_expense_summary(uuid)'::regprocedure
+    'public.get_trip_expense_summary(uuid)'::regprocedure,
+    'public.get_my_ride_trail(uuid,integer)'::regprocedure,
+    'public.register_push_token(text,text)'::regprocedure,
+    'public.unregister_push_token(text)'::regprocedure
   ] LOOP
     IF has_function_privilege('anon',rpc,'EXECUTE') THEN
       RAISE EXCEPTION 'anonymous RPC access: %',rpc;
@@ -1298,4 +1301,68 @@ BEGIN
   PERFORM public.delete_trip(v_trip_id);
 END $$;
 
+RESET ROLE;
+
+-- Whole-ride trail and device push tokens (028)
+SET ROLE authenticated;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+INSERT INTO public.rides (id,name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
+VALUES ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','Trail','TRAIL1',auth.uid(),'A','B','[0,0]','[0.01,0]','active');
+SELECT public.bulk_insert_location_updates(jsonb_build_array(
+  jsonb_build_object('client_id','d1111111-1111-4111-8111-111111111111','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0.002,'timestamp','2026-10-01T00:02:00Z'),
+  jsonb_build_object('client_id','d2222222-2222-4222-8222-222222222222','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0,'timestamp','2026-10-01T00:00:00Z'),
+  jsonb_build_object('client_id','d3333333-3333-4333-8333-333333333333','ride_id','dddddddd-dddd-4ddd-8ddd-dddddddddddd','user_id',auth.uid(),'lat',0,'lng',0.001,'timestamp','2026-10-01T00:01:00Z')));
+DO $$
+DECLARE trail jsonb;
+BEGIN
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  -- Ordered by time, not insert order: 0 -> 0.001 -> 0.002 degrees of longitude.
+  IF (trail->>'distance_meters')::numeric NOT BETWEEN 222 AND 223 THEN
+    RAISE EXCEPTION 'trail distance must cover every ordered breadcrumb: %', trail;
+  END IF;
+  IF jsonb_array_length(trail->'coordinates') != 3 OR trail->'coordinates'->2 != '[0.002, 0]'::jsonb THEN
+    RAISE EXCEPTION 'trail coordinates are not time ordered: %', trail;
+  END IF;
+  IF (trail->>'last_timestamp')::timestamptz != '2026-10-01T00:02:00Z'::timestamptz THEN
+    RAISE EXCEPTION 'trail last timestamp wrong: %', trail;
+  END IF;
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 2);
+  IF jsonb_array_length(trail->'coordinates') != 2 OR trail->'coordinates'->1 != '[0.002, 0]'::jsonb
+     OR (trail->>'distance_meters')::numeric NOT BETWEEN 222 AND 223 THEN
+    RAISE EXCEPTION 'thinned trail must keep the latest point and full distance: %', trail;
+  END IF;
+
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  IF (SELECT count(*) FROM public.push_tokens) != 1 THEN RAISE EXCEPTION 'push token not registered once'; END IF;
+  BEGIN
+    PERFORM public.register_push_token('not-a-token', 'android');
+    RAISE EXCEPTION 'malformed push token accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.push_tokens (token,user_id,platform) VALUES ('ExponentPushToken[forged]','22222222-2222-4222-8222-222222222222','android');
+    RAISE EXCEPTION 'direct push token insert accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+SET request.jwt.claim.sub = '33333333-3333-4333-8333-333333333333';
+DO $$
+DECLARE trail jsonb;
+BEGIN
+  trail := public.get_my_ride_trail('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  IF (trail->>'distance_meters')::numeric != 0 OR jsonb_array_length(trail->'coordinates') != 0 THEN
+    RAISE EXCEPTION 'trail leaked another rider''s breadcrumbs: %', trail;
+  END IF;
+  IF (SELECT count(*) FROM public.push_tokens) != 0 THEN RAISE EXCEPTION 'push tokens readable by another user'; END IF;
+  PERFORM public.unregister_push_token('ExponentPushToken[device-1]');
+  -- Signing in on the same device moves the token to the new account.
+  PERFORM public.register_push_token('ExponentPushToken[device-1]', 'android');
+  IF (SELECT count(*) FROM public.push_tokens WHERE user_id = auth.uid()) != 1 THEN RAISE EXCEPTION 'device token not reassigned'; END IF;
+END $$;
+SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.push_tokens) != 0 THEN RAISE EXCEPTION 'previous account still owns reassigned token'; END IF;
+  PERFORM public.delete_trip('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+END $$;
 RESET ROLE;
