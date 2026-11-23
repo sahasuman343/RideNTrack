@@ -51,7 +51,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
-import { useRideTheme, RidePalette, typography } from '../../src/theme';
+import { useRideTheme, RidePalette, typography, elevation, radius } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
 import {
@@ -939,7 +939,7 @@ export default function LiveRideScreen() {
         <Mapbox.MapView
           key={mapRetry}
           style={StyleSheet.absoluteFill}
-          styleURL={theme ? (theme.text === '#F2F0E8' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12') : 'mapbox://styles/mapbox/outdoors-v12'}
+          styleURL={theme?.scheme === 'dark' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
           onDidFinishLoadingMap={() => {
             setMapReady(true);
             setMapError(false);
@@ -1166,11 +1166,11 @@ export default function LiveRideScreen() {
               acknowledgedAlertIds.includes(newest.id) ? (
                 <View style={s.acknowledgedBadge}>
                   <Icon name="checkmark" size="sm" color={theme.green} />
-                      <Text style={s.acknowledgedText}>Acknowledged</Text>
+                  <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
                 </View>
               ) : (
                 <TouchableOpacity style={s.floatingAlertActionBtn} onPress={() => void acknowledgeAnnouncement(newest.id)}>
-                  <Text style={s.floatingAlertActionText}>Acknowledge</Text>
+                  <Text style={s.floatingAlertActionText}>👍 Acknowledge</Text>
                 </TouchableOpacity>
               )
             )}
@@ -1216,7 +1216,7 @@ export default function LiveRideScreen() {
       {/* Regroup Banner Toast */}
       {arrivingRegroupPoint && (
         <View style={[s.regroupBanner, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text numberOfLines={1} style={s.regroupBannerText}>Near regroup: {arrivingRegroupPoint.name}</Text>
+          <Text numberOfLines={1} style={s.regroupBannerText}>Near Regroup: {arrivingRegroupPoint.name}</Text>
           <TouchableOpacity style={s.confirmRegroupButton} disabled={busy} onPress={() => void confirmArrival(arrivingRegroupPoint.id)}>
             <Text style={s.confirmRegroupText}>Confirm arrival</Text>
           </TouchableOpacity>
@@ -1226,14 +1226,14 @@ export default function LiveRideScreen() {
       {/* Route Deviation Alert */}
       {gps.state === 'fresh' && routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
         <View style={[s.deviationWarning, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text style={s.deviationWarningText}>Route deviation: ~{Math.round(routeDeviation)} m from planned route</Text>
+          <Text style={s.deviationWarningText}>Route Deviation: ~{Math.round(routeDeviation)} m from planned route</Text>
         </View>
       )}
 
       {/* Waypoint Arrival Toast */}
       {lastArrivedWaypoint && (
         <View style={[s.arrivalToast, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text style={s.arrivalToastText}>Arrived at {lastArrivedWaypoint}. Next stop loaded.</Text>
+          <Text style={s.arrivalToastText}>Arrived at {lastArrivedWaypoint}! Next stop loaded.</Text>
         </View>
       )}
 
@@ -2083,10 +2083,10 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 12,
       paddingVertical: 7,
-      borderRadius: 20,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 30,
@@ -2150,26 +2150,27 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      borderRadius: 12,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 25,
       maxWidth: '55%',
+      ...elevation('floating', c),
     },
     apexPinTitle: { color: c.text, fontSize: 12, fontWeight: '800' },
     apexPinSub: { color: c.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
 
     controls: { position: 'absolute', right: 14, flexDirection: 'row', gap: 8, zIndex: 25 },
     control: {
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 14,
       minHeight: 40,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 20,
+      borderRadius: radius.sm,
       borderWidth: 1,
       borderColor: c.border,
     },
@@ -2183,16 +2184,17 @@ const makeStyles = (c: RidePalette) =>
       left: 14,
       right: 14,
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: radius.lg,
       padding: 14,
       borderWidth: 1.5,
       borderColor: c.accent,
       zIndex: 50,
+      ...elevation('overlay', c),
     },
-    floatingAlertEmergency: { backgroundColor: '#FEF2F2', borderColor: c.danger, borderWidth: 2 },
-    floatingAlertAnnouncement: { backgroundColor: '#FFF7ED', borderColor: '#F97316' },
-    floatingAlertFuel: { backgroundColor: '#FFFBEB', borderColor: '#F59E0B' },
-    floatingAlertBreak: { backgroundColor: '#FEF3C7', borderColor: '#D97706' },
+    floatingAlertEmergency: { backgroundColor: c.dangerSoft, borderColor: c.danger, borderWidth: 2 },
+    floatingAlertAnnouncement: { backgroundColor: c.accentSoft, borderColor: c.accent },
+    floatingAlertFuel: { backgroundColor: c.warningSoft, borderColor: c.warning },
+    floatingAlertBreak: { backgroundColor: c.warningSoft, borderColor: c.warning },
     floatingAlertHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
     floatingAlertTitle: { color: c.text, fontSize: 14, fontWeight: '800' },
     floatingAlertDismiss: { padding: 4, marginLeft: 8 },
@@ -2261,12 +2263,13 @@ const makeStyles = (c: RidePalette) =>
       left: 0,
       right: 0,
       backgroundColor: c.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
       paddingHorizontal: 16,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 20,
+      ...elevation('sheet', c),
     },
     sheetExpanded: { maxHeight: '75%' },
     sheetHeader: { paddingTop: 8, paddingBottom: 6 },
@@ -2336,7 +2339,7 @@ const makeStyles = (c: RidePalette) =>
     formationItem: { alignItems: 'center', minWidth: 68, backgroundColor: c.surface, borderRadius: 8, padding: 6, borderWidth: 1, borderColor: c.border },
     formationBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 4 },
     leaderBadge: { backgroundColor: c.accentSoft },
-    tailBadge: { backgroundColor: '#FEF3C7' },
+    tailBadge: { backgroundColor: c.warningSoft },
     memberBadge: { backgroundColor: c.surfaceRaised },
     formationBadgeText: { color: c.text, fontSize: 9, fontWeight: '800' },
     formationName: { color: c.text, fontSize: 11, fontWeight: '700', maxWidth: 70 },

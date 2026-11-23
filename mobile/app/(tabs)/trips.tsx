@@ -198,15 +198,15 @@ export default function TripsScreen() {
   function getStatusColor(status: string) {
     switch (status) {
       case 'active':
-        return '#4CAF50';
+        return theme.green;
       case 'planned':
-        return '#FF9800';
+        return theme.warning;
       case 'completed':
-        return '#9E9E9E';
+        return theme.textMuted;
       case 'archived':
-        return '#607D8B';
+        return theme.scheme === 'dark' ? theme.subtle : '#607D8B';
       default:
-        return '#666';
+        return theme.textMuted;
     }
   }
 

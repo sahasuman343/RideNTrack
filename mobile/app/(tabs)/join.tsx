@@ -570,8 +570,8 @@ const makeStyles = (c: RidePalette) =>
     viewfinderBox: {
       width: '100%',
       aspectRatio: 4 / 3,
-      borderRadius: 18,
-      backgroundColor: '#0c0e11',
+      borderRadius: radius.lg,
+      backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',

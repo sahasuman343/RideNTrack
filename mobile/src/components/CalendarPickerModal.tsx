@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { useRideTheme, RidePalette } from '../theme';
+import { Icon } from './ui/Icon';
 
 export interface CalendarPickerModalProps {
   visible: boolean;
@@ -222,7 +223,7 @@ export default function CalendarPickerModal({
               <Text style={styles.title}>{title}</Text>
             </View>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close calendar">
-              <Text style={styles.closeText}>✕</Text>
+              <Icon name="close" size="md" color={theme.textMuted} />
             </TouchableOpacity>
           </View>
 
@@ -308,17 +309,20 @@ export default function CalendarPickerModal({
           <View style={styles.summaryBar}>
             {selStart ? (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryDates}>
-                  🗓️ {formatDateNice(selStart)}
-                  {selEnd && selEnd !== selStart ? ` → ${formatDateNice(selEnd)}` : ''}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon name="calendar-outline" size="xs" color={theme.textMuted} />
+                  <Text style={styles.summaryDates}>
+                    {formatDateNice(selStart)}
+                    {selEnd && selEnd !== selStart ? ` → ${formatDateNice(selEnd)}` : ''}
+                  </Text>
+                </View>
                 <Text style={styles.summaryBadge}>
                   {daysCount} {daysCount === 1 ? 'Day' : 'Days'}
                 </Text>
               </View>
             ) : (
               <Text style={styles.summaryHint}>
-                👉 Tap a start date, then tap an end date (or 1 tap for single-day)
+                Tap a start date, then tap an end date (or 1 tap for single-day)
               </Text>
             )}
           </View>
@@ -333,7 +337,7 @@ export default function CalendarPickerModal({
               onPress={handleConfirm}
               disabled={!selStart}
             >
-              <Text style={styles.confirmBtnText}>Apply Dates ✓</Text>
+              <Text style={styles.confirmBtnText}>Apply Dates</Text>
             </TouchableOpacity>
           </View>
         </View>

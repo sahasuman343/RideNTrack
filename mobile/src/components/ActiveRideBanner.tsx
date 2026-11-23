@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
 import { useRideTheme } from '../theme';
+import { Icon } from './ui/Icon';
 import {
   type ActiveTracking,
   getActiveTracking,
@@ -52,7 +53,10 @@ export function ActiveRideBanner() {
         accessibilityRole="button"
         accessibilityLabel="Location sharing is on for your active ride. Open live ride."
       >
-        <Text style={[styles.text, { color: theme.text }]} numberOfLines={1}>📍 Sharing your location · Open live ride</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          <Icon name="location-outline" size="sm" color={theme.accent} />
+          <Text style={[styles.text, { color: theme.text }]} numberOfLines={1}>Sharing your location · Open live ride</Text>
+        </View>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={confirmStop}

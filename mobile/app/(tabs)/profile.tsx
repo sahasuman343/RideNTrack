@@ -306,6 +306,9 @@ export default function ProfileScreen() {
                   </Text>
                 </View>
               )}
+              <View style={styles.verifiedCheckBadge}>
+                <Icon name="checkmark" size="xs" color={theme.onAccent} />
+              </View>
             </View>
 
             <View style={styles.riderMetaCol}>
@@ -862,6 +865,19 @@ const makeStyles = (c: RidePalette) =>
       fontSize: 24,
       fontWeight: '900',
     },
+    verifiedCheckBadge: {
+      position: 'absolute',
+      bottom: -2,
+      right: -2,
+      width: 20,
+      height: 20,
+      borderRadius: radius.round,
+      backgroundColor: c.green,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: c.surface,
+    },
     riderMetaCol: {
       flex: 1,
       gap: 2,
@@ -1022,8 +1038,7 @@ const makeStyles = (c: RidePalette) =>
       right: 0,
       top: 0,
       bottom: 0,
-      backgroundColor: '#0c0e11',
-      opacity: 0.6,
+      backgroundColor: c.scrim,
     },
     primarySteedBadge: {
       alignSelf: 'flex-start',
@@ -1053,7 +1068,7 @@ const makeStyles = (c: RidePalette) =>
     },
     steedCategoryText: {
       fontSize: 11,
-      color: '#cbd5e1',
+      color: c.textMuted,
       fontWeight: '600',
       marginTop: 2,
     },

@@ -614,7 +614,7 @@ export default function RouteEditorScreen() {
           {Mapbox && routeGeometry ? (
             <Mapbox.MapView
               style={styles.map}
-              styleURL={theme.background === '#14221D' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
+              styleURL={theme.scheme === 'dark' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
               logoEnabled={false}
               attributionEnabled={true}
             >

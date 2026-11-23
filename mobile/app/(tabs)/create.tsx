@@ -1170,6 +1170,22 @@ export default function CreateRideScreen() {
                   thumbColor="#FFFFFF"
                 />
               </View>
+              <View style={styles.calibrationDivider} />
+              <View style={styles.offlineCacheRow}>
+                <View style={styles.offlineCacheLeft}>
+                  <Icon name="cloud-download-outline" size="md" color={theme.textMuted} />
+                  <View>
+                    <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
+                    <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.syncBtn}
+                  onPress={() => Alert.alert('Offline Pack', 'Offline vector pack download is not supported in this build. Dynamic online routing will be used.')}
+                >
+                  <Text style={styles.syncBtnText}>SYNC</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
@@ -1196,7 +1212,7 @@ export default function CreateRideScreen() {
               </View>
 
               <View style={styles.telemetrySummaryCard}>
-                <Text style={styles.telemetrySummaryLabel}>RIDE DAYS</Text>
+                <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
                 <View style={styles.telemetryValueRow}>
                   <Text style={styles.telemetryValueNum}>{days.length > 0 ? days.length : '—'}</Text>
                   <Text style={styles.telemetryValueUnitMuted}>{days.length === 1 ? 'DAY' : days.length > 1 ? 'DAYS' : ''}</Text>
@@ -1205,6 +1221,19 @@ export default function CreateRideScreen() {
                   <Text style={styles.apexPassText} numberOfLines={1}>
                     {plannedStopCount} planned {plannedStopCount === 1 ? 'stop' : 'stops'}
                   </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Ascent Profile Card */}
+            <View style={styles.ascentProfileCard}>
+              <View style={styles.ascentHeader}>
+                <View style={styles.ascentTitleRow}>
+                  <Icon name="trending-up-outline" size="sm" color={theme.accent} />
+                  <Text style={styles.ascentTitleText}>Ascent Profile</Text>
+                </View>
+                <View style={styles.ascentNetClimbBadge}>
+                  <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
                 </View>
               </View>
             </View>
@@ -1538,6 +1567,40 @@ const makeStyles = (c: RidePalette) =>
       padding: 12,
       justifyContent: 'space-between',
     },
+    ascentProfileCard: {
+      backgroundColor: c.surface,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 12,
+      gap: 8,
+    },
+    ascentHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    ascentTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    ascentTitleText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: c.text,
+    },
+    ascentNetClimbBadge: {
+      backgroundColor: c.accentSoft,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: radius.xs,
+    },
+    ascentNetClimbText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: c.accent,
+    },
     telemetrySummaryLabel: {
       fontSize: 10,
       fontWeight: '800',
@@ -1616,6 +1679,41 @@ const makeStyles = (c: RidePalette) =>
     calibrationDivider: {
       height: 1,
       backgroundColor: c.border,
+    },
+    offlineCacheRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingTop: 4,
+    },
+    offlineCacheLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flex: 1,
+    },
+    offlineCacheTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.text,
+    },
+    offlineCacheSub: {
+      fontSize: 10,
+      color: c.green,
+      marginTop: 2,
+    },
+    syncBtn: {
+      backgroundColor: c.surfaceRaised,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: radius.sm,
+    },
+    syncBtnText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: c.text,
     },
     stickyFooter: {
       position: 'absolute',
@@ -1853,7 +1951,7 @@ const makeStyles = (c: RidePalette) =>
     },
     suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: c.border },
     suggestionTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
-    suggestionAddress: { color: '#aab6ca', fontSize: 11, marginTop: 3 },
+    suggestionAddress: { color: c.textMuted, fontSize: 11, marginTop: 3 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
     chip: { borderRadius: radius.sm, borderWidth: 1, borderColor: c.border, paddingHorizontal: 11, paddingVertical: 8 },
     chipActive: { backgroundColor: 'rgba(255, 122, 26, 0.15)', borderColor: c.accent },

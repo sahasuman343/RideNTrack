@@ -2665,8 +2665,8 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   sectionSubtitle: { color: c.muted, fontSize: 12, marginTop: 2 },
   counterBadge: { backgroundColor: c.surfaceRaised, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   counterBadgeText: { color: c.muted, fontSize: 10, fontWeight: '800' },
-  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B98122', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
-  greenPulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.green },
+  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.greenSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.xs },
+  greenPulseDot: { width: 6, height: 6, borderRadius: radius.round, backgroundColor: c.green },
   activePillText: { color: c.green, fontSize: 10, fontWeight: '800' },
 
 
@@ -2695,7 +2695,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   leaderPillText: { color: c.accent, fontSize: 9, fontWeight: '800' },
   sweepPill: { backgroundColor: c.surface, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
   sweepPillText: { color: c.tertiary, fontSize: 9, fontWeight: '800' },
-  alertPill: { backgroundColor: '#EF444422', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
+  alertPill: { backgroundColor: c.dangerSoft, paddingHorizontal: 5, paddingVertical: 1, borderRadius: radius.xs },
   alertPillText: { color: c.danger, fontSize: 9, fontWeight: '800' },
   riderBikeText: { color: c.muted, fontSize: 11, marginTop: 2 },
   riderRowRight: { alignItems: 'flex-end', gap: 4 },
@@ -2748,7 +2748,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   advisoryTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 2 },
   advisoryDesc: { color: c.muted, fontSize: 11, lineHeight: 16 },
   advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
-  advisoryCaution: { backgroundColor: '#FEF9C3', borderColor: '#CA8A04' },
+  advisoryCaution: { backgroundColor: c.warningSoft, borderColor: c.warning },
   advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
 
   statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
