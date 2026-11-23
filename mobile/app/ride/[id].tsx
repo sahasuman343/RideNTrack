@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   Modal,
   ActivityIndicator,
   Alert as Dialog,
@@ -33,6 +32,7 @@ import {
   buildGoogleMapsNavigationUrl,
   getRiderLiveStatus,
   type RiderLiveStatus,
+  type RideIceContact,
   calculatePackFormation,
   type PackRiderProgress,
   calculateLiveRideStats,
@@ -45,16 +45,12 @@ import {
   NATIONAL_EMERGENCY_HELPLINES,
   SEEDED_BREAKDOWN_DIRECTORY,
   type VerifiedBreakdownService,
-  type RideTrail,
-  type TrailHistory,
-  EMPTY_TRAIL,
-  appendTrailPoint,
-  mergeTrailHistory,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { useRideTrail } from '../../src/hooks/useRideTrail';
 import { useRideTheme, RidePalette, typography } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
@@ -67,6 +63,7 @@ import {
 import { playAlertSound } from '../../src/services/alertSound';
 import { registerPushToken } from '../../src/services/pushNotifications';
 import { HoldToConfirmButton, LiveDot } from '../../src/components/ui';
+import { RiderRoster } from '../../src/components/ride/RiderRoster';
 
 // Graceful keep-awake in ride mode
 let useKeepAwake: () => void = () => {};
@@ -118,6 +115,7 @@ export default function LiveRideScreen() {
   const sync = useOfflineSync();
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
   const [position, setPosition] = useState<LocationUpdate | null>(null);
+  const { geoJson: actualTrailGeoJson, distanceMeters: distanceCoveredMeters } = useRideTrail(id, userId, position);
   const [tracking, setTracking] = useState<TrackerMode>('waiting');
   const gpsSession = useRef(0);
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -168,6 +166,13 @@ export default function LiveRideScreen() {
       paddingRight: Math.min(45, maxHoriz),
     };
   }, [insets.top, sheetHeight, windowHeight, windowWidth, active]);
+  const focusRider = useCallback((point: LocationUpdate) => {
+    setFollow(false);
+    if (!Number.isFinite(point.lng) || !Number.isFinite(point.lat)) return;
+    try {
+      camera.current?.setCamera({ centerCoordinate: [point.lng, point.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 });
+    } catch { /* ignore */ }
+  }, [cameraPadding]);
 
   const lastCameraPosition = useRef<{ lat: number; lng: number } | null>(null);
   const [modal, setModal] = useState(false);
@@ -177,7 +182,6 @@ export default function LiveRideScreen() {
   const [mapError, setMapError] = useState(false);
   const [mapRetry, setMapRetry] = useState(0);
   const [route, setRoute] = useState<Ride['route_geometry']>();
-  const [trail, setTrail] = useState<RideTrail>(EMPTY_TRAIL);
   const [routeDeviation, setRouteDeviation] = useState<number | null>(null);
   const [lastArrivedWaypoint, setLastArrivedWaypoint] = useState<string | null>(null);
   const [upcomingWaypoints, setUpcomingWaypoints] = useState<Array<{ name: string; latitude: number; longitude: number; provider_place_id?: string | null; sequence: number }>>([]);
@@ -194,6 +198,7 @@ export default function LiveRideScreen() {
   const [mechanicalDetails, setMechanicalDetails] = useState('');
   const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
   const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
+  const [iceByRider, setIceByRider] = useState<Record<string, RideIceContact>>({});
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
   const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
   const [now, setNow] = useState(() => Date.now());
@@ -260,6 +265,17 @@ export default function LiveRideScreen() {
     if (!active || !userId) return;
     void registerPushToken(userId, { prompt: true }).catch(e => console.warn('Push registration failed:', e));
   }, [active, userId]);
+
+  useEffect(() => {
+    if (!id || !active || !userId) { setIceByRider({}); return; }
+    let cancelled = false;
+    void supabase.rpc('get_ride_ice_contacts', { p_ride_id: id }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setMessage(error.message); return; }
+      setIceByRider(Object.fromEntries(((data || []) as RideIceContact[]).map(contact => [contact.user_id, contact])));
+    });
+    return () => { cancelled = true; };
+  }, [id, active, userId]);
 
   // Reserve the cooldown synchronously and keep it outside the component so
   // reopening the ride screen cannot re-send the same safety alert.
@@ -453,38 +469,6 @@ export default function LiveRideScreen() {
   }, [position?.lat, position?.lng, regroupPoints]);
 
   useEffect(() => {
-    if (!id || !userId) return;
-    let cancelled = false;
-    setTrail(EMPTY_TRAIL);
-    // Server computes whole-ride distance and a thinned trail; fetching raw
-    // rows here would load only part of a long ride.
-    void supabase.rpc('get_my_ride_trail', { p_ride_id: id }).then(({ data, error }) => {
-      if (cancelled || error || !data) return;
-      setTrail(live => mergeTrailHistory(data as TrailHistory, live));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, userId]);
-
-  useEffect(() => {
-    if (!position || !Number.isFinite(position.lng) || !Number.isFinite(position.lat)) return;
-    setTrail(prev => appendTrailPoint(prev, position));
-  }, [position]);
-
-  const actualTrailGeoJson = useMemo(() => {
-    if (trail.coords.length < 2) return null;
-    return {
-      type: 'Feature' as const,
-      geometry: {
-        type: 'LineString' as const,
-        coordinates: trail.coords,
-      },
-      properties: {},
-    };
-  }, [trail.coords]);
-
-  useEffect(() => {
     if (!position || !nextWaypoint || targetWaypointIndex >= upcomingWaypoints.length - 1) return;
     const distance = distanceMeters(position, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude });
     if (distance < 250) {
@@ -495,8 +479,6 @@ export default function LiveRideScreen() {
       return () => clearTimeout(timer);
     }
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude, targetWaypointIndex, upcomingWaypoints.length]);
-
-  const distanceCoveredMeters = Math.round(trail.distanceMeters);
 
   const distanceToNextStopMeters = useMemo(() => {
     if (!position || !nextWaypoint) return null;
@@ -1548,93 +1530,13 @@ export default function LiveRideScreen() {
               </View>
             )}
 
-            <FlatList
-              data={points}
-              style={s.riders}
-              scrollEnabled={true}
-              keyExtractor={item => item.user_id}
-              initialNumToRender={8}
-              maxToRenderPerBatch={8}
-              windowSize={5}
-              updateCellsBatchingPeriod={50}
-              removeClippedSubviews
-              ListEmptyComponent={<Text style={s.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
-              renderItem={({ item: p }) => {
-                const riderStatus = getRiderLiveStatus(p, ride.status, now);
-                const isDisconnected = riderStatus.status === 'disconnected';
-                return (
-                  <TouchableOpacity
-                    style={s.rider}
-                    onPress={() => {
-                      setFollow(false);
-                      if (typeof p.lng === 'number' && typeof p.lat === 'number' && Number.isFinite(p.lng) && Number.isFinite(p.lat)) {
-                        try {
-                          camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], zoomLevel: 15, padding: cameraPadding, animationDuration: 700 });
-                        } catch {
-                          /* ignore */
-                        }
-                      }
-                    }}
-                  >
-                    <View
-                      style={[
-                        s.avatar,
-                        riderStatus.status === 'riding'
-                          ? s.avatarRiding
-                          : riderStatus.status === 'stopped'
-                          ? s.avatarStopped
-                          : riderStatus.status === 'completed'
-                          ? s.avatarCompleted
-                          : s.stale,
-                      ]}
-                    >
-                      <Text style={s.buttonText}>{(p.display_name?.[0] || 'R').toUpperCase()}</Text>
-                    </View>
-                    <View style={s.grow}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={s.text}>{p.display_name}{p.user_id === userId ? ' · you' : ''}</Text>
-                        <View
-                          style={[
-                            s.statusPill,
-                            riderStatus.status === 'riding'
-                              ? s.statusPillRiding
-                              : riderStatus.status === 'stopped'
-                              ? s.statusPillStopped
-                              : riderStatus.status === 'completed'
-                              ? s.statusPillCompleted
-                              : s.statusPillDisconnected,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              s.statusPillText,
-                              riderStatus.status === 'riding'
-                                ? s.statusPillTextRiding
-                                : riderStatus.status === 'stopped'
-                                ? s.statusPillTextStopped
-                                : riderStatus.status === 'completed'
-                                ? s.statusPillTextCompleted
-                                : s.statusPillTextDisconnected,
-                            ]}
-                          >
-                            {riderStatus.label}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={s.muted}>
-                        {isDisconnected
-                          ? riderStatus.lastSeenText || 'Last known position'
-                          : riderStatus.status === 'completed'
-                          ? 'Ride completed'
-                          : 'Live location'}
-                      </Text>
-                    </View>
-                    <Text style={s.text}>
-                      {riderStatus.status === 'riding' ? Math.round((p.speed || 0) * 3.6) + ' km/h' : riderStatus.status === 'stopped' ? '0 km/h' : '—'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
+            <RiderRoster
+              points={points}
+              userId={userId}
+              rideStatus={ride.status}
+              now={now}
+              iceByRider={iceByRider}
+              onFocusRider={focusRider}
             />
 
             {(pending > 0 || sync.syncError) && (
@@ -2440,24 +2342,6 @@ const makeStyles = (c: RidePalette) =>
     secondary: { backgroundColor: c.surfaceRaised, borderRadius: 15, minHeight: 48, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
     buttonText: { color: c.text, fontSize: 14, fontWeight: '700' },
 
-    riders: { maxHeight: 200, marginVertical: 8 },
-    rider: { flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderColor: c.border },
-    avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.green, alignItems: 'center', justifyContent: 'center' },
-    avatarRiding: { backgroundColor: c.green },
-    avatarStopped: { backgroundColor: '#EAB308' },
-    avatarCompleted: { backgroundColor: c.accent },
-    stale: { backgroundColor: c.subtle },
-    grow: { flex: 1 },
-    statusPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-    statusPillText: { fontSize: 10, fontWeight: '700' },
-    statusPillRiding: { backgroundColor: c.greenSoft },
-    statusPillTextRiding: { color: c.green, fontSize: 10, fontWeight: '700' },
-    statusPillStopped: { backgroundColor: '#FEF9C3' },
-    statusPillTextStopped: { color: '#854D0E', fontSize: 10, fontWeight: '700' },
-    statusPillDisconnected: { backgroundColor: c.surfaceRaised },
-    statusPillTextDisconnected: { color: c.muted, fontSize: 10, fontWeight: '700' },
-    statusPillCompleted: { backgroundColor: c.accentSoft },
-    statusPillTextCompleted: { color: c.accent, fontSize: 10, fontWeight: '700' },
 
     sync: { paddingVertical: 10, alignItems: 'center' },
 

@@ -61,3 +61,12 @@ Run the same 3–4 hour ride scenario on an entry-level device and a 6–8 GB re
 - Treat the optimization as accepted only if tracking reliability is unchanged and the low-end device shows lower CPU/network work without sustained memory growth or UI stalls.
 
 Do not use emulator-only results as evidence of low-end device compatibility. Background location and vendor battery-management behavior must be checked on physical hardware.
+
+## Error reporting
+
+Set `EXPO_PUBLIC_SENTRY_DSN` to enable Sentry. The DSN is a public endpoint and is
+not an auth secret; leave it blank for local builds. `sendDefaultPii` is disabled,
+and the app has a visible crash boundary that preserves local/offline storage.
+Native crashes and JavaScript exceptions are captured after an APK/AAB is built
+with the Sentry Expo config plugin. Source-map upload credentials stay in EAS/CI
+secrets and must not be added to `app.json` or a committed `.env` file.

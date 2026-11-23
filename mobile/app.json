@@ -23,9 +23,13 @@
         {
           "color": "#FF6B00",
           "defaultChannel": "ride-alerts",
-          "sounds": ["./assets/sounds/alert_chime.wav"]
+          "sounds": [
+            "./assets/sounds/alert_chime.wav"
+          ]
         }
-      ]
+      ],
+      "@sentry/react-native",
+      "expo-sqlite"
     ],
     "ios": {
       "supportsTablet": true,

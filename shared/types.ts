@@ -14,9 +14,19 @@ export interface User {
   fuel_reserve_liters?: number | null;
   motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
   blood_group?: string | null;
+  share_ice_with_ride?: boolean;
+  ice_consent_at?: string | null;
+  subscription_tier?: 'free' | 'pro_tourer';
 }
 
 export type Profile = User;
+
+export interface RideIceContact {
+  user_id: string;
+  display_name: string;
+  blood_group: string | null;
+  emergency_contact: string | null;
+}
 
 export interface Ride {
   id: string;

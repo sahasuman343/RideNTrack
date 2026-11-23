@@ -51,8 +51,8 @@ test('route validation requires ordered origin and destination with valid coordi
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,latitude:91}:p)),/coordinates/i);
   assert.match(routeTools.validateRoutePoints(points.map((p,i)=>i===1?{...p,name:' '}:p)),/name/i);
   assert.match(routeTools.validateRoutePoints([points[0],{...points[1],waypoint_type:'destination'},points[2]]),/first and last/i);
-  const tooMany=Array.from({length:201},(_,i)=>({sequence:i,waypoint_type:i===0?'origin':i===200?'destination':'stop',name:'P'+i,latitude:12,longitude:77}));
-  assert.match(routeTools.validateRoutePoints(tooMany),/200 route points/i);
+  const tooMany=Array.from({length:51},(_,i)=>({sequence:i,waypoint_type:i===0?'origin':i===50?'destination':'stop',name:'P'+i,latitude:12,longitude:77}));
+  assert.match(routeTools.validateRoutePoints(tooMany),/50 route points/i);
 });
 test('route coordinate order is longitude then latitude', () => {
   assert.deepEqual(routeTools.routeCoordinates(routeFixture()),[[77.5946,12.9716],[77.1173,13.3379],[74.3188,14.5479]]);
@@ -70,7 +70,7 @@ test('Mapbox directions response is normalized and estimates are formatted', () 
 });
 
 test('driving route joins ordered road geometry and totals across the provider boundary', async t => {
-  const points = Array.from({length:200}, (_, i) => [i - 100, 10]);
+  const points = Array.from({length:50}, (_, i) => [i - 25, 10]);
   const batches = [];
   t.mock.method(globalThis, 'fetch', async url => {
     const request = new URL(url);
@@ -83,10 +83,10 @@ test('driving route joins ordered road geometry and totals across the provider b
     return { ok:true, json:async () => ({routes:[{geometry:{type:'LineString', coordinates}, distance:12.4, duration:3.6}]}) };
   });
   const result = await routeTools.fetchDrivingRoute(points, {token:'a&b', avoidTolls:true});
-  assert.deepEqual(batches.map(b => b.length), [25,25,25,25,25,25,25,25,8]);
+  assert.deepEqual(batches.map(b => b.length), [25,25,2]);
   batches.forEach((batch, i) => assert.deepEqual(batch, points.slice(i*24, i*24+25)));
   const expected = points.flatMap(([x,y], i) => i % 24 === 0 && i < points.length - 1 ? [[x,y],[x+0.5,11]] : [[x,y]]);
-  assert.deepEqual(result, {geometry:{type:'LineString', coordinates:expected}, distance:112, duration:32});
+  assert.deepEqual(result, {geometry:{type:'LineString', coordinates:expected}, distance:37, duration:11});
 });
 
 test('preview needs no geometry and never returns a partial estimate after a failed batch', async t => {
@@ -107,7 +107,7 @@ test('preview needs no geometry and never returns a partial estimate after a fai
   assert.deepEqual(await routeTools.fetchDrivingRoute(points, options), {distance:21, duration:11});
   failLast = true;
   await assert.rejects(routeTools.fetchDrivingRoute(points, options), /no driving route/i);
-  await assert.rejects(routeTools.fetchDrivingRoute(Array(201).fill(points[0]), options), /200 route points/i);
+  await assert.rejects(routeTools.fetchDrivingRoute(Array(51).fill(points[0]), options), /50 route points/i);
   assert.equal(fetch.mock.callCount(), 5);
 });
 
@@ -635,7 +635,7 @@ test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, a
   }, /valid geographic coordinates/);
 
   let fullPoints = [...initialPoints];
-  for (let i = 0; i < 198; i++) {
+  for (let i = 0; i < 48; i++) {
     fullPoints = insertRouteStop(fullPoints, {
       waypoint_type: 'stop',
       name: `Stop ${i + 1}`,
@@ -643,7 +643,7 @@ test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, a
       longitude: 77.0,
     });
   }
-  assert.equal(fullPoints.length, 200);
+  assert.equal(fullPoints.length, 50);
   assert.equal(validateRoutePoints(fullPoints), null);
 
   assert.throws(() => {
@@ -653,7 +653,7 @@ test('insertRouteStop safely inserts waypoints, preserves contiguous sequence, a
       latitude: 12.8,
       longitude: 77.1,
     });
-  }, /up to 200 route points/);
+  }, /up to 50 route points/);
 });
 
 test('removeRouteStop and moveRouteStop manage intermediate stops without corrupting origin/destination', () => {
@@ -1560,8 +1560,7 @@ test('phase 4 & 5 safety and emergency pure functions format messages and calcul
   assert.ok(shared.NATIONAL_EMERGENCY_HELPLINES.some(h => h.number === '1033'));
 
   assert.ok(Array.isArray(shared.SEEDED_BREAKDOWN_DIRECTORY));
-  assert.ok(shared.SEEDED_BREAKDOWN_DIRECTORY.some(s => s.phone === '1033'));
-  assert.ok(shared.SEEDED_BREAKDOWN_DIRECTORY.some(s => s.name.includes('Royal Enfield')));
+  assert.deepEqual(shared.SEEDED_BREAKDOWN_DIRECTORY.map(s => s.phone), ['1033']);
 });
 
 test('phase 4 & 5 migration defines regroup closure, acknowledgements, escalation, and breakdown directory', () => {

@@ -38,7 +38,7 @@ export type DirectionsRoute = {
 };
 
 // create_trip_plan (007) and save_trip_route (014) count both endpoints.
-export const MAX_TRIP_ROUTE_POINTS = 200;
+export const MAX_TRIP_ROUTE_POINTS = 50;
 export const TRIP_ROUTE_LIMIT_MESSAGE = `A trip supports up to ${MAX_TRIP_ROUTE_POINTS} route points, including origin and destination.`;
 const MAPBOX_REQUEST_POINTS = 25;
 

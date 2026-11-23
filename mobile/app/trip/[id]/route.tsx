@@ -20,8 +20,8 @@ import {
   formatRouteDistance,
   formatRouteDuration,
   fetchDrivingRoute,
-  MAX_TRIP_ROUTE_POINTS,
-  TRIP_ROUTE_LIMIT_MESSAGE,
+  PLAN_LIMITS,
+
   routeCoordinates,
   validateRoutePoints,
   insertRouteStop,
@@ -88,7 +88,8 @@ type DayPickerConfig = {
 export default function RouteEditorScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const routePointLimit = PLAN_LIMITS[profile?.subscription_tier ?? 'free'].maxWaypointsPerTrip;
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const camera = useRef<any>(null);
@@ -266,8 +267,8 @@ export default function RouteEditorScreen() {
 
   // Open search modal to ADD a stop
   function openAddStop(type: RouteWaypointType = 'stop', targetIndex?: number) {
-    if (points.length >= MAX_TRIP_ROUTE_POINTS) {
-      Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+    if (points.length >= routePointLimit) {
+      Alert.alert('Route point limit', `Your plan supports up to ${routePointLimit} route points, including origin and destination.`);
       return;
     }
     const insertAt = targetIndex !== undefined ? targetIndex : points.length - 1;

@@ -53,3 +53,23 @@ background.
 - Permission denied: no token is stored; the rider still gets in-app alerts.
 - Push service outage: the function returns 502 and the webhook logs the failure;
   alerts remain in the database and appear in the app.
+
+## GPS retention schedule
+
+Migration 029 installs `purge_old_location_history(retention_days DEFAULT 90)`;
+the client never receives access to it. Schedule a daily HTTP request to the
+`purge-location-history` Edge Function:
+
+```sh
+supabase functions deploy purge-location-history --no-verify-jwt
+supabase secrets set LOCATION_PURGE_SECRET=<long random value> LOCATION_RETENTION_DAYS=90
+```
+
+Use the Supabase scheduled-function UI (Database > Cron, or the Edge Function
+schedule configuration) to call the function daily with
+`x-schedule-secret: <same secret>`. A 90-day default bounds stored precision;
+change `LOCATION_RETENTION_DAYS` to 7–3650 only after updating the privacy notice.
+
+The function verifies the shared secret before using the service role and reports
+how many rows were deleted. Failed calls return 500 and do not silently report
+success.

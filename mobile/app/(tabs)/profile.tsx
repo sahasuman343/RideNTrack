@@ -35,6 +35,7 @@ export default function ProfileScreen() {
   const [phone, setPhone] = useState(profile?.phone || '');
   const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
   const [bloodGroup, setBloodGroup] = useState(profile?.blood_group || '');
+  const [shareIceWithRide, setShareIceWithRide] = useState(Boolean(profile?.share_ice_with_ride));
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
@@ -158,6 +159,7 @@ export default function ProfileScreen() {
     setPhone(profile?.phone || '');
     setEmergencyContact(profile?.emergency_contact || '');
     setBloodGroup(profile?.blood_group || '');
+    setShareIceWithRide(Boolean(profile.share_ice_with_ride));
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
@@ -214,6 +216,7 @@ export default function ProfileScreen() {
       } : section === 'emergency' ? {
         emergency_contact: emergencyContact.trim() || null,
         blood_group: bloodGroup.trim().toUpperCase() || null,
+        share_ice_with_ride: shareIceWithRide,
       } : {
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
@@ -362,7 +365,7 @@ export default function ProfileScreen() {
               </Text>
             </View>
             <View style={styles.iceRight}>
-              <Text style={styles.iceLabel}>ICE: Edit emergency details</Text>
+              <Text style={styles.iceLabel}>{profile?.share_ice_with_ride ? 'ICE: shared with active ride - Edit' : 'ICE: private - Edit emergency details'}</Text>
               <Text style={styles.icePhone}>
                 {profile?.emergency_contact || 'Not recorded'}
               </Text>
@@ -646,6 +649,13 @@ export default function ProfileScreen() {
             <TextInput style={styles.input} value={emergencyContact} onChangeText={setEmergencyContact} keyboardType="phone-pad" placeholder="Emergency contact phone (+91...)" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Blood group (ICE medical)</Text>
             <TextInput style={styles.input} value={bloodGroup} onChangeText={setBloodGroup} autoCapitalize="characters" placeholder="e.g. O+, A+, B-, AB+" placeholderTextColor={theme.subtle} />
+            <View style={styles.iceConsentRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Share with active ride members</Text>
+                <Text style={styles.hint}>Only active members can view this. Turning it off removes consent immediately.</Text>
+              </View>
+              <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor="#fff" />
+            </View>
             </>}
             {section === 'bike' && <>
             <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
@@ -958,6 +968,12 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+    },
+    iceConsentRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
     },
     iceLeft: {
       flexDirection: 'row',

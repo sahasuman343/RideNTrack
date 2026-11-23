@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   canCreateMoreTrips, PLAN_LIMITS, PAYMENT_CONFIG,
-  fetchDrivingRoute, routeCoordinates, MAX_TRIP_ROUTE_POINTS, TRIP_ROUTE_LIMIT_MESSAGE,
+  fetchDrivingRoute, routeCoordinates,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -295,6 +295,8 @@ export default function CreateRideScreen() {
 
   const [loading, setLoading] = useState(false);
   const { user, profile } = useAuth();
+  const tier = profile?.subscription_tier ?? 'free';
+  const routePointLimit = PLAN_LIMITS[tier].maxWaypointsPerTrip;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
@@ -480,8 +482,8 @@ export default function CreateRideScreen() {
   const pointCount = 2 + stops.length + (meetup ? 1 : 0);
 
   function addStop(kind: WaypointKind = 'stop') {
-    if (pointCount >= MAX_TRIP_ROUTE_POINTS) {
-      Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+    if (pointCount >= routePointLimit) {
+      Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
       return;
     }
     setStops((current) => [...current, { key: String(Date.now()) + Math.random(), place: null, kind }]);
@@ -498,8 +500,8 @@ export default function CreateRideScreen() {
       return;
     }
     if (!user) return;
-    if (pointCount > MAX_TRIP_ROUTE_POINTS) {
-      Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+    if (pointCount > routePointLimit) {
+      Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
       return;
     }
     if (startDate && endDate && days.length === 0) {
@@ -518,17 +520,19 @@ export default function CreateRideScreen() {
         .from('rides')
         .select('id', { count: 'exact', head: true })
         .eq('admin_id', user.id)
-        .neq('status', 'completed');
-      if (!countError && typeof count === 'number' && !canCreateMoreTrips(count, 'free')) {
+        .in('status', ['planned', 'active']);
+      if (!countError && typeof count === 'number' && !canCreateMoreTrips(count, tier)) {
         Alert.alert(
-          '⭐️ RideNTrack Pro Tourer Limit',
-          `Free tier includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for unlimited expeditions, topographical contours, and weather radar.`,
+          tier === 'free' ? '⭐️ RideNTrack Free Plan Limit' : 'RideNTrack Plan Limit',
+          tier === 'free'
+            ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for more trips and route points.`
+            : `Your Pro Tourer plan has reached its ${PLAN_LIMITS.pro_tourer.maxActiveTrips}-trip active limit. Complete or archive an existing trip first.`,
           [
             { text: 'Manage Trips', onPress: () => router.push('/(tabs)') },
-            {
+            ...(tier === 'free' ? [{
               text: 'Upgrade to Pro',
-              onPress: () => Alert.alert('Payment Gateway', 'Razorpay checkout will launch in production build. Test mode: Plan benefits unlocked!'),
-            },
+              onPress: () => Alert.alert('Upgrade unavailable', 'Payments are not configured in this build. Your plan limits are enforced on the server.'),
+            }] : []),
           ]
         );
         return;
@@ -1056,8 +1060,8 @@ export default function CreateRideScreen() {
                 placeholder="Where riders gather before departure"
                 value={meetup}
                 onChange={place => {
-                  if (place && !meetup && pointCount >= MAX_TRIP_ROUTE_POINTS) {
-                    Alert.alert('Route point limit', TRIP_ROUTE_LIMIT_MESSAGE);
+                  if (place && !meetup && pointCount >= routePointLimit) {
+                    Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
                   } else {
                     setMeetup(place);
                   }

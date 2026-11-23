@@ -55,3 +55,19 @@ Do not introduce a separate FastAPI service, Redis, Kafka or microservices witho
 - Use transactions for aggregate writes.
 - Add regression tests for RLS, idempotency, date boundaries and offline recovery.
 - Document each feature's state model, permissions, failure modes and acceptance criteria in `docs/features/`.
+
+## Consent, plan limits and retention (migration 029)
+
+- Emergency contact and blood group remain private until the owner enables
+  **Share with active ride members** in Profile. The `get_ride_ice_contacts` RPC
+  verifies that the caller is a member of a currently active ride.
+- Free users are limited to 5 active trips and 15 route points; Pro Tourer is
+  limited to 100 active trips and 50 route points. These checks are database
+  constraint triggers, so direct Supabase clients cannot bypass them.
+- `subscription_tier` cannot be changed by an authenticated app client. It must
+  be updated by a service-role payment webhook after payment verification.
+- Location breadcrumbs are retained for 90 days by the
+  `purge-location-history` scheduled Edge Function. See the deployment section
+  in [push-notifications.md](push-notifications.md).
+- Only verified national emergency services remain in the breakdown directory;
+  merchant and regional phone numbers are not presented as verified by default.
