@@ -5,6 +5,7 @@ import {
   FlatList,
   Platform,
   RefreshControl,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -28,7 +29,7 @@ import {
   FallbackTripCover,
 } from '../../src/components/ui';
 
-export type TripsFilter = 'all' | 'live' | 'planned' | 'past' | 'community';
+export type TripsFilter = 'all' | 'live' | 'planned' | 'past' | 'archived' | 'community';
 
 export default function TripsScreen() {
   const [rides, setRides] = useState<Ride[]>([]);
@@ -39,6 +40,7 @@ export default function TripsScreen() {
   const [unavailable, setUnavailable] = useState({ rides: false, community: false, stats: false });
   const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
   const [duplicatingRideId, setDuplicatingRideId] = useState<string | null>(null);
+  const [menuRideId, setMenuRideId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<TripsFilter>('all');
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc'>('date_desc');
 
@@ -48,7 +50,8 @@ export default function TripsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const isDark = theme.background !== '#F8FAFC';
+  const styles = useMemo(() => makeStyles(theme, isDark), [theme, isDark]);
 
   useFocusEffect(
     useCallback(() => {
@@ -62,7 +65,7 @@ export default function TripsScreen() {
       const [ridesRes, analyticsRes, communityRes] = await Promise.all([
         supabase
           .from('ride_participants')
-          .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, start_date, end_date, estimated_distance_meters, created_at)')
+          .select('ride_id, rides(id, name, ride_code, origin, destination, status, admin_id, origin_coords, destination_coords, start_date, end_date, estimated_distance_meters, estimated_duration_seconds, created_at)')
           .eq('user_id', user.id)
           .eq('is_active', true)
           .order('joined_at', { ascending: false }),
@@ -94,6 +97,7 @@ export default function TripsScreen() {
   }
 
   function handleDeleteTrip(item: Ride) {
+    setMenuRideId(null);
     const isLeader = item.admin_id === user?.id;
     if (isLeader) {
       Alert.alert(
@@ -151,6 +155,7 @@ export default function TripsScreen() {
   }
 
   function handleDuplicateTrip(item: Ride) {
+    setMenuRideId(null);
     Alert.alert(
       'Duplicate Trip?',
       `Create a new planned copy of "${item.name}" with its complete route, waypoints, and itinerary?`,
@@ -181,6 +186,13 @@ export default function TripsScreen() {
     );
   }
 
+  function handleShareTrip(item: Ride) {
+    setMenuRideId(null);
+    const codeLine = item.ride_code ? `Join with code: ${item.ride_code}` : '';
+    const shareMessage = `RideNTrack: Join my motorcycle expedition "${item.name}" from ${item.origin} to ${item.destination}! ${codeLine}`.trim();
+    void Share.share({ message: shareMessage });
+  }
+
   function getStatusColor(status: string) {
     switch (status) {
       case 'active':
@@ -207,7 +219,8 @@ export default function TripsScreen() {
     let filtered = rides.filter(r => {
       if (filterTab === 'live') return r.status === 'active';
       if (filterTab === 'planned') return r.status === 'planned';
-      if (filterTab === 'past') return r.status === 'completed' || r.status === 'archived';
+      if (filterTab === 'past') return r.status === 'completed';
+      if (filterTab === 'archived') return r.status === 'archived';
       return true; // 'all'
     });
 
@@ -272,17 +285,20 @@ export default function TripsScreen() {
         </View>
       </View>
 
-      {/* Always Visible Segmented Filter */}
+      {/* Selective Frosted Glass Filter Chips */}
       <View style={styles.filterSection}>
         <SegmentedControl
           options={filterOptions}
           selectedKey={filterTab}
-          onSelect={k => setFilterTab(k as TripsFilter)}
+          onSelect={k => {
+            setFilterTab(k as TripsFilter);
+            setMenuRideId(null);
+          }}
           scrollable={true}
         />
       </View>
 
-      {/* Optional Sort Bar for Non-Community */}
+      {/* Sorting Control */}
       {filterTab !== 'community' && rides.length > 1 && (
         <View style={styles.sortRow}>
           <Text style={styles.sortLabel}>
@@ -301,12 +317,15 @@ export default function TripsScreen() {
         </View>
       )}
 
+      {/* Network / Refresh Warning */}
       {(filterTab === 'community' ? unavailable.community : unavailable.rides || unavailable.stats) && (
         <TouchableOpacity style={styles.analyticsCard} accessibilityRole="button" disabled={refreshing} onPress={() => void onRefresh()}>
           <Text style={styles.tripName}>{refreshing ? 'Refreshing…' : 'Could not refresh. Tap to retry.'}</Text>
           <Text style={styles.tripDesc}>Any displayed results are from the last successful load.</Text>
         </TouchableOpacity>
       )}
+
+      {/* Glassmorphic Summary Statistics Panel */}
       {analytics && filterTab !== 'community' && (filterTab === 'all' || filterTab === 'past' || displayedRides.length > 0) && (
         <View style={styles.analyticsCard}>
           <View style={styles.analyticsStats}>
@@ -338,17 +357,17 @@ export default function TripsScreen() {
         </View>
       )}
 
-      {/* Loading Skeletons matching exact card shape */}
+      {/* Loading Skeletons */}
       {loading ? (
         <View style={styles.skeletonContainer}>
           <Card variant="raised" style={styles.tripCard}>
-            <Skeleton height={124} borderRadius={16} style={{ marginBottom: 12 }} />
+            <Skeleton height={140} borderRadius={18} style={{ marginBottom: 12 }} />
             <Skeleton height={22} width="65%" style={{ marginBottom: 10 }} />
             <Skeleton height={14} width="100%" style={{ marginBottom: 12 }} />
             <Skeleton height={16} width="45%" />
           </Card>
           <Card variant="raised" style={styles.tripCard}>
-            <Skeleton height={124} borderRadius={16} style={{ marginBottom: 12 }} />
+            <Skeleton height={140} borderRadius={18} style={{ marginBottom: 12 }} />
             <Skeleton height={22} width="50%" style={{ marginBottom: 10 }} />
             <Skeleton height={14} width="100%" style={{ marginBottom: 12 }} />
             <Skeleton height={16} width="40%" />
@@ -379,7 +398,7 @@ export default function TripsScreen() {
               contentContainerStyle={styles.listContent}
               renderItem={({ item }) => (
                 <Card
-                  variant="raised"
+                  variant="glass"
                   style={styles.tripCard}
                   onPress={() => router.push(`/trip/${item.id}`)}
                 >
@@ -390,7 +409,7 @@ export default function TripsScreen() {
                     elevation={item.estimated_distance_meters ? `${Math.round(item.estimated_distance_meters / 1000)}km` : undefined}
                   />
                   <View style={styles.cardHeader}>
-                    <Text style={styles.tripName}>{item.name}</Text>
+                    <Text style={styles.tripName} numberOfLines={1}>{item.name}</Text>
                     <TouchableOpacity
                       style={styles.cardActionBtn}
                       accessibilityRole="button"
@@ -468,6 +487,10 @@ export default function TripsScreen() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const isLive = item.status === 'active';
+            const isCompleted = item.status === 'completed' || item.status === 'archived';
+            const isPlanned = item.status === 'planned';
+            const isMenuOpen = menuRideId === item.id;
+
             const km = item.estimated_distance_meters
               ? `${Math.round(item.estimated_distance_meters / 1000)} km`
               : null;
@@ -477,29 +500,105 @@ export default function TripsScreen() {
                 : item.start_date
               : null;
 
+            // Duration estimation
+            const durationText = item.estimated_duration_seconds
+              ? `${Math.floor(item.estimated_duration_seconds / 3600)}h ${Math.round((item.estimated_duration_seconds % 3600) / 60)}m`
+              : item.estimated_distance_meters
+              ? `~${Math.max(1, Math.round(item.estimated_distance_meters / 1000 / 60))} hrs`
+              : null;
+
             return (
               <Card
-                variant={isLive ? 'activeGlow' : 'raised'}
+                variant={isLive ? 'activeGlow' : 'glass'}
                 style={[styles.tripCard, isLive && styles.liveCard]}
-                onPress={() => router.push(`/trip/${item.id}`)}
+                onPress={() => {
+                  setMenuRideId(null);
+                  router.push(`/trip/${item.id}`);
+                }}
               >
-                {/* Fallback Cover with Overlaid Status Badge (Icon + Color) */}
-                <FallbackTripCover
-                  tripId={item.id}
-                  name={item.name}
-                  status={item.status}
-                  timeTag={dates}
-                  elevation={km}
-                />
+                {/* 1. HERO PHOTO DESIGN FOR LIVE TRIPS */}
+                {isLive ? (
+                  <View style={styles.heroSection}>
+                    <FallbackTripCover
+                      tripId={item.id}
+                      name={item.name}
+                      status={item.status}
+                      hero={true}
+                      timeTag={dates}
+                      distance={km}
+                      elevation="1,450m"
+                    />
+                    {/* Three-dot menu trigger button on Hero top-right */}
+                    <TouchableOpacity
+                      style={styles.heroMenuTrigger}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Options for ${item.name}`}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        setMenuRideId(prev => (prev === item.id ? null : item.id));
+                      }}
+                    >
+                      <Text style={styles.heroMenuIcon}>⋯</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  /* 2. MAP + SUMMARY DESIGN FOR COMPLETED & PLANNED TRIPS */
+                  <View style={styles.coverSection}>
+                    <FallbackTripCover
+                      tripId={item.id}
+                      name={item.name}
+                      status={item.status}
+                      hero={false}
+                      timeTag={dates}
+                      distance={km}
+                      elevation={isCompleted ? '+1,240m' : undefined}
+                    />
+                  </View>
+                )}
 
-                <View style={styles.cardHeader}>
-                  <Text style={styles.tripName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  <View style={styles.actionsGroup}>
+                {/* Card Title & Header Row (for Non-Hero or Secondary Header) */}
+                {!isLive && (
+                  <View style={styles.cardHeader}>
+                    <View style={styles.titleCol}>
+                      <Text style={styles.tripName} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      {isPlanned && <Text style={styles.plannedTag}>UPCOMING EXPEDITION</Text>}
+                    </View>
+                    {/* Clean Three-Dot Overflow Trigger */}
+                    <TouchableOpacity
+                      style={styles.cardMenuTrigger}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Options for ${item.name}`}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        setMenuRideId(prev => (prev === item.id ? null : item.id));
+                      }}
+                    >
+                      <Text style={styles.cardMenuIcon}>⋯</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Frosted Glass Overflow Action Menu Overlay */}
+                {isMenuOpen && (
+                  <View style={styles.overflowMenuOverlay}>
+                    {/* Edit Option */}
+                    <TouchableOpacity
+                      style={styles.menuRow}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        setMenuRideId(null);
+                        router.push(`/trip/${item.id}`);
+                      }}
+                    >
+                      <Text style={styles.menuRowIcon}>✏️</Text>
+                      <Text style={styles.menuRowText}>View / Edit Trip</Text>
+                    </TouchableOpacity>
+
                     {/* Duplicate Action */}
                     <TouchableOpacity
-                      style={styles.cardActionBtn}
+                      style={[styles.menuRow, styles.cardActionBtn]}
                       accessibilityRole="button"
                       accessibilityLabel={`Duplicate trip ${item.name}`}
                       disabled={duplicatingRideId === item.id}
@@ -511,13 +610,28 @@ export default function TripsScreen() {
                       {duplicatingRideId === item.id ? (
                         <ActivityIndicator size="small" color={theme.accent} />
                       ) : (
-                        <Text style={styles.cardActionIcon}>📋</Text>
+                        <>
+                          <Text style={styles.menuRowIcon}>📋</Text>
+                          <Text style={styles.menuRowText}>Duplicate Trip</Text>
+                        </>
                       )}
+                    </TouchableOpacity>
+
+                    {/* Share Action */}
+                    <TouchableOpacity
+                      style={styles.menuRow}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        handleShareTrip(item);
+                      }}
+                    >
+                      <Text style={styles.menuRowIcon}>📤</Text>
+                      <Text style={styles.menuRowText}>Share Route</Text>
                     </TouchableOpacity>
 
                     {/* Delete / Leave Action */}
                     <TouchableOpacity
-                      style={[styles.cardActionBtn, styles.cardDeleteBtn]}
+                      style={[styles.menuRow, styles.cardDeleteBtn]}
                       accessibilityRole="button"
                       accessibilityLabel={`Delete trip ${item.name}`}
                       disabled={deletingRideId === item.id}
@@ -529,28 +643,52 @@ export default function TripsScreen() {
                       {deletingRideId === item.id ? (
                         <ActivityIndicator size="small" color={theme.danger} />
                       ) : (
-                        <Text style={[styles.cardActionIcon, { color: theme.danger }]}>✕</Text>
+                        <>
+                          <Text style={[styles.menuRowIcon, { color: theme.danger }]}>🗑️</Text>
+                          <Text style={[styles.menuRowText, { color: theme.danger }]}>
+                            {item.admin_id === user?.id ? 'Permanently delete' : 'Leave Ride'}
+                          </Text>
+                        </>
                       )}
                     </TouchableOpacity>
                   </View>
-                </View>
+                )}
 
-                {/* Signature Route Line */}
+                {/* Signature Route Visualization */}
                 <RouteLine
                   origin={item.origin}
                   destination={item.destination}
-                  style={{ marginVertical: 10 }}
+                  style={{ marginVertical: 8 }}
                 />
 
-                {/* Footer Metadata */}
+                {/* Footer Metadata & Contextual Action */}
                 <View style={styles.cardFooter}>
                   <View style={styles.metaCol}>
                     {dates && <Text style={styles.footerDate}>🗓️ {dates}</Text>}
-                    {km && <Text style={styles.footerDistance}>📏 {km}</Text>}
+                    <View style={styles.metaPillsRow}>
+                      {km && <Text style={styles.footerDistance}>📏 {km}</Text>}
+                      {durationText && <Text style={styles.footerDuration}>⏱️ {durationText}</Text>}
+                    </View>
                   </View>
-                  <Text style={[styles.openAction, isLive && { color: theme.green }]}>
-                    {isLive ? 'Enter Live HUD ↗' : 'View Details ↗'}
-                  </Text>
+
+                  {/* Contextual Action Button */}
+                  {isLive ? (
+                    <TouchableOpacity
+                      style={styles.liveHudBtn}
+                      onPress={e => {
+                        e.stopPropagation?.();
+                        router.push(`/trip/${item.id}`);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Enter Live HUD for ${item.name}`}
+                    >
+                      <Text style={styles.liveHudBtnText}>Enter Live HUD ↗</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.openAction}>
+                      View Details ↗
+                    </Text>
+                  )}
                 </View>
               </Card>
             );
@@ -561,7 +699,7 @@ export default function TripsScreen() {
   );
 }
 
-const makeStyles = (c: RidePalette) =>
+const makeStyles = (c: RidePalette, isDark: boolean) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -581,18 +719,18 @@ const makeStyles = (c: RidePalette) =>
       gap: 10,
     },
     pageTitle: {
-      fontSize: 30,
+      fontSize: 32,
       fontWeight: '800',
       color: c.text,
       letterSpacing: -0.6,
     },
     countBadge: {
-      backgroundColor: c.surfaceHigh,
-      paddingHorizontal: 8,
-      paddingVertical: 2.5,
+      backgroundColor: isDark ? 'rgba(33, 40, 54, 0.65)' : 'rgba(255, 255, 255, 0.85)',
+      paddingHorizontal: 9,
+      paddingVertical: 3,
       borderRadius: 9999,
       borderWidth: 1,
-      borderColor: c.border,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(226, 232, 240, 0.9)',
     },
     countText: {
       fontSize: 12,
@@ -607,12 +745,17 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      backgroundColor: c.surfaceRaised,
+      backgroundColor: isDark ? 'rgba(23, 29, 39, 0.82)' : 'rgba(255, 255, 255, 0.85)',
       borderWidth: 1,
-      borderColor: c.border,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(226, 232, 240, 0.9)',
       paddingHorizontal: 13,
       paddingVertical: 7.5,
-      borderRadius: 11,
+      borderRadius: 12,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.25 : 0.05,
+      shadowRadius: 5,
+      elevation: 2,
     },
     headerActionText: {
       fontSize: 13,
@@ -629,8 +772,8 @@ const makeStyles = (c: RidePalette) =>
       borderColor: c.accent,
       shadowColor: c.accent,
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 5,
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
       elevation: 3,
     },
     headerActionPrimaryText: {
@@ -644,7 +787,7 @@ const makeStyles = (c: RidePalette) =>
       color: '#0E1013',
     },
     filterSection: {
-      marginBottom: 12,
+      marginBottom: 10,
     },
     sortRow: {
       flexDirection: 'row',
@@ -660,10 +803,12 @@ const makeStyles = (c: RidePalette) =>
       color: c.textMuted,
     },
     sortBtn: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 6,
-      backgroundColor: c.surfaceHigh,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 8,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.85)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(226, 232, 240, 0.9)',
     },
     sortBtnText: {
       fontSize: 11,
@@ -671,18 +816,18 @@ const makeStyles = (c: RidePalette) =>
       color: c.text,
     },
     analyticsCard: {
-      backgroundColor: c.surface,
-      borderRadius: 20,
+      backgroundColor: isDark ? 'rgba(18, 24, 34, 0.72)' : 'rgba(255, 255, 255, 0.82)',
+      borderRadius: 22,
       borderWidth: 1,
-      borderColor: c.border,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.85)',
       padding: 18,
       marginHorizontal: 20,
       marginBottom: 16,
       shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.08,
-      shadowRadius: 10,
-      elevation: 3,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.35 : 0.08,
+      shadowRadius: 14,
+      elevation: 4,
     },
     analyticsStats: {
       flexDirection: 'row',
@@ -709,7 +854,7 @@ const makeStyles = (c: RidePalette) =>
     statDivider: {
       width: 1,
       height: 28,
-      backgroundColor: c.border,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)',
     },
     milestonesRow: {
       flexDirection: 'row',
@@ -718,18 +863,18 @@ const makeStyles = (c: RidePalette) =>
       marginTop: 14,
       paddingTop: 14,
       borderTopWidth: 1,
-      borderTopColor: c.border,
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
     },
     milestonePill: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: c.surfaceRaised,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.92)',
       paddingHorizontal: 12,
       paddingVertical: 6,
       borderRadius: 9999,
       borderWidth: 1,
-      borderColor: c.border,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(226, 232, 240, 0.9)',
     },
     milestoneIcon: {
       fontSize: 12,
@@ -741,20 +886,44 @@ const makeStyles = (c: RidePalette) =>
     },
     listContent: {
       paddingHorizontal: 20,
-      paddingBottom: 32,
-      gap: 14,
+      paddingBottom: 36,
+      gap: 16,
     },
     tripCard: {
       marginBottom: 2,
+      position: 'relative',
     },
     liveCard: {
-      borderColor: c.green,
+      borderColor: isDark ? 'rgba(16, 185, 129, 0.65)' : 'rgba(16, 185, 129, 0.5)',
+      backgroundColor: isDark ? 'rgba(16, 185, 129, 0.06)' : 'rgba(240, 253, 244, 0.92)',
     },
-    cardTopRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
+    heroSection: {
+      position: 'relative',
+      borderRadius: 18,
+      overflow: 'hidden',
+    },
+    heroMenuTrigger: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: 'rgba(15, 23, 42, 0.72)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.22)',
+      justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: 10,
+      zIndex: 20,
+    },
+    heroMenuIcon: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: 'bold',
+      lineHeight: 18,
+    },
+    coverSection: {
+      position: 'relative',
     },
     cardHeader: {
       flexDirection: 'row',
@@ -762,24 +931,9 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       marginBottom: 6,
     },
-    actionsGroup: {
-      flexDirection: 'row',
-      gap: 6,
-    },
-    cardActionBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 8,
-      backgroundColor: c.surfaceHigh,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    cardDeleteBtn: {
-      backgroundColor: c.dangerSoft,
-    },
-    cardActionIcon: {
-      fontSize: 14,
-      color: c.text,
+    titleCol: {
+      flex: 1,
+      marginRight: 8,
     },
     tripName: {
       fontSize: 18,
@@ -787,19 +941,88 @@ const makeStyles = (c: RidePalette) =>
       color: c.text,
       letterSpacing: -0.2,
     },
+    plannedTag: {
+      fontSize: 9.5,
+      fontWeight: '800',
+      color: c.accent,
+      letterSpacing: 0.8,
+      marginTop: 2,
+    },
     tripDesc: {
       fontSize: 13,
       color: c.textMuted,
       marginTop: 4,
     },
+    cardMenuTrigger: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    cardMenuIcon: {
+      fontSize: 14,
+      color: c.text,
+      fontWeight: 'bold',
+      lineHeight: 16,
+    },
+    overflowMenuOverlay: {
+      backgroundColor: isDark ? 'rgba(20, 26, 36, 0.95)' : 'rgba(255, 255, 255, 0.98)',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)',
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      marginVertical: 8,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: isDark ? 0.45 : 0.12,
+      shadowRadius: 16,
+      elevation: 8,
+      gap: 2,
+    },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 9,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      gap: 10,
+    },
+    menuRowIcon: {
+      fontSize: 15,
+    },
+    menuRowText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.text,
+    },
+    cardActionBtn: {
+      backgroundColor: 'transparent',
+    },
+    cardDeleteBtn: {
+      backgroundColor: 'transparent',
+    },
+    cardActionIcon: {
+      fontSize: 14,
+      color: c.text,
+    },
     cardFooter: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      alignItems: 'flex-end',
-      marginTop: 2,
+      alignItems: 'center',
+      marginTop: 4,
     },
     metaCol: {
-      gap: 2,
+      gap: 3,
+    },
+    metaPillsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
     },
     footerDate: {
       fontSize: 12,
@@ -811,11 +1034,35 @@ const makeStyles = (c: RidePalette) =>
       color: c.textMuted,
       fontWeight: '600',
     },
+    footerDuration: {
+      fontSize: 12,
+      color: c.textMuted,
+      fontWeight: '600',
+    },
     footerMeta: {
       fontSize: 11,
       fontWeight: '700',
       color: c.textMuted,
       letterSpacing: 0.5,
+    },
+    liveHudBtn: {
+      backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : 'rgba(236, 253, 245, 0.95)',
+      borderColor: isDark ? 'rgba(16, 185, 129, 0.5)' : 'rgba(16, 185, 129, 0.4)',
+      borderWidth: 1.2,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 12,
+      shadowColor: '#10B981',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.3 : 0.12,
+      shadowRadius: 6,
+      elevation: 2,
+    },
+    liveHudBtnText: {
+      fontSize: 12.5,
+      fontWeight: '800',
+      color: c.green,
+      letterSpacing: 0.3,
     },
     openAction: {
       fontSize: 13,
@@ -831,6 +1078,7 @@ const makeStyles = (c: RidePalette) =>
     skeletonContainer: {
       paddingHorizontal: 20,
       paddingTop: 8,
+      gap: 14,
     },
     empty: {
       flex: 1,
@@ -840,23 +1088,23 @@ const makeStyles = (c: RidePalette) =>
       paddingVertical: 48,
     },
     emptyIconCircle: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: c.surfaceRaised,
+      width: 76,
+      height: 76,
+      borderRadius: 38,
+      backgroundColor: isDark ? 'rgba(23, 29, 39, 0.8)' : 'rgba(255, 255, 255, 0.85)',
       borderWidth: 1,
-      borderColor: c.border,
+      borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(226, 232, 240, 0.9)',
       justifyContent: 'center',
       alignItems: 'center',
       marginBottom: 18,
       shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      elevation: 2,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: isDark ? 0.3 : 0.06,
+      shadowRadius: 10,
+      elevation: 3,
     },
     emptyIcon: {
-      fontSize: 32,
+      fontSize: 34,
     },
     emptyTitle: {
       fontSize: 20,

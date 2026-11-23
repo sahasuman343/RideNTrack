@@ -23,6 +23,11 @@ export type RidePalette = {
   dangerSoft: string;
   input: string;
   shadow: string;
+  glassSurface: string;
+  glassSurfaceRaised: string;
+  glassBorder: string;
+  glassHighlight: string;
+  glassShadow: string;
 };
 
 export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
@@ -45,6 +50,11 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     dangerSoft: 'rgba(239, 68, 68, 0.18)',
     input: '#151921',
     shadow: '#000000',
+    glassSurface: 'rgba(17, 20, 27, 0.72)',
+    glassSurfaceRaised: 'rgba(23, 29, 39, 0.82)',
+    glassBorder: 'rgba(255, 255, 255, 0.12)',
+    glassHighlight: 'rgba(255, 255, 255, 0.08)',
+    glassShadow: 'rgba(0, 0, 0, 0.45)',
   },
   ride: {
     background: '#050706',
@@ -65,6 +75,11 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     dangerSoft: 'rgba(255, 23, 68, 0.3)',
     input: '#0D110F',
     shadow: '#000000',
+    glassSurface: 'rgba(13, 17, 15, 0.78)',
+    glassSurfaceRaised: 'rgba(20, 26, 23, 0.85)',
+    glassBorder: 'rgba(255, 255, 255, 0.14)',
+    glassHighlight: 'rgba(255, 255, 255, 0.10)',
+    glassShadow: 'rgba(0, 0, 0, 0.50)',
   },
   light: {
     background: '#F8FAFC',
@@ -85,6 +100,11 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     dangerSoft: 'rgba(239, 68, 68, 0.12)',
     input: '#FFFFFF',
     shadow: 'rgba(15, 23, 42, 0.08)',
+    glassSurface: 'rgba(255, 255, 255, 0.82)',
+    glassSurfaceRaised: 'rgba(255, 255, 255, 0.92)',
+    glassBorder: 'rgba(255, 255, 255, 0.75)',
+    glassHighlight: 'rgba(255, 255, 255, 0.95)',
+    glassShadow: 'rgba(15, 23, 42, 0.08)',
   },
 };
 
