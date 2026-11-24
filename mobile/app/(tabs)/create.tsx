@@ -24,7 +24,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
-import { Icon } from '../../src/components/ui';
+import { Icon, Dialog } from '../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../src/icons';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
@@ -300,6 +300,20 @@ export default function CreateRideScreen() {
   const [checkOut, setCheckOut] = useState('');
   const [stayPrice, setStayPrice] = useState('');
 
+  // Dialog state for notifications/errors/success
+  const [activeDialog, setActiveDialog] = useState<{
+    visible: boolean;
+    title: string;
+    message?: string;
+    icon?: any;
+    iconColor?: string;
+    actions?: Array<{
+      text: string;
+      onPress: () => void;
+      variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline';
+    }>;
+  }>({ visible: false, title: '' });
+
   const [loading, setLoading] = useState(false);
   const { user, profile } = useAuth();
   const tier = profile?.subscription_tier ?? 'free';
@@ -491,7 +505,13 @@ export default function CreateRideScreen() {
 
   function addStop(kind: WaypointKind = 'stop') {
     if (pointCount >= routePointLimit) {
-      Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
+      setActiveDialog({
+        visible: true,
+        title: 'Route point limit',
+        message: `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`,
+        icon: 'information-circle',
+        actions: [{ text: 'OK', onPress: () => setActiveDialog((d) => ({ ...d, visible: false })) }],
+      });
       return;
     }
     setStops((current) => [...current, { key: String(Date.now()) + Math.random(), place: null, kind }]);
@@ -504,20 +524,44 @@ export default function CreateRideScreen() {
   async function handleCreate() {
     if (isCreatingRef.current) return;
     if (!name.trim() || !origin || !destination) {
-      Alert.alert('Missing trip details', 'Please add a trip name, a starting point (origin) and a final destination.');
+      setActiveDialog({
+        visible: true,
+        title: 'Missing trip details',
+        message: 'Please add a trip name, a starting point (origin) and a final destination.',
+        icon: 'alert-circle',
+        actions: [{ text: 'OK', onPress: () => setActiveDialog((d) => ({ ...d, visible: false })) }],
+      });
       return;
     }
     if (!user) return;
     if (pointCount > routePointLimit) {
-      Alert.alert('Route point limit', `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`);
+      setActiveDialog({
+        visible: true,
+        title: 'Route point limit',
+        message: `Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan supports up to ${routePointLimit} route points, including origin and destination.`,
+        icon: 'information-circle',
+        actions: [{ text: 'OK', onPress: () => setActiveDialog((d) => ({ ...d, visible: false })) }],
+      });
       return;
     }
     if (startDate && endDate && days.length === 0) {
-      Alert.alert('Check trip dates', 'Please ensure the end date is on or after the start date.');
+      setActiveDialog({
+        visible: true,
+        title: 'Check trip dates',
+        message: 'Please ensure the end date is on or after the start date.',
+        icon: 'calendar',
+        actions: [{ text: 'OK', onPress: () => setActiveDialog((d) => ({ ...d, visible: false })) }],
+      });
       return;
     }
     if (stops.some((s) => !s.place)) {
-      Alert.alert('Incomplete stop', 'Please select a location for every added stop or remove the empty stop.');
+      setActiveDialog({
+        visible: true,
+        title: 'Incomplete stop',
+        message: 'Please select a location for every added stop or remove the empty stop.',
+        icon: 'location',
+        actions: [{ text: 'OK', onPress: () => setActiveDialog((d) => ({ ...d, visible: false })) }],
+      });
       return;
     }
     isCreatingRef.current = true;
@@ -639,12 +683,38 @@ export default function CreateRideScreen() {
       await AsyncStorage.removeItem(scopedKey).catch(() => {});
       await AsyncStorage.removeItem(DRAFT_STORAGE_KEY).catch(() => {});
 
-      Alert.alert('Trip created', 'Your trip plan is ready. You can invite riders, divide into stages, and customize routes.', [
-        { text: 'Open trip', onPress: () => router.push('/trip/' + rideId) },
-      ]);
+      setActiveDialog({
+        visible: true,
+        title: 'Trip created',
+        message: 'Your trip plan is ready. You can invite riders, divide into stages, and customize routes.',
+        icon: 'checkmark-circle',
+        actions: [
+          {
+            text: 'Open trip',
+            variant: 'primary',
+            onPress: () => {
+              setActiveDialog((d) => ({ ...d, visible: false }));
+              router.push('/trip/' + rideId);
+            },
+          },
+        ],
+      });
     } catch (error: any) {
       isDraftClearedRef.current = false;
-      Alert.alert('Could not create trip', error?.message || 'Please try again.');
+      setActiveDialog({
+        visible: true,
+        title: 'Could not create trip',
+        message: error?.message || 'Please try again.',
+        icon: 'alert-circle',
+        iconColor: theme.danger,
+        actions: [
+          {
+            text: 'OK',
+            variant: 'secondary',
+            onPress: () => setActiveDialog((d) => ({ ...d, visible: false })),
+          },
+        ],
+      });
     } finally {
       setLoading(false);
       isCreatingRef.current = false;
@@ -1385,6 +1455,16 @@ export default function CreateRideScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      <Dialog
+        visible={activeDialog.visible}
+        title={activeDialog.title}
+        message={activeDialog.message}
+        icon={activeDialog.icon}
+        iconColor={activeDialog.iconColor}
+        actions={activeDialog.actions}
+        onDismiss={() => setActiveDialog((d) => ({ ...d, visible: false }))}
+      />
     </View>
   );
 }
