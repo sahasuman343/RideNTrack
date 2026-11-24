@@ -10,22 +10,22 @@ const RIDE_CHANNEL_ID = 'ride-alerts';
 // A non-emergency alert that synced late from an offline queue is no longer actionable.
 const MAX_ROUTINE_ALERT_AGE_MS = 10 * 60 * 1000;
 
-// Rate limiting: bound push notifications from the same user to prevent alert spamming.
+// In-memory cache as a fast-path optimization; primary throttle state is stored atomically in PostgreSQL.
 const recentAlerts = new Map<string, number>();
 
-function isRateLimited(key: string, minIntervalMs: number): boolean {
-  const now = Date.now();
+function isLocalRateLimited(key: string, minIntervalMs: number): boolean {
   const lastTime = recentAlerts.get(key);
-  if (lastTime && now - lastTime < minIntervalMs) {
-    return true;
-  }
-  recentAlerts.set(key, now);
+  return typeof lastTime === 'number' && Date.now() - lastTime < minIntervalMs;
+}
+
+function recordLocalThrottle(key: string, timestamp: number) {
+  recentAlerts.set(key, timestamp);
   if (recentAlerts.size > 1000) {
-    for (const [k, timestamp] of recentAlerts.entries()) {
-      if (now - timestamp > 60_000) recentAlerts.delete(k);
+    const now = Date.now();
+    for (const [k, ts] of recentAlerts.entries()) {
+      if (now - ts > 60_000) recentAlerts.delete(k);
     }
   }
-  return false;
 }
 
 const LABELS: Record<string, string> = {
@@ -73,16 +73,31 @@ Deno.serve(async req => {
     return new Response('Stale alert', { status: 202 });
   }
 
-  // Throttle rapid repeated alerts to prevent denial-of-service notification floods
+  // Fast-path in-memory rate check (process-local optimization)
   const throttleKey = `${alert.ride_id}:${alert.user_id}:${alert.type}`;
   const throttleInterval = emergency ? 5_000 : 15_000;
-  if (isRateLimited(throttleKey, throttleInterval)) {
+  if (isLocalRateLimited(throttleKey, throttleInterval)) {
     return new Response('Rate limited', { status: 429 });
   }
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false },
   });
+
+  // Atomic shared-store check in PostgreSQL: verify no delivered alert exists for this sender in the throttle window
+  const cutoffIso = new Date(Date.now() - throttleInterval).toISOString();
+  const { data: recentDelivered } = await admin
+    .from('alerts')
+    .select('id')
+    .eq('ride_id', alert.ride_id)
+    .eq('user_id', alert.user_id)
+    .neq('id', alert.id)
+    .gte('notified_at', cutoffIso)
+    .limit(1);
+
+  if (recentDelivered && recentDelivered.length > 0) {
+    return new Response('Rate limited', { status: 429 });
+  }
   const [ride, sender, members] = await Promise.all([
     admin.from('rides').select('name,status').eq('id', alert.ride_id).maybeSingle(),
     admin.from('profiles').select('display_name').eq('id', alert.user_id).maybeSingle(),
@@ -131,6 +146,11 @@ Deno.serve(async req => {
     });
   }
   if (stale.length) await admin.from('push_tokens').delete().in('token', stale);
+
+  // Record successful notification delivery in both shared database and local cache
+  const deliveryIso = new Date().toISOString();
+  await admin.from('alerts').update({ notified_at: deliveryIso }).eq('id', alert.id);
+  recordLocalThrottle(throttleKey, Date.now());
 
   return new Response(JSON.stringify({ sent: messages.length, removed: stale.length }), {
     headers: { 'content-type': 'application/json' },

@@ -8,7 +8,10 @@ CREATE POLICY "Admin can update ride" ON public.rides
   USING (auth.uid() = admin_id)
   WITH CHECK (auth.uid() = admin_id);
 
--- 2. Storage Buckets & Policies (Executed conditionally if storage extension/schema is present)
+-- 2. Track push notification delivery timestamps for atomic cross-isolate rate limiting
+ALTER TABLE public.alerts ADD COLUMN IF NOT EXISTS notified_at timestamptz;
+
+-- 3. Storage Buckets & Policies (Executed conditionally if storage extension/schema is present)
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'storage' AND tablename = 'buckets') THEN
