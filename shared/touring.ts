@@ -142,3 +142,120 @@ export function generateTouringAdvisories(params: {
 
   return advisories;
 }
+
+export interface PackRiderFuelInput {
+  id: string;
+  displayName: string;
+  tankLiters?: number | null;
+  mileageKmPerL?: number | null;
+  reserveLiters?: number | null;
+}
+
+export interface PackFuelPlan {
+  routeDistanceKm: number;
+  limitingRider: { id: string; displayName: string; safeRangeKm: number } | null;
+  fuelIntervalKm: number | null;
+  recommendedFuelStops: number | null;
+  ridersWithSpecs: number;
+  ridersMissingSpecs: Array<{ id: string; displayName: string }>;
+}
+
+export function calculatePackFuelPlan(
+  riders: PackRiderFuelInput[],
+  routeDistanceKm: number,
+): PackFuelPlan {
+  const safeDistanceKm = Number.isFinite(routeDistanceKm) && routeDistanceKm > 0 ? Math.round(routeDistanceKm * 10) / 10 : 0;
+  const ridersMissingSpecs: Array<{ id: string; displayName: string }> = [];
+  let limitingRider: { id: string; displayName: string; safeRangeKm: number } | null = null;
+  let ridersWithSpecs = 0;
+
+  for (const rider of riders) {
+    const tank = rider.tankLiters ?? null;
+    const mileage = rider.mileageKmPerL ?? null;
+    const reserve = rider.reserveLiters ?? 0;
+
+    if (!tank || !mileage || tank <= 0 || mileage <= 0 || reserve < 0 || reserve >= tank) {
+      ridersMissingSpecs.push({ id: rider.id, displayName: rider.displayName });
+      continue;
+    }
+
+    ridersWithSpecs++;
+    const safeRangeKm = Math.round((tank - reserve) * mileage);
+    if (safeRangeKm > 0 && (!limitingRider || safeRangeKm < limitingRider.safeRangeKm)) {
+      limitingRider = { id: rider.id, displayName: rider.displayName, safeRangeKm };
+    }
+  }
+
+  const fuelIntervalKm = limitingRider ? limitingRider.safeRangeKm : null;
+  const recommendedFuelStops =
+    limitingRider && limitingRider.safeRangeKm > 0 && safeDistanceKm > 0
+      ? Math.max(0, Math.ceil(safeDistanceKm / limitingRider.safeRangeKm) - 1)
+      : limitingRider
+        ? 0
+        : null;
+
+  return {
+    routeDistanceKm: safeDistanceKm,
+    limitingRider,
+    fuelIntervalKm,
+    recommendedFuelStops,
+    ridersWithSpecs,
+    ridersMissingSpecs,
+  };
+}
+
+export type TerrainType = 'highway' | 'mixed' | 'ghat';
+
+const TERRAIN_PACING_MULTIPLIERS: Record<TerrainType, number> = {
+  highway: 1.1,
+  mixed: 1.25,
+  ghat: 1.45,
+};
+
+export function evaluateDaylightRisk(
+  departureIso: string,
+  estimatedDurationSeconds: number,
+  sunsetIso: string,
+  terrain: TerrainType = 'mixed',
+): {
+  risk: 'daylight' | 'night';
+  multiplier: number;
+  adjustedDurationSeconds: number;
+  projectedArrivalIso: string | null;
+  advisory: TouringSafetyAdvisory | null;
+} {
+  const multiplier = TERRAIN_PACING_MULTIPLIERS[terrain] ?? 1.25;
+  const safeDuration = Number.isFinite(estimatedDurationSeconds) && estimatedDurationSeconds > 0 ? estimatedDurationSeconds : 0;
+  const adjustedDurationSeconds = Math.round(safeDuration * multiplier);
+
+  const depMs = Date.parse(departureIso);
+  const sunsetMs = Date.parse(sunsetIso);
+  if (!Number.isFinite(depMs) || !Number.isFinite(sunsetMs)) {
+    return {
+      risk: 'daylight',
+      multiplier,
+      adjustedDurationSeconds,
+      projectedArrivalIso: null,
+      advisory: null,
+    };
+  }
+
+  const arrivalMs = depMs + adjustedDurationSeconds * 1000;
+  const projectedArrivalIso = new Date(arrivalMs).toISOString();
+  const isNightRisk = arrivalMs >= sunsetMs - 30 * 60 * 1000;
+
+  return {
+    risk: isNightRisk ? 'night' : 'daylight',
+    multiplier,
+    adjustedDurationSeconds,
+    projectedArrivalIso,
+    advisory: isNightRisk
+      ? {
+          type: 'night',
+          level: 'warning',
+          title: terrain === 'ghat' ? 'Ghat Night-Riding Risk' : 'Low-Light Arrival Warning',
+          description: `With ${terrain} pacing (${multiplier}x), projected arrival (${projectedArrivalIso}) falls within 30 minutes of or after sunset. Consider an earlier departure or overnight halt.`,
+        }
+      : null,
+  };
+}

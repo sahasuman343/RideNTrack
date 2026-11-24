@@ -14,15 +14,43 @@ interface Params extends Context {
   publish?: (point: LocationUpdate) => Promise<void> | void;
   onError?: (message: string) => void;
   onGpsRecovered?: () => void;
+  onAutoStop?: (reason: 'arrived' | 'timeout') => void;
   batterySaver?: boolean;
+  activeRidersCount?: number;
+  destination?: { latitude: number; longitude: number } | null;
+  maxRideDurationMs?: number;
 }
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
 let generation = 0, lastSync = 0, lastFixTimestamp = 0;
 let nativeOptionsKey: string | null = null;
+let trackingStartedAtMs = 0;
+let stationarySinceMs: number | null = null;
+let lastMovedCoords: { lat: number; lng: number } | null = null;
+let adaptiveLowPower = false;
+let lastAdaptivePublishMs = 0;
+let arrivedAtDestSinceMs: number | null = null;
 const GPS_INTERVAL_MS = 5000;
 const GPS_DISTANCE_METERS = 15;
 const QUEUE_SYNC_INTERVAL_MS = 30000;
+const STATIONARY_THRESHOLD_MS = 2 * 60 * 1000;
+const STATIONARY_SPEED_MPS = 2 / 3.6; // 2 km/h
+const STATIONARY_DISPLACEMENT_M = 25;
+const ADAPTIVE_PUBLISH_INTERVAL_MS = 30_000;
+const ARRIVAL_RADIUS_METERS = 200;
+const ARRIVAL_DWELL_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_RIDE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+function approxDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 let operations: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
@@ -79,7 +107,9 @@ async function startNativeUpdates(params: Params, restart = false) {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'RideNTrack · Sharing location',
-      notificationBody: 'Your group can see your position.',
+      notificationBody: params.activeRidersCount && params.activeRidersCount > 0
+        ? `Live pack: ${params.activeRidersCount} rider${params.activeRidersCount === 1 ? '' : 's'} active`
+        : 'Your group can see your position.',
       notificationColor: '#FF6B00',
     },
   });
@@ -140,13 +170,49 @@ async function record(locations: Location.LocationObject[]) {
     } catch {
       /* Ignore UI update error */
     }
-    // Presence delivery is best-effort; it must not block saving the next breadcrumb.
-    void Promise.resolve(context?.publish?.(point)).catch(() => {});
+    // Presence delivery is best-effort; throttle when adaptive low-power is active.
     const nowMs = Date.now();
+    if (!lastMovedCoords || approxDistanceMeters(lastMovedCoords.lat, lastMovedCoords.lng, lat, lng) >= STATIONARY_DISPLACEMENT_M || point.speed >= STATIONARY_SPEED_MPS) {
+      lastMovedCoords = { lat, lng };
+      stationarySinceMs = null;
+      adaptiveLowPower = false;
+    } else {
+      stationarySinceMs ??= nowMs;
+      if (nowMs - stationarySinceMs >= STATIONARY_THRESHOLD_MS) {
+        adaptiveLowPower = true;
+      }
+    }
+
+    if (!adaptiveLowPower || nowMs - lastAdaptivePublishMs >= ADAPTIVE_PUBLISH_INTERVAL_MS) {
+      lastAdaptivePublishMs = nowMs;
+      void Promise.resolve(context?.publish?.(point)).catch(() => {});
+    }
+
     if (lastFixTimestamp > 0 && location.timestamp - lastFixTimestamp > 30000 && nowMs - location.timestamp <= 30000) {
       context?.onGpsRecovered?.();
     }
     lastFixTimestamp = Math.max(lastFixTimestamp, location.timestamp);
+
+    // Auto-stop on arrival within 200m of destination for 10 minutes, or max ride timeout.
+    const dest = context?.destination;
+    if (dest && validCoordinates(dest.latitude, dest.longitude)) {
+      if (approxDistanceMeters(lat, lng, dest.latitude, dest.longitude) <= ARRIVAL_RADIUS_METERS) {
+        arrivedAtDestSinceMs ??= nowMs;
+        if (nowMs - arrivedAtDestSinceMs >= ARRIVAL_DWELL_MS) {
+          context?.onAutoStop?.('arrived');
+          void stopBackgroundLocationUpdates(saved.rideId);
+          return;
+        }
+      } else {
+        arrivedAtDestSinceMs = null;
+      }
+    }
+    const maxDuration = context?.maxRideDurationMs ?? DEFAULT_MAX_RIDE_DURATION_MS;
+    if (trackingStartedAtMs > 0 && nowMs - trackingStartedAtMs >= maxDuration) {
+      context?.onAutoStop?.('timeout');
+      void stopBackgroundLocationUpdates(saved.rideId);
+      return;
+    }
   }
   if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
@@ -213,6 +279,11 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
     fallback?.remove();
     fallback = null;
     lastFixTimestamp = 0;
+    trackingStartedAtMs = Date.now();
+    stationarySinceMs = null;
+    lastMovedCoords = null;
+    adaptiveLowPower = false;
+    arrivedAtDestSinceMs = null;
 
     // Keep ride tracking useful while background permission is optional.
     // Background permission is requested only from an explicit user action.

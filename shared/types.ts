@@ -178,6 +178,7 @@ export interface TripChecklistItem {
   sequence: number;
   my_completed: boolean;
   completed_count: number;
+  assigned_to_user_id?: string | null;
 }
 
 export type AttendanceStatus = 'confirmed' | 'tentative' | 'declined' | 'attended';
@@ -350,8 +351,30 @@ export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
   return [...result.values()].sort((a,b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 100);
 }
 
-export { watchRide, type Connection } from './live';
+export { watchRide, classifyRiderFreshness, formatLastSeenAgo, fetchRideMessages, sendRideMessage, type Connection, type RiderFreshness } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
+
+export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system';
+
+export interface RideMessage {
+  id: string;
+  ride_id: string;
+  sender_id: string;
+  sender_name?: string;
+  message_type: RideMessageType;
+  body: string;
+  attachment_url?: string | null;
+  is_pinned: boolean;
+  created_at: string;
+}
+
+export const QUICK_REPLY_PRESETS = [
+  'Copy',
+  'Stopping ahead',
+  'Fuel needed',
+  'Slowing down',
+  'Need assistance',
+] as const;
 
 export * from './route';
 
@@ -388,6 +411,7 @@ export * from './expenses';
 export * from './stats';
 export * from './safety';
 export * from './trail';
+export * from './navigation';
 
 
 

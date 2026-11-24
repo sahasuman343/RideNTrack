@@ -20,9 +20,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   buildGoogleMapsNavigationUrl,
+  type ExternalNavProvider,
+  type RoutePoint,
   type TripStage,
   type StageStatus,
   calculateMotorcycleFuelPlan,
+  calculatePackFuelPlan,
+  evaluateDaylightRisk,
   generateTouringAdvisories,
   getWeatherConditionFromCode,
   type RouteWeatherPoint,
@@ -46,6 +50,13 @@ import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
+import {
+  formatNavProviderLabel,
+  getDefaultNavProvider,
+  getPreferredNavProvider,
+  openExternalNavLeg,
+  setPreferredNavProvider,
+} from '../../src/lib/externalNav';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 import {
   Avatar,
@@ -156,6 +167,25 @@ export default function TripWorkspaceScreen() {
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
   const [stages, setStages] = useState<TripStage[]>([]);
+  const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
+
+  useEffect(() => {
+    void getPreferredNavProvider().then(setNavProvider);
+  }, []);
+
+  async function toggleNavProvider() {
+    const next: ExternalNavProvider = navProvider === 'google_maps' ? 'apple_maps' : 'google_maps';
+    setNavProvider(next);
+    await setPreferredNavProvider(next);
+  }
+
+  async function navigateLeg(points: RoutePoint[], legIndex = 0) {
+    try {
+      await openExternalNavLeg(points, navProvider, { legIndex });
+    } catch (e: any) {
+      Alert.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
+    }
+  }
   const [roster, setRoster] = useState<Rider[]>([]);
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
@@ -288,13 +318,45 @@ export default function TripWorkspaceScreen() {
     });
   }, [trip?.estimated_distance_meters, profile]);
 
+  const packFuelPlan = useMemo(() => {
+    const distKm = (trip?.estimated_distance_meters || 0) / 1000;
+    return calculatePackFuelPlan(
+      roster.map(r => ({
+        id: r.user_id,
+        displayName: r.display_name,
+        tankLiters: r.user_id === user?.id ? profile?.fuel_tank_capacity_liters : null,
+        mileageKmPerL: r.user_id === user?.id ? profile?.mileage_km_per_liter : null,
+        reserveLiters: r.user_id === user?.id ? profile?.fuel_reserve_liters : null,
+      })),
+      distKm,
+    );
+  }, [trip?.estimated_distance_meters, roster, user?.id, profile]);
+
   const advisories = useMemo(() => {
-    return generateTouringAdvisories({
+    const base = generateTouringAdvisories({
       distanceMeters: trip?.estimated_distance_meters || 0,
       fuelPlan,
       weatherPoints,
     });
-  }, [trip?.estimated_distance_meters, fuelPlan, weatherPoints]);
+    if (trip?.start_date && trip?.estimated_duration_seconds) {
+      const sunsetIso = new Date(`${trip.start_date.slice(0, 10)}T18:00:00`).toISOString();
+      const departureIso = new Date(`${trip.start_date.slice(0, 10)}T07:00:00`).toISOString();
+      const terrain = trip.trip_type === 'expedition' ? 'ghat' : 'mixed';
+      const daylight = evaluateDaylightRisk(departureIso, trip.estimated_duration_seconds, sunsetIso, terrain);
+      if (daylight.advisory) {
+        base.unshift(daylight.advisory);
+      }
+    }
+    if (packFuelPlan.limitingRider && packFuelPlan.recommendedFuelStops !== null) {
+      base.unshift({
+        type: 'fuel',
+        level: 'info',
+        title: `Pack Fuel Cadence: Every ${packFuelPlan.fuelIntervalKm} km`,
+        description: `Limited by ${packFuelPlan.limitingRider.displayName} (${packFuelPlan.limitingRider.safeRangeKm} km safe range) · ${packFuelPlan.recommendedFuelStops} stop(s) needed.`,
+      });
+    }
+    return base;
+  }, [trip?.estimated_distance_meters, trip?.start_date, trip?.estimated_duration_seconds, trip?.trip_type, fuelPlan, weatherPoints, packFuelPlan]);
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -1254,13 +1316,37 @@ export default function TripWorkspaceScreen() {
         {!!stage.notes && (
           <Text style={styles.stageNotes}>{stage.notes}</Text>
         )}
-        {isAdmin && (
-          <View style={styles.stageActions}>
+        <View style={styles.stageActions}>
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() =>
+              void navigateLeg([
+                {
+                  sequence: 0,
+                  waypoint_type: 'origin',
+                  name: stage.start_name,
+                  latitude: stage.start_coords[1],
+                  longitude: stage.start_coords[0],
+                },
+                {
+                  sequence: 1,
+                  waypoint_type: 'destination',
+                  name: stage.destination_name,
+                  latitude: stage.destination_coords[1],
+                  longitude: stage.destination_coords[0],
+                },
+              ])
+            }
+          >
+            <Icon name="navigate-outline" size="xs" color={theme.accent} />
+            <Text style={styles.linkText}>Navigate Leg ({formatNavProviderLabel(navProvider)})</Text>
+          </TouchableOpacity>
+          {isAdmin && (
             <TouchableOpacity onPress={() => confirmDeleteStage(stage.id, stage.name)}>
               <Text style={styles.remove}>Remove stage</Text>
             </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </View>
       </View>
     );
   }
@@ -1673,13 +1759,28 @@ export default function TripWorkspaceScreen() {
                 const nextStop = waypoints.find(point => point.waypoint_type !== 'origin');
                 if (!nextStop) return null;
                 return (
-                  <TouchableOpacity
-                    style={styles.navigateNextBtn}
-                    onPress={() => void openDirections(nextStop)}
-                  >
-                    <Icon name="navigate-outline" size="sm" color={theme.accent} />
-                    <Text style={styles.navigateNextBtnText} numberOfLines={1}>Navigate to next stop: {nextStop.name}</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.navigateNextBtn, { flex: 1, marginVertical: 0 }]}
+                      onPress={() => {
+                        if (waypoints.length >= 2) {
+                          void navigateLeg(waypoints as unknown as RoutePoint[]);
+                        } else {
+                          void openDirections(nextStop);
+                        }
+                      }}
+                    >
+                      <Icon name="navigate-outline" size="sm" color={theme.accent} />
+                      <Text style={styles.navigateNextBtnText} numberOfLines={1}>Navigate to next stop: {nextStop.name}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.navigateNextBtn, { marginVertical: 0, paddingHorizontal: 10 }]}
+                      onPress={() => void toggleNavProvider()}
+                      accessibilityLabel="Switch external maps app"
+                    >
+                      <Text style={styles.navigateNextBtnText}>{formatNavProviderLabel(navProvider)}</Text>
+                    </TouchableOpacity>
+                  </View>
                 );
               })()}
 
@@ -1730,7 +1831,18 @@ export default function TripWorkspaceScreen() {
                         {/* Stops in this day */}
                         {dayWaypoints.length > 0 && (
                           <View style={{ marginTop: 8 }}>
-                            <Text style={styles.stageSectionHeader}>PLANNED STOPS ({dayWaypoints.length})</Text>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={styles.stageSectionHeader}>PLANNED STOPS ({dayWaypoints.length})</Text>
+                              {dayWaypoints.length >= 2 && (
+                                <TouchableOpacity
+                                  style={styles.linkRow}
+                                  onPress={() => void navigateLeg(dayWaypoints as unknown as RoutePoint[])}
+                                >
+                                  <Icon name="navigate-outline" size="xs" color={theme.accent} />
+                                  <Text style={styles.linkText}>Navigate Leg</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
                             {dayWaypoints.map(wp => (
                               <View key={wp.id} style={styles.dayStopRow}>
                                 <Text style={styles.dayStopText}>
@@ -1981,9 +2093,30 @@ export default function TripWorkspaceScreen() {
                           <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>{item.title}</Text>
                         </View>
                         {!!item.description && <Text style={styles.mutedSmall}>{item.description}</Text>}
-                        <Text style={[styles.mutedSmall, { fontSize: 10, marginTop: 2, color: theme.accent }]}>
-                          {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                          <Text style={[styles.mutedSmall, { fontSize: 10, color: theme.accent }]}>
+                            {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
+                            {item.assigned_to_user_id ? ` · Claimed by ${roster.find(r => r.user_id === item.assigned_to_user_id)?.display_name || 'rider'}` : ''}
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.smallButton}
+                            onPress={() => {
+                              const assignSelf = item.assigned_to_user_id !== user?.id;
+                              void supabase.rpc('claim_trip_checklist_item', {
+                                p_checklist_id: item.id,
+                                p_assign_to_self: assignSelf,
+                              }).then(({ error: rpcErr }) => {
+                                if (!rpcErr) {
+                                  setChecklists(prev => prev.map(c => c.id === item.id ? { ...c, assigned_to_user_id: assignSelf ? user?.id ?? null : null } : c));
+                                }
+                              });
+                            }}
+                          >
+                            <Text style={styles.smallButtonText}>
+                              {item.assigned_to_user_id === user?.id ? 'Unclaim' : 'Claim'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </TouchableOpacity>
                   );

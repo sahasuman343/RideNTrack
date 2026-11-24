@@ -30,6 +30,8 @@ import {
   distanceMeters,
   distanceToRouteMeters,
   buildGoogleMapsNavigationUrl,
+  type ExternalNavProvider,
+  type RoutePoint,
   getRiderLiveStatus,
   type RiderLiveStatus,
   type RideIceContact,
@@ -41,10 +43,14 @@ import {
   MECHANICAL_ISSUE_LABELS,
   type AlertAcknowledgement,
   formatEmergencySms,
+  evaluateStationaryOffRouteCheckIn,
   formatMechanicalBreakdownMessage,
   NATIONAL_EMERGENCY_HELPLINES,
   SEEDED_BREAKDOWN_DIRECTORY,
   type VerifiedBreakdownService,
+  sendRideMessage,
+  type RideMessageType,
+  resolveRideEntitlements,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -53,7 +59,16 @@ import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
 import { useRideTheme, RidePalette, typography, elevation, radius, spacing } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
+import {
+  formatNavProviderLabel,
+  getDefaultNavProvider,
+  getPreferredNavProvider,
+  openExternalNavLeg,
+  setPreferredNavProvider,
+} from '../../src/lib/externalNav';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
+import { TripChatSheet } from '../../src/components/ride/TripChatSheet';
+import { UpgradePromptModal } from '../../src/components/ui/UpgradePromptModal';
 import {
   detachBackgroundLocationCallbacks,
   enableBackgroundLocationUpdates,
@@ -112,8 +127,8 @@ export default function LiveRideScreen() {
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const s = React.useMemo(() => makeStyles(theme), [theme]);
-  const { ride, participants, alerts, error, publish, refresh, setRide } = useRide(id, userId || '');
   const sync = useOfflineSync();
+  const { ride, participants, alerts, messages, error, publish, refresh, setRide } = useRide(id, userId || '', sync.isOnline);
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
   const [position, setPosition] = useState<LocationUpdate | null>(null);
   const { geoJson: actualTrailGeoJson, distanceMeters: distanceCoveredMeters } = useRideTrail(id, userId, position);
@@ -198,6 +213,114 @@ export default function LiveRideScreen() {
   const [selectedMechanicalIssue, setSelectedMechanicalIssue] = useState<MechanicalIssueType>('puncture');
   const [mechanicalDetails, setMechanicalDetails] = useState('');
   const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
+  const [chatVisible, setChatVisible] = useState(false);
+  const [upgradePromptVisible, setUpgradePromptVisible] = useState(false);
+  const [spectatorLink, setSpectatorLink] = useState<{ id: string; token: string } | null>(null);
+  const entitlements = useMemo(
+    () => resolveRideEntitlements({ userTier: profile?.subscription_tier ?? 'free' }),
+    [profile?.subscription_tier],
+  );
+
+  async function shareFamilySpectatorLink(hours = 24) {
+    if (!ride || !userId) return;
+    if (!entitlements.limits.supportsSpectatorLink) {
+      setUpgradePromptVisible(true);
+      return;
+    }
+    try {
+      const token = `${ride.id.slice(0, 8)}${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
+      const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+      const { data, error: linkErr } = await supabase
+        .from('ride_share_links')
+        .insert({ ride_id: ride.id, token, created_by: userId, expires_at: expiresAt })
+        .select('id, token')
+        .single();
+      if (linkErr) throw linkErr;
+      setSpectatorLink(data as { id: string; token: string });
+      await Share.share({
+        title: `${ride.name} · Live Family Link`,
+        message: `Track our ride live on RideNTrack: https://ridentrack.app/track/${(data as { token: string }).token}`,
+      });
+    } catch (e: any) {
+      Dialog.alert('Could not create spectator link', e?.message || 'Pro Tourer or Expedition Pass required.');
+    }
+  }
+
+  async function revokeFamilySpectatorLink() {
+    if (!spectatorLink) return;
+    const { error: revErr } = await supabase
+      .from('ride_share_links')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', spectatorLink.id);
+    if (!revErr) {
+      setSpectatorLink(null);
+      setMessage('Family spectator link revoked.');
+    }
+  }
+  const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
+
+  useEffect(() => {
+    void getPreferredNavProvider().then(setNavProvider);
+  }, []);
+
+  const [batteryBannerDismissed, setBatteryBannerDismissed] = useState(false);
+  const [stationaryCountdown, setStationaryCountdown] = useState<number | null>(null);
+  const stationarySinceRef = useRef<number | null>(null);
+  const stationaryAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
+  const stationaryCooldownUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!active || !position) {
+      stationarySinceRef.current = null;
+      stationaryAnchorRef.current = null;
+      setStationaryCountdown(null);
+      return;
+    }
+    const nowMs = Date.now();
+    const speedKmh = (position.speed || 0) * 3.6;
+    const anchor = stationaryAnchorRef.current;
+    const moved = anchor ? distanceMeters(anchor, { lat: position.lat, lng: position.lng }) >= 25 : true;
+    if (speedKmh >= 2 || moved) {
+      stationaryAnchorRef.current = { lat: position.lat, lng: position.lng };
+      stationarySinceRef.current = nowMs;
+      return;
+    }
+    if (!stationarySinceRef.current) {
+      stationarySinceRef.current = nowMs;
+      return;
+    }
+    if (nowMs < stationaryCooldownUntilRef.current) return;
+    const check = evaluateStationaryOffRouteCheckIn({
+      stationaryDurationMs: nowMs - stationarySinceRef.current,
+      currentLat: position.lat,
+      currentLng: position.lng,
+      waypoints: upcomingWaypoints,
+    });
+    if (check.shouldPrompt && stationaryCountdown === null) {
+      setStationaryCountdown(120);
+    }
+  }, [active, position?.lat, position?.lng, position?.speed, upcomingWaypoints, stationaryCountdown]);
+
+  useEffect(() => {
+    if (stationaryCountdown === null) return;
+    if (stationaryCountdown <= 0) {
+      setStationaryCountdown(null);
+      stationaryCooldownUntilRef.current = Date.now() + 10 * 60 * 1000;
+      if (position && userId && ride) {
+        void sendAlert('emergency', 'Stationary off-route check-in unanswered — please check on rider.');
+      }
+      return;
+    }
+    const t = setTimeout(() => setStationaryCountdown(c => (c !== null ? c - 1 : null)), 1000);
+    return () => clearTimeout(t);
+  }, [stationaryCountdown]);
+
+  async function toggleNavProvider() {
+    const next: ExternalNavProvider = navProvider === 'google_maps' ? 'apple_maps' : 'google_maps';
+    setNavProvider(next);
+    await setPreferredNavProvider(next);
+    setMessage(`Maps app set to ${formatNavProviderLabel(next)}`);
+  }
   const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
   const [iceByRider, setIceByRider] = useState<Record<string, RideIceContact>>({});
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
@@ -522,6 +645,36 @@ export default function LiveRideScreen() {
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
     try {
+      const remaining = upcomingWaypoints.slice(targetWaypointIndex);
+      const legPoints: RoutePoint[] = [];
+      if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+        legPoints.push({
+          sequence: 0,
+          waypoint_type: 'origin',
+          name: 'Current Location',
+          latitude: position.lat,
+          longitude: position.lng,
+        });
+      }
+      remaining.forEach((wp, idx) => {
+        legPoints.push({
+          sequence: legPoints.length,
+          waypoint_type: idx === remaining.length - 1 ? 'destination' : 'stop',
+          name: wp.name,
+          latitude: wp.latitude,
+          longitude: wp.longitude,
+          provider_place_id: wp.provider_place_id,
+        });
+      });
+
+      if (legPoints.length >= 2) {
+        const result = await openExternalNavLeg(legPoints, navProvider);
+        if (result.legCount > 1) {
+          setMessage(`Opened leg 1 of ${result.legCount} in ${formatNavProviderLabel(result.provider)}`);
+        }
+        return;
+      }
+
       await Linking.openURL(
         buildGoogleMapsNavigationUrl({
           latitude: nextWaypoint.latitude,
@@ -1095,6 +1248,9 @@ export default function LiveRideScreen() {
         <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
           <Text style={s.sosTopButtonText}>SOS</Text>
         </TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Trip Chat" style={s.square} onPress={() => setChatVisible(true)}>
+          <Icon name="chatbubbles-outline" size="md" color={theme.text} />
+        </TouchableOpacity>
         {admin && (
           <TouchableOpacity accessibilityLabel="Captain Dashboard" style={[s.square, { borderColor: theme.accent }]} onPress={() => setCaptainDashboardVisible(true)}>
             <Icon name="ribbon-outline" size="md" color={theme.accent} />
@@ -1134,6 +1290,62 @@ export default function LiveRideScreen() {
           <Text style={s.controlText}>⊞ Group</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Android Pre-Ride Battery Readiness Banner */}
+      {Platform.OS === 'android' && !active && !batteryBannerDismissed && (
+        <View style={[s.floatingAlertBanner, { top: insets.top + 64 }]}>
+          <View style={s.floatingAlertHeader}>
+            <Icon name="battery-charging-outline" size="sm" color={theme.warning} />
+            <Text style={[s.floatingAlertTitle, { flex: 1 }]}>Disable battery optimization for uninterrupted background GPS</Text>
+            <TouchableOpacity onPress={() => setBatteryBannerDismissed(true)} accessibilityLabel="Dismiss battery check">
+              <Icon name="close" size="sm" color={theme.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            <TouchableOpacity style={s.floatingAlertSecondaryBtn} onPress={() => void Linking.openSettings()}>
+              <Text style={s.floatingAlertActionText}>Open Battery Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Stationary Off-Route Safety Check-In */}
+      {stationaryCountdown !== null && (
+        <View style={[s.floatingAlertBanner, s.floatingAlertEmergency, { top: insets.top + 118 }]}>
+          <View style={s.floatingAlertHeader}>
+            <Icon name="alert-circle-outline" size="sm" color={theme.danger} />
+            <Text style={[s.floatingAlertTitle, { flex: 1 }]}>Stopped off-route — Are you okay? ({stationaryCountdown}s)</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            <TouchableOpacity
+              style={s.floatingAlertSecondaryBtn}
+              onPress={() => {
+                setStationaryCountdown(null);
+                stationaryCooldownUntilRef.current = Date.now() + 10 * 60 * 1000;
+              }}
+            >
+              <Text style={s.floatingAlertActionText}>I&apos;m Okay</Text>
+            </TouchableOpacity>
+            {!!profile?.emergency_contact && !!position && !!ride && (
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => {
+                  const smsBody = formatEmergencySms({
+                    riderName: name,
+                    motorcycleModel: profile.motorcycle_model,
+                    rideName: ride.name,
+                    latitude: position.lat,
+                    longitude: position.lng,
+                  });
+                  void Linking.openURL(`sms:${profile.emergency_contact}?body=${encodeURIComponent(smsBody)}`);
+                }}
+              >
+                <Text style={s.floatingAlertActionText}>Send SOS SMS</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* Prominent Floating Alert Overlay Card */}
       {newest && (
@@ -1349,24 +1561,25 @@ export default function LiveRideScreen() {
           <View style={s.giantActionDeck}>
             <View style={s.actionGridRow}>
               {/* Action 1: Navigate External Maps */}
-              <TouchableOpacity
+                <TouchableOpacity
                 style={[s.giantActionBtn, s.actionButton]}
                 onPress={() => void navigateToNextWaypoint()}
+                onLongPress={() => void toggleNavProvider()}
                 accessibilityRole="button"
-                accessibilityLabel={nextWaypoint ? `Navigate to ${nextWaypoint.name}` : 'Navigate'}
+                accessibilityLabel={nextWaypoint ? `Navigate leg to ${nextWaypoint.name} in ${formatNavProviderLabel(navProvider)}` : 'Navigate Leg'}
               >
                 <View style={s.giantBtnIconWrap}>
                   <Icon name="navigate-outline" size="lg" color={theme.text} />
                 </View>
                 <View style={s.giantBtnTextCol}>
-                  <Text style={s.giantBtnTitle}>NAVIGATE</Text>
+                  <Text style={s.giantBtnTitle}>NAVIGATE LEG</Text>
                   {active && nextWaypoint ? (
                     <Text style={s.giantBtnSubtitle} numberOfLines={1}>
-                      Navigate to {nextWaypoint.name}
+                      Navigate to {nextWaypoint.name} ({formatNavProviderLabel(navProvider)})
                     </Text>
                   ) : (
                     <Text style={s.giantBtnSubtitle} numberOfLines={1}>
-                      Turn Prompts
+                      {formatNavProviderLabel(navProvider)} (hold to switch)
                     </Text>
                   )}
                 </View>
@@ -1930,6 +2143,23 @@ export default function LiveRideScreen() {
 
               <TouchableOpacity
                 style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
+                onPress={() => void shareFamilySpectatorLink(24)}
+              >
+                <Icon name="share-social-outline" size="md" color={theme.accent} />
+                <Text style={[s.text, { color: theme.accent }]}>Share Live Family Link (24h)</Text>
+              </TouchableOpacity>
+              {spectatorLink && (
+                <TouchableOpacity
+                  style={[s.alertOption, { borderColor: theme.danger, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
+                  onPress={() => void revokeFamilySpectatorLink()}
+                >
+                  <Icon name="close-circle-outline" size="md" color={theme.danger} />
+                  <Text style={[s.text, { color: theme.danger }]}>Revoke Active Family Link</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
                 onPress={() => {
                   setCaptainDashboardVisible(false);
                   void loadBreakdownDirectory();
@@ -1946,6 +2176,27 @@ export default function LiveRideScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Upgrade Prompt Modal */}
+      <UpgradePromptModal
+        visible={upgradePromptVisible}
+        featureTitle="Live Family Spectator Link"
+        featureDescription="Share a read-only live map link with family and friends (no app install required). Unlock with Pro Tourer or an Expedition Pass."
+        onClose={() => setUpgradePromptVisible(false)}
+      />
+
+      {/* Trip Chat Sheet */}
+      <TripChatSheet
+        visible={chatVisible}
+        onClose={() => setChatVisible(false)}
+        messages={messages}
+        currentUserId={userId}
+        isOnline={sync.isOnline}
+        onSend={async (body: string, messageType: RideMessageType) => {
+          if (!userId || !id) return;
+          await sendRideMessage(supabase, { rideId: id, senderId: userId, body, messageType });
+        }}
+      />
 
       {/* Mechanical Breakdown Modal */}
       <Modal visible={mechanicalModalVisible} transparent animationType="slide" onRequestClose={() => setMechanicalModalVisible(false)}>

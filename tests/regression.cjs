@@ -2273,3 +2273,188 @@ test('lockfile includes Linux CSS native binaries required by CI builds', () => 
     assert.equal(packageJson.optionalDependencies?.[name], version);
   }
 });
+
+test('Phase 1 external navigation slices multi-stop legs and builds Google/Apple Maps URLs', () => {
+  const nav = loader()('shared/navigation.ts');
+  const points = Array.from({ length: 15 }, (_, i) => ({
+    sequence: i,
+    waypoint_type: i === 0 ? 'origin' : i === 14 ? 'destination' : 'stop',
+    name: `Stop ${i}`,
+    latitude: 12 + i * 0.1,
+    longitude: 77 + i * 0.1,
+  }));
+
+  const legs = nav.sliceNavigationLegs(points, 8);
+  assert.equal(legs.length, 2);
+  assert.equal(legs[0].length, 10);
+  assert.equal(legs[1].length, 6);
+  assert.equal(legs[1][0].sequence, legs[0][legs[0].length - 1].sequence);
+
+  const directGoogle = new URL(nav.buildExternalNavUrl('google_maps', points.slice(0, 2)));
+  assert.equal(directGoogle.searchParams.get('origin'), '12,77');
+  assert.equal(directGoogle.searchParams.get('destination'), '12.1,77.1');
+  assert.equal(directGoogle.searchParams.get('waypoints'), null);
+  assert.equal(directGoogle.searchParams.get('travelmode'), 'driving');
+
+  const multiGoogle = new URL(nav.buildExternalNavUrl('google_maps', legs[0], { avoidTolls: true }));
+  assert.equal(multiGoogle.searchParams.get('avoid'), 'tolls');
+  assert.equal(multiGoogle.searchParams.get('waypoints')?.split('|').length, 8);
+
+  const appleUrl = new URL(nav.buildExternalNavUrl('apple_maps', legs[0]));
+  assert.equal(appleUrl.hostname, 'maps.apple.com');
+  assert.equal(appleUrl.searchParams.get('saddr'), '12,77');
+  assert.equal(appleUrl.searchParams.get('daddr'), '12.1,77.1');
+  assert.equal(appleUrl.searchParams.get('dirflg'), 'd');
+
+  assert.throws(() => nav.sliceNavigationLegs([points[0]]), /at least 2/i);
+  assert.throws(() => nav.buildExternalNavUrl('google_maps', [{ ...points[0], latitude: 95 }, points[1]]), /invalid navigation coordinate/i);
+});
+
+test('Phase 2 classifies rider freshness and evaluates stationary off-route safety check-in', () => {
+  const live = loader()('shared/live.ts');
+  const safety = loader()('shared/safety.ts');
+  const now = Date.parse('2026-11-25T10:00:00Z');
+
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:59:00Z', now), 'live');
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:55:00Z', now), 'stale');
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:45:00Z', now), 'offline');
+  assert.equal(live.formatLastSeenAgo('2026-11-25T09:55:00Z', now), 'Last seen 5 min ago');
+
+  const waypoints = [{ latitude: 12.9716, longitude: 77.5946, waypoint_type: 'fuel' }];
+  const nearFuel = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000,
+    currentLat: 12.9717,
+    currentLng: 77.5947,
+    waypoints,
+  });
+  assert.equal(nearFuel.shouldPrompt, false);
+
+  const offRoute = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000,
+    currentLat: 13.05,
+    currentLng: 77.65,
+    waypoints,
+  });
+  assert.equal(offRoute.shouldPrompt, true);
+  assert.ok(offRoute.nearestWaypointMeters > 300);
+});
+
+test('Phase 3 ride_messages migration enforces non-recursive RLS and shared chat helpers work', async () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/031_ride_messages.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.ride_messages/i);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /public\.is_ride_participant\(ride_id, auth\.uid\(\)\)/);
+  assert.match(migration, /supabase_realtime/);
+
+  assert.ok(shared.QUICK_REPLY_PRESETS.includes('Copy'));
+  assert.ok(shared.QUICK_REPLY_PRESETS.includes('Need assistance'));
+
+  const inserted = [];
+  const client = {
+    from: table => {
+      assert.equal(table, 'ride_messages');
+      return {
+        insert: row => {
+          inserted.push(row);
+          return { select: () => ({ single: async () => ({ data: { id: 'm1', created_at: '2026-11-25T10:00:00Z', ...row }, error: null }) }) };
+        },
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({ data: [{ id: 'm2', body: 'Two' }, { id: 'm1', body: 'One' }], error: null }),
+            }),
+          }),
+        }),
+      };
+    },
+  };
+  const msg = await shared.sendRideMessage(client, { rideId: 'r1', senderId: 'u1', body: ' Copy ', messageType: 'quick_reply' });
+  assert.equal(msg.body, 'Copy');
+  assert.equal(inserted[0].message_type, 'quick_reply');
+  const list = await shared.fetchRideMessages(client, 'r1', 50);
+  assert.deepEqual(list.map(m => m.id), ['m1', 'm2']);
+});
+
+test('Phase 4 pack-minimum fuel, GPX round-trip, and daylight/ghat advisories', () => {
+  const gpxXml = shared.exportTripToGpx({
+    tripName: 'Spiti & Leh',
+    description: 'High altitude ride',
+    waypoints: [
+      { name: 'Manali', latitude: 32.2396, longitude: 77.1887, waypoint_type: 'origin', notes: 'Fuel up & check' },
+      { name: 'Kaza', latitude: 32.2276, longitude: 78.0706, waypoint_type: 'destination' },
+    ],
+    routeCoordinates: [[77.1887, 32.2396], [78.0706, 32.2276]],
+    trailCoordinates: [[77.1887, 32.2396], [77.6, 32.23], [78.0706, 32.2276]],
+  });
+  const parsed = shared.parseGpx(gpxXml);
+  assert.equal(parsed.name, 'Spiti & Leh');
+  assert.equal(parsed.waypoints.length, 2);
+  assert.equal(parsed.waypoints[0].notes, 'Fuel up & check');
+  assert.equal(parsed.routePoints.length, 2);
+  assert.equal(parsed.trackPoints.length, 3);
+
+  const malformed = shared.parseGpx('<gpx><wpt lat="999" lon="77"><name>Bad</name></wpt><wpt lat="12.9" lon="77.5"><name>Good</name></wpt></gpx>');
+  assert.equal(malformed.waypoints.length, 1);
+  assert.equal(malformed.warnings.length, 1);
+
+  const packFuel = shared.calculatePackFuelPlan([
+    { id: 'r1', displayName: 'ADV', tankLiters: 20, mileageKmPerL: 25, reserveLiters: 2 }, // 450 km
+    { id: 'r2', displayName: 'Cruiser', tankLiters: 12, mileageKmPerL: 22, reserveLiters: 2 }, // 220 km
+    { id: 'r3', displayName: 'Unconfigured' },
+  ], 500);
+  assert.equal(packFuel.limitingRider?.id, 'r2');
+  assert.equal(packFuel.limitingRider?.safeRangeKm, 220);
+  assert.equal(packFuel.fuelIntervalKm, 220);
+  assert.equal(packFuel.recommendedFuelStops, 2);
+  assert.equal(packFuel.ridersMissingSpecs.length, 1);
+
+  const ghatNight = shared.evaluateDaylightRisk('2026-11-25T08:00:00Z', 6 * 3600, '2026-11-25T16:30:00Z', 'ghat');
+  assert.equal(ghatNight.risk, 'night');
+  assert.equal(ghatNight.multiplier, 1.45);
+  assert.ok(ghatNight.advisory);
+
+  const highwayDay = shared.evaluateDaylightRisk('2026-11-25T06:00:00Z', 4 * 3600, '2026-11-25T18:00:00Z', 'highway');
+  assert.equal(highwayDay.risk, 'daylight');
+  assert.equal(highwayDay.advisory, null);
+});
+
+test('Phase 5 tier entitlements enforce Host-Unlocks-Group and server-side limits', () => {
+  const freeJoinFreeHost = shared.resolveRideEntitlements({ hostTier: 'free', userTier: 'free', hasExpeditionPass: false });
+  assert.equal(freeJoinFreeHost.effectiveTier, 'free');
+  assert.equal(freeJoinFreeHost.limits.maxTripDays, 2);
+  assert.equal(freeJoinFreeHost.limits.maxWaypointsPerTrip, 5);
+  assert.equal(freeJoinFreeHost.limits.maxParticipantsPerRide, 6);
+  assert.equal(freeJoinFreeHost.canJoinAnyRide, true);
+  assert.equal(freeJoinFreeHost.canUseSos, true);
+
+  const freeJoinProHost = shared.resolveRideEntitlements({ hostTier: 'pro_tourer', userTier: 'free', hasExpeditionPass: false });
+  assert.equal(freeJoinProHost.effectiveTier, 'pro_tourer');
+  assert.equal(freeJoinProHost.isHostUnlocked, true);
+  assert.equal(freeJoinProHost.limits.maxTripDays, null);
+  assert.equal(freeJoinProHost.limits.maxWaypointsPerTrip, 50);
+  assert.equal(freeJoinProHost.limits.supportsSpectatorLink, true);
+
+  const passUnlock = shared.resolveRideEntitlements({ hostTier: 'free', userTier: 'free', hasExpeditionPass: true });
+  assert.equal(passUnlock.effectiveTier, 'pro_tourer');
+  assert.equal(passUnlock.isHostUnlocked, true);
+
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/033_tier_enforcement.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.trip_passes/i);
+  assert.match(migration, /ride_has_pro_access\(p_ride_id uuid\)/);
+  assert.match(migration, /enforce_trip_day_limit/);
+  assert.match(migration, /enforce_participant_limit/);
+  assert.match(migration, /NOT public\.ride_has_pro_access\(lu\.ride_id\)/);
+});
+
+test('Phase 6 spectator links migration enforces Pro gating and zero-PII public snapshot', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/034_spectator_links.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.ride_share_links/i);
+  assert.match(migration, /public\.ride_has_pro_access\(ride_id\)/);
+  assert.match(migration, /get_public_ride_snapshot\(p_token text\)/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.get_public_ride_snapshot\(text\) TO anon, authenticated/);
+  assert.doesNotMatch(migration, /emergency_contact|blood_group|ride_messages|ride_code/i);
+
+  const trackPage = fs.readFileSync(path.resolve('web/src/app/track/[token]/track-view.tsx'), 'utf8');
+  assert.match(trackPage, /get_public_ride_snapshot/);
+  assert.match(trackPage, /Link expired or revoked/);
+});
