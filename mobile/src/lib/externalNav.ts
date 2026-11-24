@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking, Platform } from 'react-native';
 import {
   buildExternalNavUrl,
-  sliceNavigationLegs,
+  sliceNavigationLegsForProvider,
   type ExternalNavProvider,
   type RoutePoint,
 } from '@ridentrack/shared';
@@ -43,7 +43,7 @@ export async function openExternalNavLeg(
   options?: { avoidTolls?: boolean; legIndex?: number },
 ): Promise<{ provider: ExternalNavProvider; legCount: number; legIndex: number }> {
   const provider = preferredProvider ?? (await getPreferredNavProvider());
-  const legs = sliceNavigationLegs(points);
+  const legs = sliceNavigationLegsForProvider(provider, points);
   const legIndex = Math.max(0, Math.min(options?.legIndex ?? 0, legs.length - 1));
   const targetLeg = legs[legIndex];
   const url = buildExternalNavUrl(provider, targetLeg, { avoidTolls: options?.avoidTolls });

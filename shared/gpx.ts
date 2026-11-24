@@ -155,6 +155,8 @@ const VALID_WAYPOINT_TYPES = new Set<RouteWaypointType>([
   'accommodation',
 ]);
 
+const STRICT_DECIMAL_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+
 function parsePointTags(
   xml: string,
   tagName: 'wpt' | 'rtept' | 'trkpt',
@@ -167,10 +169,12 @@ function parsePointTags(
   while ((match = regex.exec(xml)) !== null) {
     const attrs = match[1] || '';
     const inner = match[2] || '';
-    const latMatch = attrs.match(/\blat=["']([^"']+)["']/i);
-    const lonMatch = attrs.match(/\blon=["']([^"']+)["']/i);
-    const lat = latMatch ? Number(latMatch[1]) : Number.NaN;
-    const lon = lonMatch ? Number(lonMatch[1]) : Number.NaN;
+    const latMatch = attrs.match(/\blat\s*=\s*["']([^"']+)["']/i);
+    const lonMatch = attrs.match(/\blon\s*=\s*["']([^"']+)["']/i);
+    const latStr = latMatch?.[1]?.trim() ?? '';
+    const lonStr = lonMatch?.[1]?.trim() ?? '';
+    const lat = STRICT_DECIMAL_RE.test(latStr) ? Number(latStr) : Number.NaN;
+    const lon = STRICT_DECIMAL_RE.test(lonStr) ? Number(lonStr) : Number.NaN;
 
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
       warnings.push(`Skipped malformed <${tagName}> with invalid coordinates.`);
@@ -207,12 +211,13 @@ export function parseGpx(xml: string): {
   }
 
   const warnings: string[] = [];
-  const metadataBlock = xml.match(/<metadata[^>]*>([\s\S]*?)<\/metadata>/i)?.[1] || '';
-  const name = extractTagText(metadataBlock, 'name') || extractTagText(xml, 'name');
+  const cleanXml = xml.replace(/<!--[\s\S]*?-->/g, '');
+  const metadataBlock = cleanXml.match(/<metadata[^>]*>([\s\S]*?)<\/metadata>/i)?.[1] || '';
+  const name = extractTagText(metadataBlock, 'name') || extractTagText(cleanXml, 'name');
 
-  let waypoints = parsePointTags(xml, 'wpt', warnings);
-  let routePoints = parsePointTags(xml, 'rtept', warnings);
-  let trackPoints = parsePointTags(xml, 'trkpt', warnings);
+  let waypoints = parsePointTags(cleanXml, 'wpt', warnings);
+  let routePoints = parsePointTags(cleanXml, 'rtept', warnings);
+  let trackPoints = parsePointTags(cleanXml, 'trkpt', warnings);
 
   if (waypoints.length > MAX_TRIP_ROUTE_POINTS) {
     warnings.push(`Downsampled ${waypoints.length} waypoints to ${MAX_TRIP_ROUTE_POINTS}.`);

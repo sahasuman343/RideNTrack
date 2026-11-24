@@ -17,16 +17,37 @@ CREATE INDEX IF NOT EXISTS idx_ride_share_links_ride
 ALTER TABLE public.ride_share_links ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Ride admin manages pro spectator links" ON public.ride_share_links;
-CREATE POLICY "Ride admin manages pro spectator links" ON public.ride_share_links
-  FOR ALL TO authenticated
+DROP POLICY IF EXISTS "Ride admin views spectator links" ON public.ride_share_links;
+CREATE POLICY "Ride admin views spectator links" ON public.ride_share_links
+  FOR SELECT TO authenticated
   USING (
     EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid())
-    AND public.ride_has_pro_access(ride_id)
-  )
+  );
+
+DROP POLICY IF EXISTS "Ride admin creates pro spectator links" ON public.ride_share_links;
+CREATE POLICY "Ride admin creates pro spectator links" ON public.ride_share_links
+  FOR INSERT TO authenticated
   WITH CHECK (
     created_by = auth.uid()
     AND EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid())
     AND public.ride_has_pro_access(ride_id)
+  );
+
+DROP POLICY IF EXISTS "Ride admin revokes spectator links" ON public.ride_share_links;
+CREATE POLICY "Ride admin revokes spectator links" ON public.ride_share_links
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid())
+  )
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "Ride admin deletes spectator links" ON public.ride_share_links;
+CREATE POLICY "Ride admin deletes spectator links" ON public.ride_share_links
+  FOR DELETE TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM public.rides r WHERE r.id = ride_id AND r.admin_id = auth.uid())
   );
 
 CREATE OR REPLACE FUNCTION public.get_public_ride_snapshot(p_token text)

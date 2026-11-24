@@ -36,6 +36,9 @@ export default function TrackView({ token }: { token: string }) {
   const [snapshot, setSnapshot] = useState<PublicSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [expired, setExpired] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -48,15 +51,21 @@ export default function TrackView({ token }: { token: string }) {
           p_token: token,
         });
         if (cancelled) return;
-        if (error || !data) {
+        if (error) {
+          setConnectionError(error.message || 'Unable to refresh live positions.');
+        } else if (!data) {
           setExpired(true);
+          setConnectionError(null);
           setSnapshot(null);
         } else {
           setExpired(false);
+          setConnectionError(null);
           setSnapshot(data as PublicSnapshot);
         }
       } catch {
-        if (!cancelled) setExpired(true);
+        if (!cancelled) {
+          setConnectionError('Network error while refreshing live positions.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -69,7 +78,7 @@ export default function TrackView({ token }: { token: string }) {
       clearInterval(pollTimer);
       clearInterval(clockTimer);
     };
-  }, [token]);
+  }, [token, retryCount]);
 
   if (loading) {
     return (
@@ -83,7 +92,7 @@ export default function TrackView({ token }: { token: string }) {
     );
   }
 
-  if (expired || !snapshot) {
+  if (expired) {
     return (
       <main className="ride-loading">
         <Link className="wordmark" href="/">
@@ -95,6 +104,21 @@ export default function TrackView({ token }: { token: string }) {
           generate a fresh live tracking link.
         </p>
         <Link href="/">Back to RideNTrack</Link>
+      </main>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <main className="ride-loading">
+        <Link className="wordmark" href="/">
+          ride<span>n</span>track.
+        </Link>
+        <h1>Unable to load ride</h1>
+        <p role="alert">{connectionError || 'Please check your connection and try again.'}</p>
+        <button className="primary-button" onClick={() => setRetryCount(c => c + 1)}>
+          Try again
+        </button>
       </main>
     );
   }
@@ -112,14 +136,25 @@ export default function TrackView({ token }: { token: string }) {
           <span className="eyebrow">FAMILY SPECTATOR VIEW · READ-ONLY</span>
           <h1>{ride.name}</h1>
         </div>
-        <div className="connection-pill" role="status">
+        <div className={'connection-pill ' + (connectionError ? 'is-offline' : '')} role="status">
           <i />
-          Auto-refresh 45s
+          {connectionError ? 'Stale · Retrying' : 'Auto-refresh 45s'}
         </div>
       </header>
 
       <div className="ride-workspace">
-        <aside className="ride-panel">
+        <aside className={'ride-panel ' + (expanded ? 'is-expanded' : '')}>
+          <button
+            className="mobile-panel-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(v => !v)}
+          >
+            <span className="panel-handle" />
+            <span>
+              {participants.length} rider{participants.length === 1 ? '' : 's'} tracked{' '}
+              <b>{expanded ? '⌄' : '⌃'}</b>
+            </span>
+          </button>
           <div className="panel-intro">
             <div className="section-heading">
               <span className="eyebrow">ROUTE</span>
@@ -208,6 +243,12 @@ export default function TrackView({ token }: { token: string }) {
               ⊞ <span>Fit group</span>
             </button>
           </div>
+          {connectionError && (
+            <div className="ride-notice" role="alert">
+              <span>{connectionError} Showing last known positions.</span>
+              <button onClick={() => setRetryCount(c => c + 1)}>Retry</button>
+            </div>
+          )}
         </section>
       </div>
     </main>

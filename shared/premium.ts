@@ -56,15 +56,9 @@ export const TIER_LIMITS: Record<SubscriptionTier, TierLimits> = {
   },
 };
 
-// Backward-compatible legacy alias
+// Backward-compatible alias
 export type PlanLimits = TierLimits;
-export const PLAN_LIMITS: Record<SubscriptionTier, TierLimits> = {
-  ...TIER_LIMITS,
-  free: {
-    ...TIER_LIMITS.free,
-    maxWaypointsPerTrip: 15,
-  },
-};
+export const PLAN_LIMITS = TIER_LIMITS;
 
 export interface RideEntitlements {
   effectiveTier: SubscriptionTier;

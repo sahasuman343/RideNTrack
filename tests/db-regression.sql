@@ -105,15 +105,15 @@ BEGIN
   INSERT INTO public.rides (name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
   VALUES ('Waypoint limit','WPL001',auth.uid(),'A','B','[0,0]','[1,1]','planned')
   RETURNING id INTO v_ride;
-  FOR i IN 1..15 LOOP
+  FOR i IN 1..5 LOOP
     INSERT INTO public.trip_waypoints (ride_id,sequence,waypoint_type,name,latitude,longitude)
-    VALUES (v_ride,i-1,CASE WHEN i=1 THEN 'origin' WHEN i=15 THEN 'destination' ELSE 'stop' END,
+    VALUES (v_ride,i-1,CASE WHEN i=1 THEN 'origin' WHEN i=5 THEN 'destination' ELSE 'stop' END,
             'Point ' || i,0,i::double precision / 100);
   END LOOP;
   BEGIN
     INSERT INTO public.trip_waypoints (ride_id,sequence,waypoint_type,name,latitude,longitude)
-    VALUES (v_ride,15,'stop','Overflow',0,0.2);
-    RAISE EXCEPTION 'free plan accepted a sixteenth waypoint' USING ERRCODE = '23514';
+    VALUES (v_ride,5,'stop','Overflow',0,0.2);
+    RAISE EXCEPTION 'free plan accepted a sixth waypoint' USING ERRCODE = '23514';
   EXCEPTION WHEN raise_exception THEN NULL;
   END;
   UPDATE public.rides SET status = 'completed' WHERE id = v_ride;

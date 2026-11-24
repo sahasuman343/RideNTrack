@@ -215,10 +215,35 @@ export default function LiveRideScreen() {
   const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
   const [chatVisible, setChatVisible] = useState(false);
   const [upgradePromptVisible, setUpgradePromptVisible] = useState(false);
-  const [spectatorLink, setSpectatorLink] = useState<{ id: string; token: string } | null>(null);
+  const [hasActiveSpectatorLink, setHasActiveSpectatorLink] = useState(false);
+  const [rideProAccess, setRideProAccess] = useState(false);
+
+  useEffect(() => {
+    if (!id || !userId) return;
+    let cancelled = false;
+    void supabase.rpc('ride_has_pro_access', { p_ride_id: id }).then(({ data }) => {
+      if (!cancelled && typeof data === 'boolean') setRideProAccess(data);
+    });
+    void supabase
+      .from('ride_share_links')
+      .select('id')
+      .eq('ride_id', id)
+      .is('revoked_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .limit(1)
+      .then(({ data }) => {
+        if (!cancelled) setHasActiveSpectatorLink(Boolean(data && data.length > 0));
+      });
+    return () => { cancelled = true; };
+  }, [id, userId]);
+
   const entitlements = useMemo(
-    () => resolveRideEntitlements({ userTier: profile?.subscription_tier ?? 'free' }),
-    [profile?.subscription_tier],
+    () =>
+      resolveRideEntitlements({
+        userTier: profile?.subscription_tier ?? 'free',
+        hasExpeditionPass: rideProAccess,
+      }),
+    [profile?.subscription_tier, rideProAccess],
   );
 
   async function shareFamilySpectatorLink(hours = 24) {
@@ -230,16 +255,14 @@ export default function LiveRideScreen() {
     try {
       const token = `${ride.id.slice(0, 8)}${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
       const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-      const { data, error: linkErr } = await supabase
+      const { error: linkErr } = await supabase
         .from('ride_share_links')
-        .insert({ ride_id: ride.id, token, created_by: userId, expires_at: expiresAt })
-        .select('id, token')
-        .single();
+        .insert({ ride_id: ride.id, token, created_by: userId, expires_at: expiresAt });
       if (linkErr) throw linkErr;
-      setSpectatorLink(data as { id: string; token: string });
+      setHasActiveSpectatorLink(true);
       await Share.share({
         title: `${ride.name} · Live Family Link`,
-        message: `Track our ride live on RideNTrack: https://ridentrack.app/track/${(data as { token: string }).token}`,
+        message: `Track our ride live on RideNTrack: https://ridentrack.app/track/${token}`,
       });
     } catch (e: any) {
       Dialog.alert('Could not create spectator link', e?.message || 'Pro Tourer or Expedition Pass required.');
@@ -247,14 +270,15 @@ export default function LiveRideScreen() {
   }
 
   async function revokeFamilySpectatorLink() {
-    if (!spectatorLink) return;
+    if (!ride) return;
     const { error: revErr } = await supabase
       .from('ride_share_links')
       .update({ revoked_at: new Date().toISOString() })
-      .eq('id', spectatorLink.id);
+      .eq('ride_id', ride.id)
+      .is('revoked_at', null);
     if (!revErr) {
-      setSpectatorLink(null);
-      setMessage('Family spectator link revoked.');
+      setHasActiveSpectatorLink(false);
+      setMessage('All active family spectator links revoked.');
     }
   }
   const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
@@ -263,6 +287,7 @@ export default function LiveRideScreen() {
     void getPreferredNavProvider().then(setNavProvider);
   }, []);
 
+  const [now, setNow] = useState(() => Date.now());
   const [batteryBannerDismissed, setBatteryBannerDismissed] = useState(false);
   const [stationaryCountdown, setStationaryCountdown] = useState<number | null>(null);
   const stationarySinceRef = useRef<number | null>(null);
@@ -283,6 +308,7 @@ export default function LiveRideScreen() {
     if (speedKmh >= 2 || moved) {
       stationaryAnchorRef.current = { lat: position.lat, lng: position.lng };
       stationarySinceRef.current = nowMs;
+      if (stationaryCountdown !== null) setStationaryCountdown(null);
       return;
     }
     if (!stationarySinceRef.current) {
@@ -299,7 +325,7 @@ export default function LiveRideScreen() {
     if (check.shouldPrompt && stationaryCountdown === null) {
       setStationaryCountdown(120);
     }
-  }, [active, position?.lat, position?.lng, position?.speed, upcomingWaypoints, stationaryCountdown]);
+  }, [active, position?.lat, position?.lng, position?.speed, position?.timestamp, now, upcomingWaypoints, stationaryCountdown]);
 
   useEffect(() => {
     if (stationaryCountdown === null) return;
@@ -325,7 +351,6 @@ export default function LiveRideScreen() {
   const [iceByRider, setIceByRider] = useState<Record<string, RideIceContact>>({});
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
   const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
-  const [now, setNow] = useState(() => Date.now());
   const gps = gpsStatus(active && sharing ? tracking : 'paused', position?.timestamp, now);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const gpsRecoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -503,6 +528,12 @@ export default function LiveRideScreen() {
       onError: e => {
         if (!cancelled) setGpsError(e);
       },
+      onAutoStop: () => {
+        if (!cancelled) {
+          setSharing(false);
+          setTracking('paused');
+        }
+      },
       onGpsRecovered: () => {
         if (!cancelled) {
           setGpsRecoveryStatus('recovered');
@@ -645,29 +676,26 @@ export default function LiveRideScreen() {
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
     try {
-      const remaining = upcomingWaypoints.slice(targetWaypointIndex);
-      const legPoints: RoutePoint[] = [];
       if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
-        legPoints.push({
-          sequence: 0,
-          waypoint_type: 'origin',
-          name: 'Current Location',
-          latitude: position.lat,
-          longitude: position.lng,
-        });
-      }
-      remaining.forEach((wp, idx) => {
-        legPoints.push({
-          sequence: legPoints.length,
-          waypoint_type: idx === remaining.length - 1 ? 'destination' : 'stop',
-          name: wp.name,
-          latitude: wp.latitude,
-          longitude: wp.longitude,
-          provider_place_id: wp.provider_place_id,
-        });
-      });
+        const remaining = upcomingWaypoints.slice(targetWaypointIndex);
+        const legPoints: RoutePoint[] = [
+          {
+            sequence: 0,
+            waypoint_type: 'origin',
+            name: 'Current Location',
+            latitude: position.lat,
+            longitude: position.lng,
+          },
+          ...remaining.map((wp, idx) => ({
+            sequence: idx + 1,
+            waypoint_type: (idx === remaining.length - 1 ? 'destination' : 'stop') as RoutePoint['waypoint_type'],
+            name: wp.name,
+            latitude: wp.latitude,
+            longitude: wp.longitude,
+            provider_place_id: wp.provider_place_id,
+          })),
+        ];
 
-      if (legPoints.length >= 2) {
         const result = await openExternalNavLeg(legPoints, navProvider);
         if (result.legCount > 1) {
           setMessage(`Opened leg 1 of ${result.legCount} in ${formatNavProviderLabel(result.provider)}`);
@@ -1301,7 +1329,7 @@ export default function LiveRideScreen() {
               <Icon name="close" size="sm" color={theme.textMuted} />
             </TouchableOpacity>
           </View>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
             <TouchableOpacity style={s.floatingAlertSecondaryBtn} onPress={() => void Linking.openSettings()}>
               <Text style={s.floatingAlertActionText}>Open Battery Settings</Text>
             </TouchableOpacity>
@@ -1316,7 +1344,7 @@ export default function LiveRideScreen() {
             <Icon name="alert-circle-outline" size="sm" color={theme.danger} />
             <Text style={[s.floatingAlertTitle, { flex: 1 }]}>Stopped off-route — Are you okay? ({stationaryCountdown}s)</Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
             <TouchableOpacity
               style={s.floatingAlertSecondaryBtn}
               onPress={() => {
@@ -2148,7 +2176,7 @@ export default function LiveRideScreen() {
                 <Icon name="share-social-outline" size="md" color={theme.accent} />
                 <Text style={[s.text, { color: theme.accent }]}>Share Live Family Link (24h)</Text>
               </TouchableOpacity>
-              {spectatorLink && (
+              {hasActiveSpectatorLink && (
                 <TouchableOpacity
                   style={[s.alertOption, { borderColor: theme.danger, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
                   onPress={() => void revokeFamilySpectatorLink()}

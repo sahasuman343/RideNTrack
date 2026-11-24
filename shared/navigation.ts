@@ -52,6 +52,22 @@ export function sliceNavigationLegs(
 }
 
 /**
+ * Splits a route into sequential legs tailored to the external navigation provider.
+ * Apple Maps URLs support a single immediate destination, so multi-stop routes
+ * are split into sequential two-point hops so no stop is omitted.
+ */
+export function sliceNavigationLegsForProvider(
+  provider: ExternalNavProvider,
+  points: RoutePoint[],
+  maxIntermediateWaypoints = 8,
+): RoutePoint[][] {
+  if (provider === 'apple_maps') {
+    return sliceNavigationLegs(points, 0);
+  }
+  return sliceNavigationLegs(points, maxIntermediateWaypoints);
+}
+
+/**
  * Builds an external turn-by-turn navigation URL for Google Maps or Apple Maps
  * for a single navigation leg.
  */

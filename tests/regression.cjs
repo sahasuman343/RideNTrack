@@ -1048,8 +1048,8 @@ test('plan limits and payment architecture config enforce free vs pro tourer bou
   assert.equal(shared.canCreateMoreTrips(5, 'free'), false);
   assert.equal(shared.canCreateMoreTrips(5, 'pro_tourer'), true);
 
-  assert.equal(shared.canAddMoreWaypoints(14, 'free'), true);
-  assert.equal(shared.canAddMoreWaypoints(15, 'free'), false);
+  assert.equal(shared.canAddMoreWaypoints(4, 'free'), true);
+  assert.equal(shared.canAddMoreWaypoints(5, 'free'), false);
   assert.equal(shared.canAddMoreWaypoints(15, 'pro_tourer'), true);
 
   assert.equal(shared.PAYMENT_CONFIG.provider, 'razorpay');
@@ -2306,6 +2306,12 @@ test('Phase 1 external navigation slices multi-stop legs and builds Google/Apple
   assert.equal(appleUrl.searchParams.get('daddr'), '12.1,77.1');
   assert.equal(appleUrl.searchParams.get('dirflg'), 'd');
 
+  const appleHops = nav.sliceNavigationLegsForProvider('apple_maps', points.slice(0, 4));
+  assert.equal(appleHops.length, 3);
+  assert.equal(appleHops[0].length, 2);
+  assert.equal(appleHops[1][0].sequence, 1);
+  assert.equal(appleHops[2][1].sequence, 3);
+
   assert.throws(() => nav.sliceNavigationLegs([points[0]]), /at least 2/i);
   assert.throws(() => nav.buildExternalNavUrl('google_maps', [{ ...points[0], latitude: 95 }, points[1]]), /invalid navigation coordinate/i);
 });
@@ -2393,9 +2399,15 @@ test('Phase 4 pack-minimum fuel, GPX round-trip, and daylight/ghat advisories', 
   assert.equal(parsed.routePoints.length, 2);
   assert.equal(parsed.trackPoints.length, 3);
 
-  const malformed = shared.parseGpx('<gpx><wpt lat="999" lon="77"><name>Bad</name></wpt><wpt lat="12.9" lon="77.5"><name>Good</name></wpt></gpx>');
+  const malformed = shared.parseGpx(
+    '<!-- <wpt lat="10" lon="20"><name>Commented</name></wpt> -->' +
+    '<gpx><wpt lat = "999" lon="77"><name>Bad</name></wpt>' +
+    '<wpt lat="" lon="77"><name>Blank</name></wpt>' +
+    '<wpt lat = "12.9" lon = "77.5"><name>Good</name></wpt></gpx>'
+  );
   assert.equal(malformed.waypoints.length, 1);
-  assert.equal(malformed.warnings.length, 1);
+  assert.equal(malformed.waypoints[0].name, 'Good');
+  assert.equal(malformed.warnings.length, 2);
 
   const packFuel = shared.calculatePackFuelPlan([
     { id: 'r1', displayName: 'ADV', tankLiters: 20, mileageKmPerL: 25, reserveLiters: 2 }, // 450 km

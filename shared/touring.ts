@@ -164,9 +164,10 @@ export function calculatePackFuelPlan(
   riders: PackRiderFuelInput[],
   routeDistanceKm: number,
 ): PackFuelPlan {
-  const safeDistanceKm = Number.isFinite(routeDistanceKm) && routeDistanceKm > 0 ? Math.round(routeDistanceKm * 10) / 10 : 0;
+  const exactDistanceKm = Number.isFinite(routeDistanceKm) && routeDistanceKm > 0 ? routeDistanceKm : 0;
+  const displayDistanceKm = Math.round(exactDistanceKm * 10) / 10;
   const ridersMissingSpecs: Array<{ id: string; displayName: string }> = [];
-  let limitingRider: { id: string; displayName: string; safeRangeKm: number } | null = null;
+  let limitingRiderExact: { id: string; displayName: string; exactRangeKm: number } | null = null;
   let ridersWithSpecs = 0;
 
   for (const rider of riders) {
@@ -180,22 +181,29 @@ export function calculatePackFuelPlan(
     }
 
     ridersWithSpecs++;
-    const safeRangeKm = Math.round((tank - reserve) * mileage);
-    if (safeRangeKm > 0 && (!limitingRider || safeRangeKm < limitingRider.safeRangeKm)) {
-      limitingRider = { id: rider.id, displayName: rider.displayName, safeRangeKm };
+    const exactRangeKm = (tank - reserve) * mileage;
+    if (exactRangeKm > 0 && (!limitingRiderExact || exactRangeKm < limitingRiderExact.exactRangeKm)) {
+      limitingRiderExact = { id: rider.id, displayName: rider.displayName, exactRangeKm };
     }
   }
 
+  const limitingRider = limitingRiderExact
+    ? {
+        id: limitingRiderExact.id,
+        displayName: limitingRiderExact.displayName,
+        safeRangeKm: Math.round(limitingRiderExact.exactRangeKm),
+      }
+    : null;
   const fuelIntervalKm = limitingRider ? limitingRider.safeRangeKm : null;
   const recommendedFuelStops =
-    limitingRider && limitingRider.safeRangeKm > 0 && safeDistanceKm > 0
-      ? Math.max(0, Math.ceil(safeDistanceKm / limitingRider.safeRangeKm) - 1)
-      : limitingRider
+    limitingRiderExact && limitingRiderExact.exactRangeKm > 0 && exactDistanceKm > 0
+      ? Math.max(0, Math.ceil(exactDistanceKm / limitingRiderExact.exactRangeKm) - 1)
+      : limitingRiderExact
         ? 0
         : null;
 
   return {
-    routeDistanceKm: safeDistanceKm,
+    routeDistanceKm: displayDistanceKm,
     limitingRider,
     fuelIntervalKm,
     recommendedFuelStops,

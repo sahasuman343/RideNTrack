@@ -49,7 +49,23 @@ export async function fetchRideMessages(
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return ((data || []) as RideMessage[]).reverse();
+
+  let memberNames = new Map<string, string>();
+  try {
+    const membersRes = await client.rpc('get_ride_members', { p_ride_id: rideId });
+    if (!membersRes.error && Array.isArray(membersRes.data)) {
+      memberNames = new Map(
+        (membersRes.data as Array<{ user_id: string; display_name: string }>).map(m => [m.user_id, m.display_name]),
+      );
+    }
+  } catch {
+    // Keep fallback sender names if member lookup fails.
+  }
+
+  return ((data || []) as RideMessage[]).reverse().map(msg => ({
+    ...msg,
+    sender_name: msg.sender_name || memberNames.get(msg.sender_id) || 'Rider',
+  }));
 }
 
 export async function sendRideMessage(
@@ -207,6 +223,14 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       // only fetches locations, rather than reloading all ride metadata.
       if (connected) {
         void refresh();
+        if (observer.onMessage) {
+          void fetchRideMessages(client, rideId, 50)
+            .then(msgs => {
+              if (disposed) return;
+              msgs.forEach(msg => observer.onMessage?.(msg));
+            })
+            .catch(() => {});
+        }
         if (lastPublished) void presence.track(lastPublished);
       }
     });

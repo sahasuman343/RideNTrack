@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { syncQueue } from './syncQueue';
 export const BACKGROUND_LOCATION_TASK = 'RIDENTRACK_BACKGROUND_LOCATION_TASK';
 const CONTEXT_KEY = '@ridentrack/active-ride';
-interface Context { rideId: string; userId: string; displayName: string }
+interface Context { rideId: string; userId: string; displayName: string; startedAtMs?: number }
 interface Params extends Context {
   onLocationUpdate?: (point: LocationUpdate) => void;
   publish?: (point: LocationUpdate) => Promise<void> | void;
@@ -128,6 +128,9 @@ async function record(locations: Location.LocationObject[]) {
   const version = generation;
   const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
   if (!saved) return;
+  if (!trackingStartedAtMs && saved.startedAtMs) {
+    trackingStartedAtMs = saved.startedAtMs;
+  }
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const session = sessionRes?.data?.session;
   // If a session exists, ensure it matches the active rider. Do not drop offline
@@ -261,9 +264,11 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
         if (version !== generation) return { mode: 'stopped' };
         fallback?.remove();
         fallback = null;
-        setContext(params);
+        const restoredStartedAtMs = saved.startedAtMs ?? (trackingStartedAtMs || Date.now());
+        trackingStartedAtMs = restoredStartedAtMs;
+        setContext({ ...params, startedAtMs: restoredStartedAtMs });
         await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-          rideId: params.rideId, userId: params.userId, displayName: params.displayName,
+          rideId: params.rideId, userId: params.userId, displayName: params.displayName, startedAtMs: restoredStartedAtMs,
         }));
         return { mode: 'background', permissionGranted: true };
       }
@@ -272,14 +277,15 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
       if (version !== generation) return { mode: 'stopped' };
     }
 
-    setContext(params);
+    const startedAtMs = Date.now();
+    trackingStartedAtMs = startedAtMs;
+    setContext({ ...params, startedAtMs });
     await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-      rideId: params.rideId, userId: params.userId, displayName: params.displayName,
+      rideId: params.rideId, userId: params.userId, displayName: params.displayName, startedAtMs,
     }));
     fallback?.remove();
     fallback = null;
     lastFixTimestamp = 0;
-    trackingStartedAtMs = Date.now();
     stationarySinceMs = null;
     lastMovedCoords = null;
     adaptiveLowPower = false;

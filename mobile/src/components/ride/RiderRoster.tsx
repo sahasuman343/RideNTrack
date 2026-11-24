@@ -29,21 +29,22 @@ export const RiderRoster = React.memo(function RiderRoster({ points, userId, rid
       ListEmptyComponent={<Text style={styles.muted}>Rider positions appear after GPS starts. Last known positions remain visible during signal loss.</Text>}
       renderItem={({ item: point }) => {
         const status = getRiderLiveStatus(point, rideStatus, now);
+        const isCompleted = rideStatus === 'completed';
         const freshness = classifyRiderFreshness(point.timestamp, now);
         const lastSeenBadge = formatLastSeenAgo(point.timestamp, now);
         const ice = iceByRider[point.user_id];
-        const disconnected = status.status === 'disconnected' || freshness !== 'live';
+        const disconnected = !isCompleted && (status.status === 'disconnected' || freshness !== 'live');
         return (
-          <TouchableOpacity style={[styles.row, freshness === 'offline' && styles.stale]} onPress={() => onFocusRider(point)} accessibilityRole="button" accessibilityLabel={`Focus map on ${point.display_name}`}>
+          <TouchableOpacity style={[styles.row, !isCompleted && freshness === 'offline' && styles.stale]} onPress={() => onFocusRider(point)} accessibilityRole="button" accessibilityLabel={`Focus map on ${point.display_name}`}>
             <View style={[styles.avatar, status.status === 'riding' && freshness === 'live' ? styles.riding : disconnected ? styles.stale : styles.stopped]}>
               <Text style={styles.avatarText}>{(point.display_name?.[0] || 'R').toUpperCase()}</Text>
             </View>
             <View style={styles.grow}>
               <View style={styles.nameRow}>
                 <Text style={styles.text}>{point.display_name}{point.user_id === userId ? ' · you' : ''}</Text>
-                <View style={[styles.pill, disconnected && styles.pillDisconnected]}><Text style={styles.pillText}>{freshness === 'live' ? status.label : lastSeenBadge}</Text></View>
+                <View style={[styles.pill, disconnected && styles.pillDisconnected]}><Text style={styles.pillText}>{isCompleted || freshness === 'live' ? status.label : lastSeenBadge}</Text></View>
               </View>
-              <Text style={styles.muted}>{disconnected ? status.lastSeenText || lastSeenBadge : status.status === 'completed' ? 'Ride completed' : 'Live location'}</Text>
+              <Text style={styles.muted}>{disconnected ? status.lastSeenText || lastSeenBadge : isCompleted ? 'Ride completed' : 'Live location'}</Text>
               {!!ice && (
                 <View style={styles.iceRow}>
                   <Text style={styles.iceText} numberOfLines={1}>ICE{ice.blood_group ? ` · ${ice.blood_group}` : ''}{ice.emergency_contact ? ` · ${ice.emergency_contact}` : ''}</Text>

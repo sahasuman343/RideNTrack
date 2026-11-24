@@ -43,12 +43,27 @@ function RideSession({ rideId }: { rideId: string | null }) {
       if (error) throw error;
       if (!session) { router.replace('/login'); return; }
       setCurrentUserId(session.user.id);
-      void fetchRideMessages(supabase, rideId, 50).then(setMessages).catch(() => {});
+      const mergeMsgs = (prev: RideMessage[], incoming: RideMessage[]) => {
+        const byId = new Map<string, RideMessage>();
+        for (const m of prev) byId.set(m.id, m);
+        for (const m of incoming) {
+          const existing = byId.get(m.id);
+          byId.set(m.id, existing ? { ...existing, ...m } : m);
+        }
+        return [...byId.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+      };
+      void fetchRideMessages(supabase, rideId, 50)
+        .then(history => {
+          if (!cancelled) setMessages(previous => mergeMsgs(previous, history));
+        })
+        .catch(() => {});
       feed = watchRide(supabase, rideId, session.user.id, {
         ride: setRide,
         locations: setRiders,
         alerts: incoming => setAlerts(previous => mergeAlerts(previous,incoming)),
-        onMessage: msg => setMessages(previous => previous.some(m => m.id === msg.id) ? previous : [...previous, msg]),
+        onMessage: msg => {
+          if (!cancelled) setMessages(previous => mergeMsgs(previous, [msg]));
+        },
         connection: setConnection,
         error: setError,
       });
@@ -116,10 +131,13 @@ function RideSession({ rideId }: { rideId: string | null }) {
             e.preventDefault();
             if (!rideId || !currentUserId || !chatDraft.trim() || !online) return;
             const body = chatDraft.trim();
-            setChatDraft('');
-            void sendRideMessage(supabase, { rideId, senderId: currentUserId, body, messageType: 'text' }).catch(err => setError(err.message));
+            void sendRideMessage(supabase, { rideId, senderId: currentUserId, body, messageType: 'text' })
+              .then(() => {
+                setChatDraft(prev => (prev.trim() === body ? '' : prev));
+              })
+              .catch(err => setError(err.message));
           }}>
-            <input value={chatDraft} onChange={e => setChatDraft(e.target.value)} placeholder={online ? 'Message pack…' : 'Offline…'} disabled={!online} />
+            <input value={chatDraft} onChange={e => setChatDraft(e.target.value)} maxLength={1000} placeholder={online ? 'Message pack…' : 'Offline…'} disabled={!online} />
             <button type="submit" disabled={!online || !chatDraft.trim()}>Send</button>
           </form>
         </div>

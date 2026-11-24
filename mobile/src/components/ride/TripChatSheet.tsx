@@ -36,6 +36,7 @@ export function TripChatSheet({
   const s = useMemo(() => makeStyles(theme), [theme]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const pinnedMessages = useMemo(
     () => messages.filter(m => m.is_pinned || m.message_type === 'pinned_info'),
@@ -46,9 +47,12 @@ export function TripChatSheet({
     const trimmed = text.trim();
     if (!trimmed || sending || !isOnline) return;
     setSending(true);
+    setSendError(null);
     try {
       await onSend(trimmed, type);
       if (type === 'text') setDraft('');
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Failed to send message. Try again.');
     } finally {
       setSending(false);
     }
@@ -74,7 +78,13 @@ export function TripChatSheet({
           {!isOnline && (
             <View style={s.offlineBanner}>
               <Icon name="cloud-offline-outline" size="sm" color={theme.warning} />
-              <Text style={s.offlineText}>Offline — messages send when signal returns</Text>
+              <Text style={s.offlineText}>Offline — sending messages is unavailable until signal returns</Text>
+            </View>
+          )}
+          {sendError && (
+            <View style={s.offlineBanner}>
+              <Icon name="alert-circle-outline" size="sm" color={theme.danger} />
+              <Text style={[s.offlineText, { color: theme.danger }]}>{sendError}</Text>
             </View>
           )}
 
