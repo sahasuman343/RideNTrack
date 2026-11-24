@@ -1,25 +1,27 @@
-name: Build Android preview APK
+name: Build RideNTrack beta APK
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*-beta.*'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ridentrack-apk-${{ github.ref }}
+  group: ridentrack-beta-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   validate:
-    name: Validate selected branch
+    name: Validate tagged release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Check out selected branch
+      - name: Check out the exact tagged commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.ref }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -33,19 +35,27 @@ jobs:
         run: npm test
       - name: Web lint
         run: npm run lint
+      - name: Validate beta tag format
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            echo "::error::Expected a tag like v1.0.0-beta.1; got $RELEASE_TAG"
+            exit 1
+          fi
 
   build:
-    name: Approved EAS APK build
+    name: Approved EAS beta APK build
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment:
       name: apk-approval
     steps:
-      - name: Check out the exact selected commit
+      - name: Check out the exact tagged commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.ref }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -54,7 +64,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Install pinned EAS CLI
         run: npm install --global eas-cli@27.10.0
-      - name: Start Android APK build on EAS
+      - name: Start Android beta APK build on EAS
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -85,24 +95,24 @@ jobs:
             if (!result.path) throw new Error('EAS CLI did not return the downloaded APK path');
             process.stdout.write(result.path);
           ")"
-          cp "$APK_PATH" "$GITHUB_WORKSPACE/RideNTrack-preview.apk"
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/RideNTrack-${GITHUB_REF_NAME}.apk"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RideNTrack-android-apk-${{ github.sha }}
-          path: RideNTrack-preview.apk
+          name: RideNTrack-${{ github.ref_name }}-APK
+          path: RideNTrack-${{ github.ref_name }}.apk
           if-no-files-found: error
-          retention-days: 14
-      - name: Publish build details
+          retention-days: 30
+      - name: Publish beta build details
         if: always()
         run: |
           {
-            echo "## RideNTrack Android preview build"
+            echo "## RideNTrack beta APK"
             echo
-            echo "- **Branch:** \`${GITHUB_REF_NAME}\`"
+            echo "- **Version tag:** \`${GITHUB_REF_NAME}\`"
             echo "- **Commit:** \`${GITHUB_SHA}\`"
             echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
-            echo "- **Profile:** \`preview\` (APK)"
+            echo "- **EAS profile:** \`preview\` (internal APK)"
             echo
             echo "Download the APK from this workflow run's **Artifacts** section."
           } >> "$GITHUB_STEP_SUMMARY"
