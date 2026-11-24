@@ -62,7 +62,7 @@ export async function fetchRideMessages(
     // Keep fallback sender names if member lookup fails.
   }
 
-  return ((data || []) as RideMessage[]).reverse().map(msg => ({
+  return (Array.isArray(data) ? (data as RideMessage[]) : []).slice().reverse().map(msg => ({
     ...msg,
     sender_name: msg.sender_name || memberNames.get(msg.sender_id) || 'Rider',
   }));

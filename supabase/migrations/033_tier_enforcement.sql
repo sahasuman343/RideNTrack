@@ -68,6 +68,8 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.enforce_waypoint_limit() FROM PUBLIC, anon, authenticated;
+
 -- Trip day cap trigger: unlimited for Pro/Pass rides, 2 days for Free rides
 CREATE OR REPLACE FUNCTION public.enforce_trip_day_limit()
 RETURNS trigger
@@ -146,5 +148,7 @@ BEGIN
   RETURN v_deleted;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.purge_old_location_history(integer) FROM PUBLIC, anon, authenticated;
 
 COMMIT;
