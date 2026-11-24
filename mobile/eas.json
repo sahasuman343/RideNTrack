@@ -10,6 +10,8 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "beta",
+      "autoIncrement": true,
       "android": {
         "buildType": "apk"
       },
