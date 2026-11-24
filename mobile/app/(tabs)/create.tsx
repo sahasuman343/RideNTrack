@@ -22,8 +22,10 @@ import {
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
-import { useRideTheme, RidePalette } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
+import { Icon } from '../../src/components/ui';
+import { WAYPOINT_ICONS } from '../../src/icons';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
 type WaypointKind = 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'repair';
@@ -213,7 +215,7 @@ function LocationSearch({
           setLocationError('');
         }}
         placeholder={placeholder}
-        placeholderTextColor="#77809a"
+        placeholderTextColor={theme.subtle}
         autoCorrect={false}
         autoCapitalize="words"
         returnKeyType="search"
@@ -250,7 +252,12 @@ function LocationSearch({
           ))}
         </View>
       )}
-      {value ? <Text style={styles.selected}>✓ {value.address}</Text> : null}
+      {value ? (
+        <View style={styles.selectedRow}>
+          <Icon name="checkmark-circle-outline" size="sm" color={theme.green} />
+          <Text style={styles.selected}>{value.address}</Text>
+        </View>
+      ) : null}
       {locationError ? <Text style={styles.error}>{locationError}</Text> : null}
       {searchError ? <Text style={styles.help}>{searchError}</Text> : null}
       {!TOKEN ? <Text style={styles.help}>Add EXPO_PUBLIC_MAPBOX_TOKEN to enable searchable places.</Text> : null}
@@ -423,6 +430,7 @@ export default function CreateRideScreen() {
     }
     return result;
   }, [startDate, endDate]);
+  const plannedStopCount = stops.filter(s => s.place).length;
 
   function setPresetDates(start: Date, end: Date) {
     setStartDate(formatYMD(start));
@@ -523,7 +531,7 @@ export default function CreateRideScreen() {
         .in('status', ['planned', 'active']);
       if (!countError && typeof count === 'number' && !canCreateMoreTrips(count, tier)) {
         Alert.alert(
-          tier === 'free' ? '⭐️ RideNTrack Free Plan Limit' : 'RideNTrack Plan Limit',
+          tier === 'free' ? 'RideNTrack Free Plan Limit' : 'RideNTrack Plan Limit',
           tier === 'free'
             ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for more trips and route points.`
             : `Your Pro Tourer plan has reached its ${PLAN_LIMITS.pro_tourer.maxActiveTrips}-trip active limit. Complete or archive an existing trip first.`,
@@ -743,10 +751,10 @@ export default function CreateRideScreen() {
               onPress={() => router.back()}
               accessibilityLabel="Cancel"
             >
-              <Text style={styles.cancelIcon}>✕</Text>
+              <Icon name="close" size="md" color={theme.text} />
             </TouchableOpacity>
             <View style={styles.draftStatusRow}>
-              <Text style={styles.cloudDoneIcon}>☁️</Text>
+              <Icon name="cloud-done-outline" size="sm" color={theme.textMuted} />
               <Text style={styles.draftStatusText}>{draftSavedTime}</Text>
             </View>
           </View>
@@ -782,15 +790,13 @@ export default function CreateRideScreen() {
                       isCurrent && styles.stepCircleCurrent,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.stepCircleText,
-                        isCompleted && styles.stepCircleTextCompleted,
-                        isCurrent && styles.stepCircleTextCurrent,
-                      ]}
-                    >
-                      {isCompleted ? '✓' : step.num}
-                    </Text>
+                    {isCompleted && !isCurrent ? (
+                      <Icon name="checkmark" size="sm" color={theme.green} />
+                    ) : (
+                      <Text style={[styles.stepCircleText, isCurrent && styles.stepCircleTextCurrent]}>
+                        {step.num}
+                      </Text>
+                    )}
                   </View>
                   <Text
                     style={[
@@ -857,7 +863,7 @@ export default function CreateRideScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="e.g. Spiti Valley High Passes"
-                placeholderTextColor="#77809a"
+                placeholderTextColor={theme.subtle}
               />
             </View>
 
@@ -880,7 +886,7 @@ export default function CreateRideScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Select trip dates in calendar"
               >
-                <Text style={styles.calendarIcon}>📅</Text>
+                <Icon name="calendar-outline" size="lg" color={theme.accent} />
                 <View style={styles.datePickerTextWrapper}>
                   <Text style={styles.datePickerTitle}>
                     {startDate
@@ -964,8 +970,9 @@ export default function CreateRideScreen() {
             {/* Route Preview Badge if available */}
             {previewRoute ? (
               <View style={styles.routePreviewPill}>
+                <Icon name="navigate-outline" size="sm" color={theme.green} />
                 <Text style={styles.routePreviewText}>
-                  🏍️ Estimated leg: {(previewRoute.distance / 1000).toFixed(0)} km · ~{Math.round(previewRoute.duration / 3600)} hrs driving
+                  Estimated leg: {(previewRoute.distance / 1000).toFixed(0)} km · ~{Math.round(previewRoute.duration / 3600)} hrs driving
                 </Text>
               </View>
             ) : null}
@@ -1008,22 +1015,28 @@ export default function CreateRideScreen() {
               ))}
               <View style={styles.chips}>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('stop')}>
-                  <Text style={styles.addText}>🛑 ＋ Stop</Text>
+                  <Icon name={WAYPOINT_ICONS.stop} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Stop</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('fuel')}>
-                  <Text style={styles.addText}>⛽ ＋ Fuel</Text>
+                  <Icon name={WAYPOINT_ICONS.fuel} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Fuel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('food')}>
-                  <Text style={styles.addText}>🍽️ ＋ Food</Text>
+                  <Icon name={WAYPOINT_ICONS.food} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Food</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('rest')}>
-                  <Text style={styles.addText}>☕ ＋ Rest</Text>
+                  <Icon name={WAYPOINT_ICONS.rest} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Rest</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('sightseeing')}>
-                  <Text style={styles.addText}>📸 ＋ Scenic</Text>
+                  <Icon name={WAYPOINT_ICONS.sightseeing} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Scenic</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.addButton} onPress={() => addStop('repair')}>
-                  <Text style={styles.addText}>🔧 ＋ Repair</Text>
+                  <Icon name={WAYPOINT_ICONS.repair} size="sm" color={theme.accent} />
+                  <Text style={styles.addText}>Repair</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1083,10 +1096,11 @@ export default function CreateRideScreen() {
                   setShowCalendar(true);
                 }}
               >
+                <Icon name="calendar-outline" size="sm" color={theme.accent} />
                 <Text style={styles.stayDateText}>
                   {checkIn
-                    ? `Stay: ${formatDateNice(checkIn)} → ${formatDateNice(checkOut || checkIn)} 📅`
-                    : 'Select Stay Dates in Calendar 📅'}
+                    ? `Stay: ${formatDateNice(checkIn)} → ${formatDateNice(checkOut || checkIn)}`
+                    : 'Select Stay Dates in Calendar'}
                 </Text>
               </TouchableOpacity>
               <TextInput
@@ -1095,7 +1109,7 @@ export default function CreateRideScreen() {
                 onChangeText={setStayPrice}
                 keyboardType="decimal-pad"
                 placeholder="Approx. price (INR, optional)"
-                placeholderTextColor="#77809a"
+                placeholderTextColor={theme.subtle}
               />
             </View>
           </View>
@@ -1123,7 +1137,7 @@ export default function CreateRideScreen() {
                 value={description}
                 onChangeText={setDescription}
                 placeholder="Notes about packing, gear, road observations, or itinerary notes"
-                placeholderTextColor="#77809a"
+                placeholderTextColor={theme.subtle}
               />
             </View>
 
@@ -1159,7 +1173,7 @@ export default function CreateRideScreen() {
               <View style={styles.calibrationDivider} />
               <View style={styles.offlineCacheRow}>
                 <View style={styles.offlineCacheLeft}>
-                  <Text style={styles.offlineCacheIcon}>💾</Text>
+                  <Icon name="cloud-download-outline" size="md" color={theme.textMuted} />
                   <View>
                     <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
                     <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
@@ -1190,64 +1204,37 @@ export default function CreateRideScreen() {
                   <Text style={styles.telemetryValueUnit}>{previewRoute ? 'KM' : ''}</Text>
                 </View>
                 <View style={styles.saddleTimeRow}>
+                  <Icon name="time-outline" size="xs" color={theme.green} />
                   <Text style={styles.saddleTimeText}>
-                    ⏱️ {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '— Est. Saddle'}
+                    {previewRoute ? `${Math.round(previewRoute.duration / 3600)}h Est. Saddle` : '— Est. Saddle'}
                   </Text>
                 </View>
               </View>
 
               <View style={styles.telemetrySummaryCard}>
-                <View style={styles.apexTopRow}>
-                  <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
-                  <View style={styles.reconBadge}>
-                    <Text style={styles.reconBadgeText}>Advisory</Text>
-                  </View>
-                </View>
+                <Text style={styles.telemetrySummaryLabel}>TRIP DURATION</Text>
                 <View style={styles.telemetryValueRow}>
-                  <Text style={styles.telemetryValueNum}>4,590</Text>
-                  <Text style={styles.telemetryValueUnitMuted}>M</Text>
+                  <Text style={styles.telemetryValueNum}>{days.length > 0 ? days.length : '—'}</Text>
+                  <Text style={styles.telemetryValueUnitMuted}>{days.length === 1 ? 'DAY' : days.length > 1 ? 'DAYS' : ''}</Text>
                 </View>
                 <View style={styles.saddleTimeRow}>
                   <Text style={styles.apexPassText} numberOfLines={1}>
-                    🏔️ Sample Topography
+                    {plannedStopCount} planned {plannedStopCount === 1 ? 'stop' : 'stops'}
                   </Text>
                 </View>
               </View>
             </View>
 
-            {/* Ascent Profile Chart Card */}
+            {/* Ascent Profile Card */}
             <View style={styles.ascentProfileCard}>
               <View style={styles.ascentHeader}>
                 <View style={styles.ascentTitleRow}>
-                  <Text style={styles.ascentChartIcon}>📈</Text>
-                  <Text style={styles.ascentTitleText}>Ascent Profile</Text>
+                  <Icon name="trending-up-outline" size="sm" color={theme.accent} />
+                  <Text style={styles.ascentTitleText}>Ascent Profile (MAX APEX)</Text>
                 </View>
                 <View style={styles.ascentNetClimbBadge}>
                   <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
                 </View>
-              </View>
-              {/* Topographic Sparkline Visual */}
-              <View style={styles.sparklineBox}>
-                <View style={styles.sparklinePeakPill}>
-                  <Text style={styles.sparklinePeakText}>🏔️ 4,590m Pass</Text>
-                </View>
-                <View style={styles.sparklineGuides}>
-                  <View style={styles.sparklineGuideLine} />
-                  <View style={styles.sparklineGuideLine} />
-                </View>
-                <View style={styles.sparklineCurveTrack}>
-                  <View style={styles.sparklineRidge} />
-                </View>
-                <View style={styles.sparklineFooters}>
-                  <Text style={styles.sparklineElevationLabel}>{origin ? origin.name : 'Origin'}</Text>
-                  <Text style={styles.sparklineElevationLabel}>{destination ? destination.name : 'Destination'}</Text>
-                </View>
-              </View>
-              <View style={styles.cautionNotice}>
-                <Text style={styles.cautionIcon}>⚠️</Text>
-                <Text style={styles.cautionText}>
-                  <Text style={{ fontWeight: '800', color: theme.text }}>Advisory:</Text> High-altitude mountain passes feature steep gradients and variable road surfaces.
-                </Text>
               </View>
             </View>
 
@@ -1263,23 +1250,26 @@ export default function CreateRideScreen() {
               <Text style={styles.reviewTripTitle}>{name}</Text>
 
               <View style={styles.reviewRouteRow}>
-                <Text style={styles.reviewRoutePoint}>📍 Origin: {origin?.name || origin?.address || 'Origin'}</Text>
-                <Text style={styles.reviewRouteArrow}>↓</Text>
+                <View style={styles.reviewItineraryRow}>
+                  <Icon name={WAYPOINT_ICONS.origin} size="sm" color={theme.green} />
+                  <Text style={styles.reviewRoutePoint}>Origin: {origin?.name || origin?.address || 'Origin'}</Text>
+                </View>
                 {meetup ? (
-                  <>
-                    <Text style={styles.reviewWaypoint}>🚩 Meetup: {meetup.name || meetup.address}</Text>
-                    <Text style={styles.reviewRouteArrow}>↓</Text>
-                  </>
+                  <View style={styles.reviewItineraryRow}>
+                    <Icon name={WAYPOINT_ICONS.meetup} size="sm" color={theme.textMuted} />
+                    <Text style={styles.reviewWaypoint}>Meetup: {meetup.name || meetup.address}</Text>
+                  </View>
                 ) : null}
                 {stops.filter(s => s.place).map((s, idx) => (
-                  <React.Fragment key={s.key}>
-                    <Text style={styles.reviewWaypoint}>
-                      {s.kind === 'fuel' ? '⛽' : s.kind === 'food' ? '🍽️' : s.kind === 'repair' ? '🔧' : '🛑'} Stop {idx + 1}: {s.place!.name}
-                    </Text>
-                    <Text style={styles.reviewRouteArrow}>↓</Text>
-                  </React.Fragment>
+                  <View key={s.key} style={styles.reviewItineraryRow}>
+                    <Icon name={WAYPOINT_ICONS[s.kind] ?? WAYPOINT_ICONS.stop} size="sm" color={theme.textMuted} />
+                    <Text style={styles.reviewWaypoint}>Stop {idx + 1}: {s.place!.name}</Text>
+                  </View>
                 ))}
-                <Text style={styles.reviewRoutePoint}>🏁 Destination: {destination?.name || destination?.address || 'Destination'}</Text>
+                <View style={styles.reviewItineraryRow}>
+                  <Icon name={WAYPOINT_ICONS.destination} size="sm" color={theme.accent} />
+                  <Text style={styles.reviewRoutePoint}>Destination: {destination?.name || destination?.address || 'Destination'}</Text>
+                </View>
               </View>
 
               <View style={styles.reviewMetaGrid}>
@@ -1329,7 +1319,10 @@ export default function CreateRideScreen() {
           accessibilityRole="button"
           accessibilityLabel="Back step"
         >
-          <Text style={styles.footerBackText}>← Back</Text>
+          <View style={styles.footerBackRow}>
+            <Icon name="arrow-back" size="sm" color={theme.text} />
+            <Text style={styles.footerBackText}>Back</Text>
+          </View>
         </TouchableOpacity>
 
         {/* Option 2: Step-Specific Action (Skip vs Next vs Create) */}
@@ -1342,11 +1335,11 @@ export default function CreateRideScreen() {
             accessibilityLabel="Create trip plan"
           >
             {loading ? (
-              <ActivityIndicator color="#000000" />
+              <ActivityIndicator color={theme.onAccent} />
             ) : (
               <>
                 <Text style={styles.footerContinueText}>Create trip plan</Text>
-                <Text style={styles.footerContinueArrow}>→</Text>
+                <Icon name="arrow-forward" size="md" color={theme.onAccent} />
               </>
             )}
           </TouchableOpacity>
@@ -1357,8 +1350,8 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel="Continue to Route"
           >
-            <Text style={styles.footerContinueText}>Next: Route</Text>
-            <Text style={styles.footerContinueArrow}>→</Text>
+            <Text style={styles.footerContinueText}>Next</Text>
+            <Icon name="arrow-forward" size="md" color={theme.onAccent} />
           </TouchableOpacity>
         ) : currentStep === 2 ? (
           <TouchableOpacity
@@ -1367,8 +1360,8 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel="Continue to Stops"
           >
-            <Text style={styles.footerContinueText}>Next: Stops</Text>
-            <Text style={styles.footerContinueArrow}>→</Text>
+            <Text style={styles.footerContinueText}>Next</Text>
+            <Icon name="arrow-forward" size="md" color={theme.onAccent} />
           </TouchableOpacity>
         ) : isCurrentStepEmpty(currentStep) ? (
           <TouchableOpacity
@@ -1377,10 +1370,8 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Skip ${stepsList[currentStep - 1]?.label}`}
           >
-            <Text style={styles.footerSkipText}>
-              Skip {stepsList[currentStep - 1]?.label}
-            </Text>
-            <Text style={styles.footerSkipArrow}>→</Text>
+            <Text style={styles.footerSkipText}>Skip</Text>
+            <Icon name="arrow-forward" size="md" color={theme.textMuted} />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -1389,10 +1380,8 @@ export default function CreateRideScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Continue to ${stepsList[currentStep]?.label || 'Next'}`}
           >
-            <Text style={styles.footerContinueText}>
-              Next: {stepsList[currentStep]?.label || 'Next'}
-            </Text>
-            <Text style={styles.footerContinueArrow}>→</Text>
+            <Text style={styles.footerContinueText}>Next</Text>
+            <Icon name="arrow-forward" size="md" color={theme.onAccent} />
           </TouchableOpacity>
         )}
       </View>
@@ -1432,18 +1421,10 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    cancelIcon: {
-      color: c.text,
-      fontSize: 16,
-      fontWeight: '700',
-    },
     draftStatusRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-    },
-    cloudDoneIcon: {
-      fontSize: 14,
     },
     draftStatusText: {
       color: c.textMuted,
@@ -1494,7 +1475,7 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
     },
     stepCircleCompleted: {
-      backgroundColor: c.green,
+      backgroundColor: c.greenSoft,
     },
     stepCircleCurrent: {
       backgroundColor: c.accent,
@@ -1504,11 +1485,8 @@ const makeStyles = (c: RidePalette) =>
       fontWeight: '800',
       color: c.textMuted,
     },
-    stepCircleTextCompleted: {
-      color: '#FFFFFF',
-    },
     stepCircleTextCurrent: {
-      color: '#000000',
+      color: c.onAccent,
     },
     stepLabel: {
       fontSize: 11,
@@ -1583,11 +1561,43 @@ const makeStyles = (c: RidePalette) =>
     telemetrySummaryCard: {
       flex: 1,
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
-      padding: 12,
+      padding: spacing.md,
       justifyContent: 'space-between',
+    },
+    ascentProfileCard: {
+      backgroundColor: c.surface,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    ascentHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    ascentTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    ascentTitleText: {
+      ...typography.titleMd,
+      color: c.text,
+    },
+    ascentNetClimbBadge: {
+      backgroundColor: c.accentSoft,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 3,
+      borderRadius: radius.xs,
+    },
+    ascentNetClimbText: {
+      ...typography.labelCaps,
+      color: c.accent,
     },
     telemetrySummaryLabel: {
       fontSize: 10,
@@ -1618,6 +1628,9 @@ const makeStyles = (c: RidePalette) =>
       color: c.textMuted,
     },
     saddleTimeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       marginTop: 4,
     },
     saddleTimeText: {
@@ -1625,137 +1638,10 @@ const makeStyles = (c: RidePalette) =>
       color: c.green,
       fontWeight: '600',
     },
-    apexTopRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    reconBadge: {
-      backgroundColor: 'rgba(255, 122, 26, 0.15)',
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
-    },
-    reconBadgeText: {
-      color: c.accent,
-      fontSize: 9,
-      fontWeight: '800',
-    },
     apexPassText: {
       fontSize: 11,
       color: c.textMuted,
       fontWeight: '600',
-    },
-    ascentProfileCard: {
-      backgroundColor: c.surface,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: c.border,
-      padding: 14,
-      gap: 10,
-    },
-    ascentHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    ascentTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    ascentChartIcon: {
-      fontSize: 16,
-    },
-    ascentTitleText: {
-      fontSize: 14,
-      fontWeight: '800',
-      color: c.text,
-    },
-    ascentNetClimbBadge: {
-      backgroundColor: 'rgba(255, 122, 26, 0.15)',
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 6,
-    },
-    ascentNetClimbText: {
-      fontSize: 10,
-      fontWeight: '800',
-      color: c.accent,
-    },
-    sparklineBox: {
-      height: 70,
-      backgroundColor: c.surfaceRaised,
-      borderRadius: 10,
-      position: 'relative',
-      overflow: 'hidden',
-      justifyContent: 'flex-end',
-      padding: 8,
-    },
-    sparklinePeakPill: {
-      position: 'absolute',
-      top: 6,
-      right: 12,
-      backgroundColor: 'rgba(255, 122, 26, 0.2)',
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 6,
-    },
-    sparklinePeakText: {
-      fontSize: 9,
-      fontWeight: '800',
-      color: c.accent,
-    },
-    sparklineGuides: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      top: 15,
-      bottom: 15,
-      justifyContent: 'space-between',
-    },
-    sparklineGuideLine: {
-      height: 1,
-      backgroundColor: c.border,
-      opacity: 0.5,
-    },
-    sparklineCurveTrack: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 20,
-      height: 20,
-    },
-    sparklineRidge: {
-      height: 3,
-      backgroundColor: c.accent,
-      borderRadius: 2,
-    },
-    sparklineFooters: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-    },
-    sparklineElevationLabel: {
-      fontSize: 10,
-      color: c.textMuted,
-      fontWeight: '600',
-    },
-    cautionNotice: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: c.surfaceRaised,
-      padding: 10,
-      borderRadius: 8,
-      gap: 8,
-    },
-    cautionIcon: {
-      fontSize: 14,
-    },
-    cautionText: {
-      fontSize: 11,
-      color: c.textMuted,
-      lineHeight: 16,
-      flex: 1,
     },
     calibrationCard: {
       backgroundColor: c.surfaceRaised,
@@ -1804,9 +1690,6 @@ const makeStyles = (c: RidePalette) =>
       gap: 8,
       flex: 1,
     },
-    offlineCacheIcon: {
-      fontSize: 18,
-    },
     offlineCacheTitle: {
       fontSize: 12,
       fontWeight: '700',
@@ -1818,18 +1701,17 @@ const makeStyles = (c: RidePalette) =>
       marginTop: 2,
     },
     syncBtn: {
-      backgroundColor: c.surface,
+      backgroundColor: c.surfaceRaised,
       borderWidth: 1,
       borderColor: c.border,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      borderRadius: 8,
+      borderRadius: radius.sm,
     },
     syncBtnText: {
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: '800',
-      color: c.accent,
-      letterSpacing: 0.8,
+      color: c.text,
     },
     stickyFooter: {
       position: 'absolute',
@@ -1854,6 +1736,11 @@ const makeStyles = (c: RidePalette) =>
       borderWidth: 1,
       borderColor: c.border,
     },
+    footerBackRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
     footerBackText: {
       fontSize: 13,
       fontWeight: '700',
@@ -1868,21 +1755,12 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      shadowColor: c.accent,
-      shadowOpacity: 0.3,
-      shadowRadius: 6,
-      elevation: 3,
     },
     footerContinueText: {
       fontSize: 14,
       fontWeight: '900',
-      color: '#000000',
+      color: c.onAccent,
       letterSpacing: 0.5,
-    },
-    footerContinueArrow: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: '#000000',
     },
     footerSkipBtn: {
       flex: 1,
@@ -1901,11 +1779,6 @@ const makeStyles = (c: RidePalette) =>
       fontWeight: '800',
       color: c.textMuted,
       letterSpacing: 0.3,
-    },
-    footerSkipArrow: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: c.textMuted,
     },
     card: {
       backgroundColor: c.surface,
@@ -1957,10 +1830,10 @@ const makeStyles = (c: RidePalette) =>
       fontWeight: '700',
       color: c.text,
     },
-    reviewRouteArrow: {
-      fontSize: 13,
-      color: c.accent,
-      paddingLeft: 8,
+    reviewItineraryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
     },
     reviewWaypoint: {
       fontSize: 13,
@@ -2008,7 +1881,6 @@ const makeStyles = (c: RidePalette) =>
       borderColor: c.accent,
       backgroundColor: 'rgba(255, 122, 26, 0.1)',
     },
-    calendarIcon: { fontSize: 20 },
     datePickerTextWrapper: { flex: 1 },
     datePickerTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
     datePickerSubtitle: { color: c.textMuted, fontSize: 11, marginTop: 2 },
@@ -2024,6 +1896,9 @@ const makeStyles = (c: RidePalette) =>
     },
     presetPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
     routePreviewPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
       backgroundColor: c.surfaceRaised,
       borderColor: c.border,
       borderWidth: 1,
@@ -2031,7 +1906,7 @@ const makeStyles = (c: RidePalette) =>
       paddingHorizontal: 12,
       paddingVertical: 9,
     },
-    routePreviewText: { color: c.green, fontSize: 12, fontWeight: '700' },
+    routePreviewText: { flex: 1, color: c.green, fontSize: 12, fontWeight: '700' },
     input: {
       backgroundColor: c.surfaceRaised,
       borderColor: c.border,
@@ -2045,7 +1920,8 @@ const makeStyles = (c: RidePalette) =>
     multiline: { minHeight: 76, textAlignVertical: 'top' },
     helper: { color: c.textMuted, fontSize: 12, lineHeight: 18 },
     helperCentered: { color: c.textMuted, fontSize: 11, lineHeight: 16, textAlign: 'center' },
-    selected: { color: c.green, fontSize: 11, marginTop: 5 },
+    selectedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
+    selected: { flex: 1, color: c.green, fontSize: 11 },
     currentLocationButton: {
       alignSelf: 'flex-start',
       flexDirection: 'row',
@@ -2073,9 +1949,9 @@ const makeStyles = (c: RidePalette) =>
     },
     suggestion: { padding: 11, borderBottomWidth: 1, borderBottomColor: c.border },
     suggestionTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
-    suggestionAddress: { color: '#aab6ca', fontSize: 11, marginTop: 3 },
+    suggestionAddress: { color: c.textMuted, fontSize: 11, marginTop: 3 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-    chip: { borderRadius: 20, borderWidth: 1, borderColor: c.border, paddingHorizontal: 11, paddingVertical: 8 },
+    chip: { borderRadius: radius.sm, borderWidth: 1, borderColor: c.border, paddingHorizontal: 11, paddingVertical: 8 },
     chipActive: { backgroundColor: 'rgba(255, 122, 26, 0.15)', borderColor: c.accent },
     chipText: { color: c.textMuted, fontSize: 11, textTransform: 'capitalize' },
     chipTextActive: { color: c.accent, fontWeight: '800' },
@@ -2100,6 +1976,9 @@ const makeStyles = (c: RidePalette) =>
     stopHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     remove: { color: c.danger, fontSize: 12, fontWeight: '700' },
     addButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
       borderWidth: 1,
       borderColor: c.border,
       borderStyle: 'dashed',
@@ -2109,6 +1988,9 @@ const makeStyles = (c: RidePalette) =>
     },
     addText: { color: c.accent, fontSize: 12, fontWeight: '700' },
     stayDateButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
       backgroundColor: c.surfaceRaised,
       borderColor: c.border,
       borderWidth: 1,
@@ -2124,11 +2006,7 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: 3,
-      shadowColor: c.accent,
-      shadowOpacity: 0.3,
-      shadowRadius: 6,
-      elevation: 3,
     },
-    primaryText: { color: '#000000', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
+    primaryText: { color: c.onAccent, fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
     footer: { color: c.textMuted, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12 },
   });

@@ -17,37 +17,35 @@ RideNTrack is built for long-distance motorcycle touring and group expeditions. 
 
 ## 2. Design Tokens
 
+### 2.0 Source of Truth
+
+All tokens live in `mobile/src/theme.tsx` (`palettes`, `spacing`, `radius`, `elevation()`, `typography`). Screens read them through `useTheme()`; never hard-code colours, and never detect dark mode by comparing hex values. Use `theme.scheme === 'dark'` instead. The only hard-coded colours allowed are white/black text and scrims over photography or map tiles.
+
 ### 2.1 Color Palette
 
-#### Light Mode (Daylight / Sun Glare)
-* **Canvas / Background**: `#F2F0E8` (Desert Linen / Warm Sand)
-* **Surface Card**: `#FFFDF7` (Warm Chalk)
-* **Surface Raised / Header**: `#E9E6DC` (Muted Sandstone)
-* **Primary / Accent**: `#D96535` (Terracotta Trail Orange)
-* **Primary Soft**: `#F8E5D9` (Warm Ember Wash)
-* **Text Main**: `#202B25` (Deep Forest Charcoal)
-* **Text Muted**: `#68756D` (Asphalt Slate)
-* **Text Subtle**: `#8A948A` (Granite Grey)
-* **Border**: `#D8D9CF` (Pavement Gray)
-* **Road Green / Online**: `#356B53` (Evergreen Forest)
-* **Green Soft**: `#E2EDE3` (Sage Mint)
-* **Alert / Emergency**: `#B94E40` (Safety Ochre / Rust Crimson)
+The three palettes are designed independently. Dark is pine-tinted with desaturated accents, not an inversion of light; Ride is a maximum-contrast HUD palette.
 
-#### Dark Mode (Night Rides / Low Glare)
-* **Canvas / Background**: `#14221D` (Obsidian Pine)
-* **Surface Card**: `#1D3028` (Dark Spruce)
-* **Surface Raised**: `#263B32` (Night Canopy)
-* **Primary / Accent**: `#E47A49` (Luminescent Amber Ember)
-* **Primary Soft**: `#493326` (Smoked Copper)
-* **Text Main**: `#F2F0E8` (Linen White)
-* **Text Muted**: `#B1BDB3` (Fog Green)
-* **Text Subtle**: `#87968B` (Lichen Grey)
-* **Border**: `#3B5045` (Deep Slate Border)
-* **Road Green / Online**: `#82B69A` (Phosphor Mint)
-* **Green Soft**: `#294438` (Deep Juniper)
-* **Alert / Emergency**: `#F08B7D` (High-Vis Coral Alert)
+| Token | Light (Daylight) | Dark (Night) | Ride (HUD) | Use |
+| :--- | :--- | :--- | :--- | :--- |
+| `background` | `#F2F0E8` Desert Linen | `#111A16` Obsidian Pine | `#050706` | Screen canvas |
+| `surface` | `#FFFDF7` Warm Chalk | `#18231E` Dark Spruce | `#0D110F` | Cards, sheets, inputs |
+| `surfaceRaised` | `#E9E6DC` Sandstone | `#202E27` Night Canopy | `#141A17` | Secondary buttons, segmented tracks |
+| `text` | `#1D2621` | `#ECEAE2` | `#FFFFFF` | Primary text |
+| `textMuted` | `#5E6A62` | `#A9B5AC` | `#B4C4BA` | Secondary text |
+| `subtle` | `#7E897F` | `#7D8B81` | `#7F9488` | Captions, metadata (large or non-essential text only) |
+| `border` / `borderStrong` | `#D8D9CF` / `#B9BCAF` | `#2B3B33` / `#3E5246` | `#2E3D35` / `#46594E` | Hairlines / outlined controls |
+| `accent` | `#AD4C24` Terracotta | `#E2804F` Ember | `#FF8A3D` | Primary action, route line |
+| `onAccent` | `#FFFFFF` | `#1A120D` | `#0A0A0A` | Text/icons on an accent fill |
+| `green` | `#2F6B50` Evergreen | `#86BFA0` Phosphor Mint | `#3DDC84` | Live / online / success |
+| `tertiary` | `#2D5F86` | `#8DB4D4` | `#5CC8FF` | Planned / informational |
+| `warning` | `#94620F` | `#E3B65E` | `#FFC247` | Caution |
+| `danger` / `onDanger` | `#B3402F` / `#FFFFFF` | `#EE8577` / `#1A0E0C` | `#FF5A4D` / `#0A0A0A` | SOS, destructive, errors |
+| `scrim` | 55% near-black | 60% black | 70% black | Modal backdrops, labels over photos |
+
+Every `*Soft` token is a tint of its base colour for status backgrounds. All text/background pairs meet WCAG AA; text on an accent or danger fill must use `onAccent` / `onDanger`.
 
 #### Functional Category Colors (Broadcast Alerts)
+These are semantic, not decorative, and appear only with their alert type.
 * **Fuel / Petrol Alert**: `#F59E0B` (Amber Orange)
 * **Chai / Rest Break**: `#3B82F6` (Cobalt Blue)
 * **Food / Meal**: `#10B981` (Emerald Green)
@@ -59,31 +57,68 @@ RideNTrack is built for long-distance motorcycle touring and group expeditions. 
 
 ### 2.2 Typography Scale
 
-* **Headline Font**: `Manrope` / `Google Sans` (Geometric, wide aperture for instant glanceability)
-* **Body Font**: `Inter` / `Roboto Flex` (Clear numeral distinction: `0`, `O`, `1`, `l`)
-* **Monospace / Numerical Metrics**: `Space Mono` / `JetBrains Mono` for speed and distance displays.
+System fonts (SF Pro / Roboto) for UI; platform monospace (Menlo / monospace) with tabular numerals for live telemetry so digits do not jitter.
 
-| Token | Size | Weight | Line Height | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| `display-xl` | 36px | 800 (Bold) | 44px | Speedometer & SOS HUD |
-| `heading-lg` | 24px | 700 (Bold) | 32px | Screen Titles & Modal Headers |
-| `heading-md` | 18px | 600 (SemiBold) | 24px | Card Titles, Rider Names |
-| `body-md` | 15px | 500 (Medium) | 22px | Primary labels, button text |
-| `body-sm` | 13px | 400 (Regular) | 18px | Secondary notes, timestamps |
-| `caption` | 11px | 600 (SemiBold) | 14px | Micro tags, distance badges, status pills |
+| Token | Size / Line | Weight | Purpose |
+| :--- | :--- | :--- | :--- |
+| `displayTelemetry` | 48 | 700, mono | Speedometer & HUD metrics |
+| `headlineLg` | 26 / 32 | 800 | Screen titles |
+| `headlineMd` | 22 / 28 | 700 | Section / modal headers |
+| `headlineSm` | 18 / 24 | 700 | Card titles, rider names |
+| `titleMd` | 16 / 22 | 700 | List titles, button labels |
+| `labelNumeric` | 18 | 700, tabular | Stat values |
+| `bodyLg` / `bodyMd` / `bodySm` | 16/24 ? 14/20 ? 12/16 | 400?500 | Body copy, metadata |
+| `labelCaps` | 11 / 14 | 700, +0.8 tracking, uppercase | Status tags, stat captions |
+
+Headlines stay compact: hierarchy comes from weight and contrast, not size.
 
 ---
 
-### 2.3 Shapes & Elevations
+### 2.3 Spacing, Shape & Elevation
 
-* **Border Radius**:
-  * Action Buttons & Floating Controls: `16px` (Pill / Round 12+)
-  * Metric Cards & Overlays: `14px`
-  * Bottom Command Drawer: `24px` top corners (`ROUND_TWELVE` / `ROUND_FULL`)
-* **Shadows & Elevation**:
-  * Floating Map Buttons: `0 4px 12px rgba(0, 0, 0, 0.18)`
-  * Floating Alert Banner: `0 6px 16px rgba(0, 0, 0, 0.22)`
-  * Drawer: `0 -4px 16px rgba(0, 0, 0, 0.12)`
+* **Spacing** (4pt grid): `xxs 2 ? xs 4 ? sm 8 ? md 12 ? lg 16 ? xl 20 ? xxl 24 ? xxxl 32`; horizontal screen padding `screen = 20`.
+* **Border radius**: deliberately restrained so controls read as tools, not toys.
+
+| Token | Value | Use |
+| :--- | :--- | :--- |
+| `radius.xs` | 4 | Status tags, count badges, photo labels |
+| `radius.sm` | 8 | Chips, segmented tabs, small icon buttons |
+| `radius.md` | 12 | Buttons, inputs, base cards |
+| `radius.lg` | 16 | Trip cards, hero media, grouped sections |
+| `radius.sheet` | 24 | Top corners of bottom sheets only |
+| `radius.round` | 9999 | Avatars and status dots only, never buttons |
+
+* **Elevation**: shadows mean "this floats above the content". In-flow cards, lists and buttons use a 1px `border` or hairline separators, never shadows or glows.
+
+| Level | Use |
+| :--- | :--- |
+| `elevation('none')` | Everything in the scroll flow |
+| `elevation('floating')` | Map FABs, floating action buttons |
+| `elevation('overlay')` | Floating alert banners, menus |
+| `elevation('sheet')` | Bottom command drawer |
+
+* **Not used**: glassmorphism / blur surfaces, gradients on UI chrome, coloured glow shadows, text shadows. Photography gets a flat `scrim` band behind overlaid text instead.
+
+---
+
+### 2.4 Iconography
+
+* One family: **Ionicons** via `@expo/vector-icons`. Use the filled variant for selected/active states and the `-outline` variant otherwise.
+* Icons inherit a theme colour (`text`, `textMuted`, `accent`, `onAccent`, or a status colour); never multi-coloured.
+* Emoji are not UI icons. Status is shown with a colour dot plus a text label (`StatusBadge`), not pictographs.
+* Sizes: 16 inline with text, 20 in buttons and list rows, 24 in navigation.
+
+---
+
+### 2.5 Component Rules
+
+Reuse the shared primitives in `mobile/src/components/ui/` before writing screen-local styles:
+* **`Button`**: `primary` (accent fill) ? `secondary` (`surfaceRaised`) ? `outline` (1px `borderStrong`) ? `danger`. One primary action per view.
+* **`Card`**: `default` (surface + border) ? `raised` (flat `surfaceRaised`) ? `activeGlow` (green border + 3px left rule for the live trip) ? `dangerGlow` (danger tint). Variant names are historical; none of them draw a glow. Not everything belongs in a card: stats, headers and metadata sit directly on the canvas with hairline separators.
+* **`SegmentedControl`**: square-ish track; the active segment is an inverse fill (`text` background, `background` label).
+* **`StatusBadge`**: dot + uppercase label on the status's soft tint, `radius.xs`.
+* **States**: every data screen handles loading (`Skeleton`), empty (icon + one sentence + a single action), error (`dangerSoft` notice with retry) and populated.
+* **Touch targets**: ? 48dp everywhere; ? 56dp on in-ride controls.
 
 ---
 
@@ -121,8 +156,8 @@ The primary in-ride screen mounted on the motorcycle handlebar.
 2. **Telemetry Ribbon**:
    * Real-time GPS Speedometer (`0 KM/H`), Recorded Trail Distance (`46 M`), and Remaining Distance (`616.2 KM`).
 3. **Map Canvas & Floating FABs**:
-   * Detached, floating `🧭 Navigate to <Destination> ↗` button with high-contrast terracotta fill (`#D96535`).
-   * Detached, floating `🚨 Broadcast Alert` trigger with emergency ochre accent (`#B94E40`).
+   * Detached, floating `🧭 Navigate to <Destination> ↗` button with `accent` fill with `onAccent` label.
+   * Detached, floating `🚨 Broadcast Alert` trigger with `danger` accent.
 4. **Floating Broadcast Alert Banner**:
    * Appears at top-center of the map whenever any group member sends an alert (Petrol, Break, Food, Hazard, Emergency).
    * Plays an audible chime (`alert_chime.wav`) and triggers haptic vibration.

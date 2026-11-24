@@ -777,7 +777,7 @@ test('route editor supports waypoint notes and road condition observations', () 
   assert.match(routeSource, /saveStopDetailsOnly/);
   assert.match(routeSource, /pointNotesBox/);
   assert.match(routeSource, /pointNotesText/);
-  assert.match(routeSource, /📝 \{point\.notes\}/);
+  assert.match(routeSource, /<Text style=\{styles\.pointNotesText\}>\{point\.notes\}<\/Text>/);
 });
 
 test('leave_ride migration exists and trip workspace exposes self-service leave for participants', () => {
@@ -1219,7 +1219,7 @@ test('trip workspace integrates pre-ride preparation checklist and captain role 
   assert.match(tripSource, /transferLeadership/);
   assert.match(tripSource, /removeParticipant/);
   assert.match(tripSource, /riderRoleModalVisible/);
-  assert.match(tripSource, /Manage ⚙/);
+  assert.match(tripSource, /manageRiderBtnText\}>Manage</);
   assert.match(tripSource, /ROLE_LABELS/);
 });
 
@@ -1481,7 +1481,7 @@ test('trip workspace integrates trip sharing, pack capacity, ride rules, and rid
   assert.match(tripSource, /editMaxParticipants/);
   assert.match(tripSource, /editRideRules/);
   assert.match(tripSource, /update_participant_attendance/);
-  assert.match(tripSource, /Share Code 📲/);
+  assert.match(tripSource, />Share Code</);
   assert.match(tripSource, /Your Attendance RSVP/);
   assert.match(tripSource, /ATTENDANCE_STATUS_LABELS/);
   assert.match(tripSource, /Group Ride Rules & Safety Guidelines/);
@@ -1814,10 +1814,21 @@ test('rider-first theme defines dark, light, and high-contrast sunlight ride mod
   assert.match(themeSource, /dark:\s*\{/);
   assert.match(themeSource, /ride:\s*\{/);
   assert.match(themeSource, /light:\s*\{/);
-  assert.match(themeSource, /#FF7A1A/); // Action Amber
-  assert.match(themeSource, /#10B981/); // Telemetry Live Green
-  assert.match(themeSource, /#EF4444/); // Hazard SOS
   assert.match(themeSource, /isRideMode/);
+  assert.equal((themeSource.match(/scheme: '(light|dark)'/g) || []).length, 3);
+  assert.equal((themeSource.match(/onAccent: '/g) || []).length, 3);
+  assert.match(themeSource, /export const spacing/);
+  assert.match(themeSource, /export const radius/);
+  assert.match(themeSource, /export function elevation/);
+  assert.doesNotMatch(themeSource, /glass/i);
+});
+
+test('mobile UI reads theme scheme instead of sniffing palette hex values', () => {
+  const files = ['app/_layout.tsx', 'app/(tabs)/trips.tsx', 'app/(tabs)/profile.tsx', 'src/components/ui/Card.tsx', 'src/components/ui/SegmentedControl.tsx'];
+  for (const file of files) {
+    const source = fs.readFileSync(path.resolve('mobile', file), 'utf8');
+    assert.doesNotMatch(source, /(theme|c)\.background\s*[!=]==\s*'#/, file);
+  }
 });
 
 test('shared UI primitives provide Card, StatusBadge, LiveDot, SegmentedControl, Button, HoldToConfirmButton, RouteLine, AvatarStack, Skeleton', () => {
@@ -1932,10 +1943,10 @@ test('Trip Details renders sticky section switcher, sticky bottom action bar, da
   assert.match(tripSource, /LEADER/);
   assert.match(tripSource, /SWEEP/);
 
-  // Topographic elevation sparkline profile
-  assert.match(tripSource, /Tier 4 Expedition/);
-  assert.match(tripSource, /MAX ALTITUDE/);
-  assert.match(tripSource, /elevationSparklineBox/);
+  // The hardcoded "Tier 4 / 5,359 m" elevation card showed identical fabricated data on every trip
+  assert.doesNotMatch(tripSource, /Tier 4 Expedition/);
+  assert.doesNotMatch(tripSource, /5,359 m/);
+  assert.doesNotMatch(tripSource, /elevationSparklineBox/);
 
   // FallbackTripCover integrated into trip hero
   assert.match(tripSource, /FallbackTripCover/);

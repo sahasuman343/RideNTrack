@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { loadHomeData, nextPlannedTrip } from '../../src/lib/homeData';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, RidePalette } from '../../src/theme';
+import { useRideTheme, RidePalette, radius } from '../../src/theme';
+import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import {
   Card,
   Button,
@@ -21,6 +22,7 @@ import {
   Avatar,
   Skeleton,
   FallbackTripCover,
+  Icon,
 } from '../../src/components/ui';
 
 export default function HomeScreen() {
@@ -44,6 +46,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const swipeHandlers = useSwipeTab('home');
 
   // Dynamic time-based greeting
   const greeting = useMemo(() => {
@@ -93,7 +96,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...swipeHandlers}>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: safeHeaderTop }]}
         keyboardShouldPersistTaps="handled"
@@ -117,7 +120,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
               accessibilityRole="button"
               accessibilityLabel={profile?.motorcycle_model ? `Primary motorcycle: ${motorcycleName}. Tap to open garage.` : 'No motorcycle configured. Tap to add motorcycle in garage.'}
             >
-              <Text style={styles.steedIcon}>🏍️</Text>
+              <Icon name="speedometer-outline" size="sm" color={theme.textMuted} />
               <Text style={styles.steedText} numberOfLines={1}>
                 {motorcycleName}
               </Text>
@@ -222,7 +225,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                 title="Resume Live Tracking"
                 variant="primary"
                 size="lg"
-                iconRight={<Text style={{ fontSize: 18, color: '#0E1013' }}>→</Text>}
+                iconRight={<Icon name="arrow-forward" size="md" color={theme.onAccent} />}
                 onPress={() => router.push(`/ride/${ongoingTrip.id}`)}
                 accessibilityLabel="Resume live tracking ride mode"
               />
@@ -239,7 +242,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                   accessibilityLabel="Plan a trip"
                 >
                   <View style={[styles.toolkitIconCircle, { backgroundColor: theme.accentSoft }]}>
-                    <Text style={[styles.toolkitIcon, { color: theme.accent }]}>＋</Text>
+                    <Icon name="add" size="lg" color={theme.accent} />
                   </View>
                   <Text style={styles.toolkitLabel}>Plan Trip</Text>
                 </TouchableOpacity>
@@ -251,7 +254,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                   accessibilityLabel="Join a ride"
                 >
                   <View style={[styles.toolkitIconCircle, { backgroundColor: theme.greenSoft }]}>
-                    <Text style={[styles.toolkitIcon, { color: theme.green }]}>↗</Text>
+                    <Icon name="enter-outline" size="md" color={theme.green} />
                   </View>
                   <Text style={styles.toolkitLabel}>Join Ride</Text>
                 </TouchableOpacity>
@@ -263,7 +266,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                   accessibilityLabel="View all trips"
                 >
                   <View style={[styles.toolkitIconCircle, { backgroundColor: theme.surfaceHigh }]}>
-                    <Text style={styles.toolkitIcon}>⌁</Text>
+                    <Icon name="map-outline" size="md" color={theme.text} />
                   </View>
                   <Text style={styles.toolkitLabel}>All Trips</Text>
                 </TouchableOpacity>
@@ -278,7 +281,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
           <View style={styles.emptyContainer}>
             <Card variant="raised" style={styles.emptyHeroCard}>
               <View style={styles.radarGraphic}>
-                <Text style={styles.radarIcon}>🧭</Text>
+                <Icon name="compass-outline" size="xl" color={theme.textMuted} />
               </View>
               <Text style={styles.emptyTitle}>No ride in progress</Text>
               <Text style={styles.emptySubtitle}>
@@ -291,14 +294,14 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                   title="Plan a trip"
                   variant="primary"
                   size="md"
-                  icon={<Text style={{ fontSize: 18, color: '#0E1013' }}>＋</Text>}
+                  icon={<Icon name="add" size="md" color={theme.onAccent} />}
                   onPress={() => router.push('/create')}
                 />
                 <Button
                   title="Join a ride"
                   variant="secondary"
                   size="md"
-                  icon={<Text style={{ fontSize: 16, color: theme.text }}>↗</Text>}
+                  icon={<Icon name="enter-outline" size="md" color={theme.text} />}
                   onPress={() => router.push('/join')}
                 />
               </View>
@@ -312,13 +315,12 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
                 accessibilityRole="button"
                 accessibilityLabel={`${next.title}: ${next.trip.name}, ${next.when}. Tap to view.`}
               >
-                <View style={styles.nextTripDot} />
-                <Text style={styles.nextTripIcon}>🗓️</Text>
+                <Icon name="calendar-outline" size="sm" color={theme.tertiary} />
                 <Text style={styles.nextTripText} numberOfLines={1}>
                   {next.title}: <Text style={styles.nextTripBold}>{next.trip.name}</Text>{' '}
                   {next.when}
                 </Text>
-                <Text style={styles.nextTripChevron}>›</Text>
+                <Icon name="chevron-forward" size="sm" color={theme.textMuted} />
               </TouchableOpacity>
             )}
 
@@ -368,9 +370,6 @@ const makeStyles = (c: RidePalette) =>
       borderWidth: 1,
       borderColor: c.border,
     },
-    steedIcon: {
-      fontSize: 13,
-    },
     steedText: {
       fontSize: 12,
       fontWeight: '700',
@@ -387,15 +386,10 @@ const makeStyles = (c: RidePalette) =>
     },
     heroCard: {
       padding: 16,
-      borderRadius: 24,
+      borderRadius: radius.lg,
       backgroundColor: c.surface,
       borderColor: c.border,
       borderWidth: 1,
-      shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.08,
-      shadowRadius: 16,
-      elevation: 3,
     },
     heroCoverWrap: {
       marginBottom: 12,
@@ -488,15 +482,10 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       paddingVertical: 36,
       paddingHorizontal: 20,
-      borderRadius: 24,
+      borderRadius: radius.lg,
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.border,
-      shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 12,
-      elevation: 2,
     },
     radarGraphic: {
       width: 64,
@@ -508,9 +497,6 @@ const makeStyles = (c: RidePalette) =>
       marginBottom: 16,
       borderWidth: 1,
       borderColor: c.border,
-    },
-    radarIcon: {
-      fontSize: 28,
     },
     emptyTitle: {
       fontSize: 20,
@@ -544,15 +530,6 @@ const makeStyles = (c: RidePalette) =>
       gap: 8,
       alignSelf: 'center',
     },
-    nextTripDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 3.5,
-      backgroundColor: c.tertiary,
-    },
-    nextTripIcon: {
-      fontSize: 13,
-    },
     nextTripText: {
       fontSize: 12,
       color: c.textMuted,
@@ -561,11 +538,6 @@ const makeStyles = (c: RidePalette) =>
     nextTripBold: {
       color: c.text,
       fontWeight: '800',
-    },
-    nextTripChevron: {
-      fontSize: 16,
-      color: c.textMuted,
-      fontWeight: 'bold',
     },
     toolkitSection: {
       marginTop: 22,
@@ -592,11 +564,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 6,
-      elevation: 2,
     },
     toolkitIconCircle: {
       width: 40,
@@ -604,11 +571,6 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: 20,
       justifyContent: 'center',
       alignItems: 'center',
-    },
-    toolkitIcon: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: c.text,
     },
     toolkitLabel: {
       fontSize: 12,

@@ -12,6 +12,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { useRideTheme, RidePalette } from '../../theme';
+import { Icon } from './Icon';
 
 export interface HoldToConfirmButtonProps {
   onConfirm: () => void;
@@ -148,7 +149,7 @@ export function HoldToConfirmButton({
       />
 
       <View style={styles.content}>
-        <Text style={styles.icon}>🚨</Text>
+        <Icon name="warning" size="lg" color={theme.danger} />
         <View style={styles.textContainer}>
           <Text style={styles.title}>
             {isHolding ? `ARMING SOS (${secondsRemaining.toFixed(1)}s)` : title}

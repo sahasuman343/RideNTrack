@@ -14,9 +14,9 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../src/lib/supabase';
-import { useRideTheme, RidePalette } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing } from '../../src/theme';
 import { useAuth } from '../../src/hooks/useAuth';
-import { LiveDot } from '../../src/components/ui';
+import { Icon, LiveDot } from '../../src/components/ui';
 
 export default function JoinRideScreen() {
   const params = useLocalSearchParams<{ code?: string; token?: string; rideId?: string }>();
@@ -110,7 +110,7 @@ export default function JoinRideScreen() {
           accessibilityRole="button"
           accessibilityLabel="Cancel or Go Back"
         >
-          <Text style={s.headerIconText}>✕</Text>
+          <Icon name="close" size="lg" color={theme.text} />
         </TouchableOpacity>
 
         <Text style={s.headerTitle} numberOfLines={1}>JOIN A RIDE</Text>
@@ -122,7 +122,7 @@ export default function JoinRideScreen() {
             accessibilityRole="button"
             accessibilityLabel="Ride Pairing Help"
           >
-            <Text style={s.headerHelpIcon}>?</Text>
+            <Icon name="help-circle-outline" size="lg" color={theme.textMuted} />
           </TouchableOpacity>
           <View style={s.riderAvatarMini}>
             <Text style={s.riderAvatarText}>{profile?.display_name ? profile.display_name.charAt(0).toUpperCase() : 'R'}</Text>
@@ -140,10 +140,10 @@ export default function JoinRideScreen() {
           <View style={s.errorContainer}>
             <View style={s.errorCard}>
               <View style={s.errorIconBadge}>
-                <Text style={s.errorIconText}>⏱️</Text>
+                <Icon name="time-outline" size="xl" color={theme.danger} />
               </View>
               <View style={s.errorPill}>
-                <LiveDot pulse color={theme.danger} size={6} />
+                <LiveDot color={theme.danger} size={6} />
                 <Text style={s.errorPillText}>{errorState.title.toUpperCase()}</Text>
               </View>
               <Text style={s.errorTitle}>{errorState.title}</Text>
@@ -160,7 +160,10 @@ export default function JoinRideScreen() {
                     setCode('');
                   }}
                 >
-                  <Text style={s.clearCodeAction}>⌫ Clear & Re-enter</Text>
+                  <View style={s.clearCodeRow}>
+                    <Icon name="backspace-outline" size="sm" color={theme.accent} />
+                    <Text style={s.clearCodeAction}>Clear & Re-enter</Text>
+                  </View>
                 </TouchableOpacity>
               </View>
               <View style={s.codeCellsRow}>
@@ -173,7 +176,8 @@ export default function JoinRideScreen() {
                 ))}
               </View>
               <View style={s.errorFeedbackBanner}>
-                <Text style={s.errorFeedbackText}>⚠️ {errorState.message}</Text>
+                <Icon name="warning-outline" size="sm" color={theme.danger} />
+                <Text style={s.errorFeedbackText}>{errorState.message}</Text>
               </View>
             </View>
 
@@ -186,7 +190,7 @@ export default function JoinRideScreen() {
                   setActiveTab('code');
                 }}
               >
-                <Text style={s.giantBtnIcon}>🔄</Text>
+                <Icon name="refresh" size="lg" color={theme.onAccent} />
                 <Text style={s.giantBtnTextPrimary}>Try Another Code</Text>
               </TouchableOpacity>
 
@@ -197,7 +201,7 @@ export default function JoinRideScreen() {
                   setActiveTab('qr');
                 }}
               >
-                <Text style={s.giantBtnIcon}>📷</Text>
+                <Icon name="qr-code-outline" size="lg" color={theme.text} />
                 <Text style={s.giantBtnTextSecondary}>Scan Pack QR Pass</Text>
               </TouchableOpacity>
 
@@ -231,7 +235,7 @@ export default function JoinRideScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Scan QR Method"
               >
-                <Text style={[s.segmentedTabIcon, activeTab === 'qr' && s.segmentedTabIconActive]}>📷</Text>
+                <Icon name="qr-code-outline" size={16} color={activeTab === 'qr' ? theme.accent : theme.textMuted} />
                 <Text style={[s.segmentedTabText, activeTab === 'qr' && s.segmentedTabTextActive]}>Scan QR</Text>
               </TouchableOpacity>
 
@@ -241,7 +245,7 @@ export default function JoinRideScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Passcode Method"
               >
-                <Text style={[s.segmentedTabIcon, activeTab === 'code' && s.segmentedTabIconActive]}>🔢</Text>
+                <Icon name="keypad-outline" size={16} color={activeTab === 'code' ? theme.accent : theme.textMuted} />
                 <Text style={[s.segmentedTabText, activeTab === 'code' && s.segmentedTabTextActive]}>Passcode</Text>
               </TouchableOpacity>
 
@@ -251,7 +255,7 @@ export default function JoinRideScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Link Method"
               >
-                <Text style={[s.segmentedTabIcon, activeTab === 'link' && s.segmentedTabIconActive]}>🔗</Text>
+                <Icon name="link-outline" size={16} color={activeTab === 'link' ? theme.accent : theme.textMuted} />
                 <Text style={[s.segmentedTabText, activeTab === 'link' && s.segmentedTabTextActive]}>Link</Text>
               </TouchableOpacity>
             </View>
@@ -297,7 +301,7 @@ export default function JoinRideScreen() {
                     accessibilityLabel="Enter ride code"
                   >
                     <View style={s.controlBtnIconBox}>
-                      <Text style={s.controlBtnIcon}>#</Text>
+                      <Icon name="keypad-outline" size="md" color={theme.text} />
                     </View>
                     <View style={s.controlBtnCol}>
                       <Text style={s.controlBtnTitle}>Enter code</Text>
@@ -311,7 +315,7 @@ export default function JoinRideScreen() {
                     accessibilityLabel="Paste invitation token"
                   >
                     <View style={s.controlBtnIconBox}>
-                      <Text style={s.controlBtnIcon}>🖼️</Text>
+                      <Icon name="link-outline" size="md" color={theme.text} />
                     </View>
                     <View style={s.controlBtnCol}>
                       <Text style={s.controlBtnTitle}>Use token</Text>
@@ -391,7 +395,7 @@ export default function JoinRideScreen() {
             {/* Offline Mesh Pairing Pro-Tip Banner */}
             <View style={s.meshBanner}>
               <View style={s.meshIconBox}>
-                <Text style={s.meshIcon}>📡</Text>
+                <Icon name="cloud-offline-outline" size="lg" color={theme.textMuted} />
               </View>
               <View style={s.meshTextCol}>
                 <View style={s.meshTitleRow}>
@@ -425,12 +429,11 @@ export default function JoinRideScreen() {
           accessibilityLabel="Verify and join group ride"
         >
           {loading ? (
-            <ActivityIndicator color="#000000" size="small" />
+            <ActivityIndicator color={theme.onAccent} size="small" />
           ) : (
             <View style={s.primaryBtnRow}>
-              <Text style={s.primaryBtnIcon}>🧭</Text>
               <Text style={s.primaryBtnTitle}>{activeTab === 'qr' ? 'USE RIDE CODE' : 'VERIFY & JOIN RIDE'}</Text>
-              <Text style={s.primaryBtnArrow}>→</Text>
+              <Icon name="arrow-forward" size="md" color={theme.onAccent} />
             </View>
           )}
         </TouchableOpacity>
@@ -473,11 +476,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    headerIconText: {
-      color: c.text,
-      fontSize: 18,
-      fontWeight: '700',
-    },
     headerTitle: {
       fontSize: 14,
       fontWeight: '800',
@@ -491,11 +489,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       gap: 8,
     },
-    headerHelpIcon: {
-      color: c.textMuted,
-      fontSize: 18,
-      fontWeight: '700',
-    },
     riderAvatarMini: {
       width: 32,
       height: 32,
@@ -505,7 +498,7 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
     },
     riderAvatarText: {
-      color: '#FFFFFF',
+      color: c.onAccent,
       fontSize: 14,
       fontWeight: '800',
     },
@@ -559,17 +552,6 @@ const makeStyles = (c: RidePalette) =>
     },
     segmentedTabActive: {
       backgroundColor: c.surface,
-      shadowColor: '#000',
-      shadowOpacity: 0.15,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    segmentedTabIcon: {
-      fontSize: 16,
-      color: c.textMuted,
-    },
-    segmentedTabIconActive: {
-      color: c.accent,
     },
     segmentedTabText: {
       fontSize: 12,
@@ -588,8 +570,8 @@ const makeStyles = (c: RidePalette) =>
     viewfinderBox: {
       width: '100%',
       aspectRatio: 4 / 3,
-      borderRadius: 18,
-      backgroundColor: '#0c0e11',
+      borderRadius: radius.lg,
+      backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
@@ -612,7 +594,7 @@ const makeStyles = (c: RidePalette) =>
       backgroundColor: 'rgba(12, 14, 17, 0.85)',
       paddingHorizontal: 10,
       paddingVertical: 4,
-      borderRadius: 20,
+      borderRadius: radius.xs,
     },
     fpsBadgeText: {
       fontSize: 10,
@@ -624,7 +606,7 @@ const makeStyles = (c: RidePalette) =>
       backgroundColor: 'rgba(12, 14, 17, 0.85)',
       paddingHorizontal: 8,
       paddingVertical: 4,
-      borderRadius: 20,
+      borderRadius: radius.xs,
     },
     isoBadgeText: {
       fontSize: 10,
@@ -674,9 +656,6 @@ const makeStyles = (c: RidePalette) =>
       right: 4,
       height: 2,
       backgroundColor: c.accent,
-      shadowColor: c.accent,
-      shadowOpacity: 0.8,
-      shadowRadius: 8,
     },
     crosshairHoriz: {
       position: 'absolute',
@@ -729,10 +708,7 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
     },
     controlBtnIconBoxActive: {
-      backgroundColor: 'rgba(255, 122, 26, 0.2)',
-    },
-    controlBtnIcon: {
-      fontSize: 18,
+      backgroundColor: c.accentSoft,
     },
     controlBtnCol: {
       flex: 1,
@@ -751,7 +727,7 @@ const makeStyles = (c: RidePalette) =>
     },
     passcodeSection: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
@@ -852,14 +828,14 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: 8,
     },
     clipboardApplyText: {
-      color: '#FFFFFF',
+      color: c.onAccent,
       fontSize: 10,
       fontWeight: '800',
       letterSpacing: 0.8,
     },
     linkSection: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
@@ -904,9 +880,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    meshIcon: {
-      fontSize: 20,
-    },
     meshTextCol: {
       flex: 1,
       gap: 4,
@@ -945,10 +918,10 @@ const makeStyles = (c: RidePalette) =>
       gap: 16,
     },
     errorCard: {
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
-      borderColor: 'rgba(239, 68, 68, 0.3)',
+      backgroundColor: c.dangerSoft,
+      borderColor: c.danger,
       borderWidth: 1,
-      borderRadius: 20,
+      borderRadius: radius.lg,
       padding: 20,
       alignItems: 'center',
       textAlign: 'center',
@@ -958,21 +931,18 @@ const makeStyles = (c: RidePalette) =>
       width: 54,
       height: 54,
       borderRadius: 27,
-      backgroundColor: 'rgba(239, 68, 68, 0.2)',
+      backgroundColor: c.dangerSoft,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    errorIconText: {
-      fontSize: 26,
     },
     errorPill: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: 'rgba(239, 68, 68, 0.2)',
+      backgroundColor: c.dangerSoft,
       paddingHorizontal: 10,
       paddingVertical: 4,
-      borderRadius: 20,
+      borderRadius: radius.sm,
     },
     errorPillText: {
       color: c.danger,
@@ -993,7 +963,7 @@ const makeStyles = (c: RidePalette) =>
     },
     errorCellsContainer: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
@@ -1010,6 +980,11 @@ const makeStyles = (c: RidePalette) =>
       color: c.textMuted,
       letterSpacing: 1,
     },
+    clearCodeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
     clearCodeAction: {
       fontSize: 11,
       fontWeight: '700',
@@ -1017,7 +992,7 @@ const makeStyles = (c: RidePalette) =>
     },
     codeCellError: {
       borderColor: c.danger,
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      backgroundColor: c.dangerSoft,
     },
     codeCellTextError: {
       color: c.danger,
@@ -1025,11 +1000,13 @@ const makeStyles = (c: RidePalette) =>
     errorFeedbackBanner: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      gap: 8,
+      backgroundColor: c.dangerSoft,
       padding: 10,
-      borderRadius: 8,
+      borderRadius: radius.sm,
     },
     errorFeedbackText: {
+      flex: 1,
       fontSize: 12,
       color: c.danger,
       fontWeight: '600',
@@ -1054,11 +1031,8 @@ const makeStyles = (c: RidePalette) =>
       borderWidth: 1,
       borderColor: c.border,
     },
-    giantBtnIcon: {
-      fontSize: 20,
-    },
     giantBtnTextPrimary: {
-      color: '#FFFFFF',
+      color: c.onAccent,
       fontSize: 14,
       fontWeight: '800',
       letterSpacing: 0.8,
@@ -1098,29 +1072,17 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
-      shadowColor: c.accent,
-      shadowOpacity: 0.35,
-      shadowRadius: 10,
-      elevation: 4,
     },
     primaryBtnRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
     },
-    primaryBtnIcon: {
-      fontSize: 20,
-    },
     primaryBtnTitle: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 15,
       fontWeight: '900',
       letterSpacing: 0.8,
-    },
-    primaryBtnArrow: {
-      color: '#000000',
-      fontSize: 18,
-      fontWeight: '800',
     },
     secondaryCancelBtn: {
       minHeight: 44,

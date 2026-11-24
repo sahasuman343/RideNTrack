@@ -7,7 +7,7 @@ import * as Sentry from '@sentry/react-native';
 import { AuthProvider } from '../src/hooks/useAuth';
 import { OfflineSyncProvider } from '../src/hooks/useOfflineSync';
 import { usePushNotifications } from '../src/hooks/usePushNotifications';
-import { RideThemeProvider, useRideTheme } from '../src/theme';
+import { RideThemeProvider, useRideTheme, palettes, radius } from '../src/theme';
 import '../src/services/backgroundLocation';
 
 const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
@@ -26,11 +26,10 @@ function PushNotifications() {
 
 function AppNavigator() {
   const theme = useRideTheme();
-  const isLight = theme.background === '#F8FAFC';
   return (
     <AuthProvider>
       <OfflineSyncProvider>
-        <StatusBar style={isLight ? 'dark' : 'light'} />
+        <StatusBar style={theme.scheme === 'light' ? 'dark' : 'light'} />
         <PushNotifications />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -65,10 +64,12 @@ export default function RootLayout() {
   );
 }
 
+// Rendered outside RideThemeProvider, so it uses the dark palette directly.
+const fallbackPalette = palettes.dark;
 const styles = StyleSheet.create({
-  fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, backgroundColor: '#090B0E' },
-  title: { color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  detail: { color: '#94A3B8', marginTop: 12, textAlign: 'center' },
-  button: { backgroundColor: '#FF7A1A', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 14, marginTop: 24 },
-  buttonText: { color: '#000', fontWeight: '800' },
+  fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, backgroundColor: fallbackPalette.background },
+  title: { color: fallbackPalette.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  detail: { color: fallbackPalette.textMuted, marginTop: 12, textAlign: 'center' },
+  button: { backgroundColor: fallbackPalette.accent, borderRadius: radius.md, paddingHorizontal: 24, paddingVertical: 14, marginTop: 24 },
+  buttonText: { color: fallbackPalette.onAccent, fontWeight: '800' },
 });

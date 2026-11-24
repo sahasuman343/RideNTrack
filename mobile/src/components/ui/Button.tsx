@@ -10,7 +10,7 @@ import {
   Platform,
   Vibration,
 } from 'react-native';
-import { useRideTheme, RidePalette } from '../../theme';
+import { useRideTheme, RidePalette, radius } from '../../theme';
 
 export interface ButtonProps {
   title: string;
@@ -105,7 +105,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'primary' ? '#0E1013' : theme.text}
+          color={variant === 'primary' ? theme.onAccent : variant === 'danger' ? theme.onDanger : theme.text}
         />
       ) : (
         <>
@@ -126,7 +126,7 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 14,
+      borderRadius: radius.md,
       gap: 8,
       overflow: 'hidden',
     },
@@ -141,15 +141,9 @@ const makeStyles = (c: RidePalette) =>
     sizeLg: {
       minHeight: 64,
       paddingHorizontal: 24,
-      borderRadius: 16,
     },
     btnPrimary: {
       backgroundColor: c.accent,
-      shadowColor: c.accent,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.35,
-      shadowRadius: 8,
-      elevation: 4,
     },
     btnSecondary: {
       backgroundColor: c.surfaceRaised,
@@ -158,19 +152,14 @@ const makeStyles = (c: RidePalette) =>
     },
     btnDanger: {
       backgroundColor: c.danger,
-      shadowColor: c.danger,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.4,
-      shadowRadius: 8,
-      elevation: 4,
     },
     btnGhost: {
       backgroundColor: 'transparent',
     },
     btnOutline: {
       backgroundColor: 'transparent',
-      borderWidth: 1.5,
-      borderColor: c.border,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
     },
     textBase: {
       fontWeight: '700',
@@ -188,13 +177,13 @@ const makeStyles = (c: RidePalette) =>
       letterSpacing: 0.5,
     },
     textPrimary: {
-      color: '#0E1013',
+      color: c.onAccent,
     },
     textSecondary: {
       color: c.text,
     },
     textDanger: {
-      color: '#FFFFFF',
+      color: c.onDanger,
     },
     textGhost: {
       color: c.textMuted,

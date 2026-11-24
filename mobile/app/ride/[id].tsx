@@ -51,7 +51,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
-import { useRideTheme, RidePalette, typography } from '../../src/theme';
+import { useRideTheme, RidePalette, typography, elevation, radius, spacing } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
 import {
@@ -62,7 +62,8 @@ import {
 } from '../../src/services/backgroundLocation';
 import { playAlertSound } from '../../src/services/alertSound';
 import { registerPushToken } from '../../src/services/pushNotifications';
-import { HoldToConfirmButton, LiveDot } from '../../src/components/ui';
+import { HoldToConfirmButton, Icon, LiveDot } from '../../src/components/ui';
+import { ALERT_ICONS, MECHANICAL_ICONS, plainLabel } from '../../src/icons';
 import { RiderRoster } from '../../src/components/ride/RiderRoster';
 
 // Graceful keep-awake in ride mode
@@ -688,7 +689,7 @@ export default function LiveRideScreen() {
     if (outcome === 'sent') {
       setAnnouncementModal(false);
       setCustomAnnouncement('');
-      setMessage(`📢 Broadcast sent: "${msg.trim()}"`);
+      setMessage(`Broadcast sent: "${msg.trim()}"`);
       return true;
     }
     return false;
@@ -701,7 +702,7 @@ export default function LiveRideScreen() {
       if (confirmError) throw confirmError;
       setRegroupPoints(prev => prev.map(p => (p.id === regroupPointId ? { ...p, my_arrived: true } : p)));
       setArrivingRegroupPoint(null);
-      setMessage('✅ Confirmed arrival at regroup point!');
+      setMessage('Confirmed arrival at regroup point.');
     } catch (e: any) {
       setMessage(e?.message || 'Could not confirm arrival.');
     } finally {
@@ -715,7 +716,7 @@ export default function LiveRideScreen() {
       const { error: ackErr } = await supabase.rpc('acknowledge_alert', { p_alert_id: alertId });
       if (ackErr) throw ackErr;
       setAcknowledgedAlertIds(prev => (prev.includes(alertId) ? prev : [...prev, alertId]));
-      setMessage('👍 Acknowledged announcement');
+      setMessage('Announcement acknowledged');
     } catch (e: any) {
       setMessage(e?.message || 'Could not acknowledge announcement. Tap to retry.');
     }
@@ -747,7 +748,7 @@ export default function LiveRideScreen() {
       if (arrivingRegroupPoint?.id === pointId) {
         setArrivingRegroupPoint(null);
       }
-      await broadcastAnnouncement('🏁 Regroup point completed. Pack is resuming ride!');
+      await broadcastAnnouncement('Regroup point completed. Pack is resuming ride.');
     } catch (e: any) {
       setMessage(e?.message || 'Could not close regroup point.');
     } finally {
@@ -756,7 +757,7 @@ export default function LiveRideScreen() {
   }
 
   async function broadcastPaceAdvisory(paceKmh: number, paceLabel: string) {
-    await broadcastAnnouncement(`⚡ Pace Advisory: Target ${paceKmh} km/h (${paceLabel})`);
+    await broadcastAnnouncement(`Pace advisory: Target ${paceKmh} km/h (${paceLabel})`);
   }
 
   async function sendMechanicalBreakdownAlert() {
@@ -775,7 +776,7 @@ export default function LiveRideScreen() {
     if (outcome === 'sent') {
       setMechanicalModalVisible(false);
       setMechanicalDetails('');
-      setMessage(`🔧 Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
+      setMessage(`Mechanical alert sent: ${MECHANICAL_ISSUE_LABELS[selectedMechanicalIssue].label}`);
       Dialog.alert(
         'Mechanical Assistance',
         'Alert broadcast to your pack with your live GPS location. Would you like to view roadside assistance & breakdown helplines?',
@@ -810,7 +811,7 @@ export default function LiveRideScreen() {
         // offline fallback
       }
     }
-    Dialog.alert('🚨 Escalate Emergency (112)', 'Direct dial National Emergency Helpline 112 immediately?', [
+    Dialog.alert('Escalate emergency (112)', 'Direct dial National Emergency Helpline 112 immediately?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Call 112', style: 'destructive', onPress: () => void Linking.openURL('tel:112') },
     ]);
@@ -840,7 +841,7 @@ export default function LiveRideScreen() {
       return;
     }
     if ((await sendAlert('emergency')) !== 'sent') return;
-    setMessage('🚨 Emergency alert broadcast to group with your live coordinates.');
+    setMessage('Emergency alert broadcast to group with your live coordinates.');
   }
 
   async function dialEmergencyContact() {
@@ -881,7 +882,7 @@ export default function LiveRideScreen() {
       } else {
         await Share.share({ message: body });
       }
-      setMessage('🚨 Emergency SOS initiated.');
+      setMessage('Emergency SOS initiated.');
     } catch {
       setMessage('Could not launch SMS.');
     }
@@ -938,7 +939,7 @@ export default function LiveRideScreen() {
         <Mapbox.MapView
           key={mapRetry}
           style={StyleSheet.absoluteFill}
-          styleURL={theme ? (theme.text === '#F2F0E8' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12') : 'mapbox://styles/mapbox/outdoors-v12'}
+          styleURL={theme?.scheme === 'dark' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
           onDidFinishLoadingMap={() => {
             setMapReady(true);
             setMapError(false);
@@ -1058,13 +1059,13 @@ export default function LiveRideScreen() {
 
         {/* Cellular / Network Link */}
         <View style={s.statusPillItem}>
-          <Text style={s.statusPillIcon}>{sync.isOnline ? '📶' : '📵'}</Text>
+          <Icon name={sync.isOnline ? 'cellular-outline' : 'cloud-offline-outline'} size="xs" color={sync.isOnline ? theme.textMuted : theme.danger} />
           <Text style={s.statusStripText}>{sync.isOnline ? 'ONLINE' : 'OFFLINE'}</Text>
         </View>
 
         {/* Formation Pack Count */}
         <View style={s.statusPillItem}>
-          <Text style={s.statusPillIcon}>🏍️</Text>
+          <Icon name="people-outline" size="xs" color={theme.textMuted} />
           <Text style={s.statusStripText}>{activeRidersCount}/{points.length} PACK</Text>
         </View>
       </View>
@@ -1073,7 +1074,7 @@ export default function LiveRideScreen() {
       {pending > 0 && (
         <View style={[s.calmOfflineBanner, { top: insets.top + 44 }]}>
           <Text style={s.calmOfflineText}>
-            📶 {pending} {pending === 1 ? 'update' : 'updates'} queued, syncing when signal returns
+            {pending} {pending === 1 ? 'update' : 'updates'} queued, syncing when signal returns
           </Text>
         </View>
       )}
@@ -1081,7 +1082,7 @@ export default function LiveRideScreen() {
       {/* Top Header Controls (Back, Ride Title, SOS, Captain) */}
       <View style={[s.top, { top: insets.top + (pending > 0 ? 76 : 50) }]}>
         <TouchableOpacity accessibilityLabel="Back to rides" style={s.square} onPress={handleBack}>
-          <Text style={s.backIcon}>‹</Text>
+          <Icon name="chevron-back" size="lg" color={theme.text} />
         </TouchableOpacity>
         <View style={s.title}>
           <Text numberOfLines={1} style={s.heading}>{ride.name}</Text>
@@ -1096,7 +1097,7 @@ export default function LiveRideScreen() {
         </TouchableOpacity>
         {admin && (
           <TouchableOpacity accessibilityLabel="Captain Dashboard" style={[s.square, { borderColor: theme.accent }]} onPress={() => setCaptainDashboardVisible(true)}>
-            <Text style={[s.topBarIcon, { color: theme.accent }]}>👑</Text>
+            <Icon name="ribbon-outline" size="md" color={theme.accent} />
           </TouchableOpacity>
         )}
       </View>
@@ -1104,7 +1105,7 @@ export default function LiveRideScreen() {
       {/* Floating Next Waypoint Pin (Rohtang Top style) */}
       {active && nextWaypoint && (
         <View style={[s.floatingApexPin, { top: insets.top + (pending > 0 ? 134 : 108) }]}>
-          <Text style={s.apexPinIcon}>⛳</Text>
+          <Icon name="flag-outline" size="md" color={theme.accent} />
           <View>
             <Text style={s.apexPinTitle} numberOfLines={1}>{nextWaypoint.name}</Text>
             <Text style={s.apexPinSub}>
@@ -1148,12 +1149,13 @@ export default function LiveRideScreen() {
         >
           <View style={s.floatingAlertHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-              <Text style={s.floatingAlertTitle} numberOfLines={1}>
-                {ALERT_LABELS[newest.type] || '🚨 Rider Alert'} · {newest.display_name || 'Rider'}
+              <Icon name={ALERT_ICONS[newest.type] ?? 'warning-outline'} size="sm" color={newest.type === 'emergency' ? theme.danger : theme.text} />
+              <Text style={[s.floatingAlertTitle, { flexShrink: 1 }]} numberOfLines={1}>
+                {ALERT_LABELS[newest.type] ? plainLabel(ALERT_LABELS[newest.type]) : 'Rider Alert'} · {newest.display_name || 'Rider'}
               </Text>
             </View>
             <TouchableOpacity accessibilityLabel="Dismiss alert" onPress={() => setDismissed(ids => [...ids, newest.id])} style={s.floatingAlertDismiss}>
-              <Text style={s.floatingAlertDismissText}>✕</Text>
+              <Icon name="close" size="md" color={theme.muted} />
             </TouchableOpacity>
           </View>
 
@@ -1163,6 +1165,7 @@ export default function LiveRideScreen() {
             {newest.type === 'announcement' && (
               acknowledgedAlertIds.includes(newest.id) ? (
                 <View style={s.acknowledgedBadge}>
+                  <Icon name="checkmark" size="sm" color={theme.green} />
                   <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
                 </View>
               ) : (
@@ -1174,7 +1177,8 @@ export default function LiveRideScreen() {
 
             {newest.type === 'emergency' && (
               <TouchableOpacity style={[s.floatingAlertActionBtn, { backgroundColor: theme.danger }]} onPress={() => void escalateEmergency(newest.id)}>
-                <Text style={s.floatingAlertActionText}>🚨 Escalate / Call 112</Text>
+                <Icon name="call" size="sm" color={theme.onDanger} />
+                  <Text style={[s.floatingAlertActionText, { color: theme.onDanger }]}>Escalate / Call 112</Text>
               </TouchableOpacity>
             )}
 
@@ -1195,11 +1199,13 @@ export default function LiveRideScreen() {
                     }
                   }}
                 >
-                  <Text style={s.floatingAlertSecondaryText}>📍 Focus on Map</Text>
+                  <Icon name="locate-outline" size="sm" color={theme.text} />
+                      <Text style={s.floatingAlertSecondaryText}>Focus on map</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={s.floatingAlertSecondaryBtn} onPress={() => void Linking.openURL(`https://maps.google.com/?q=${newest.lat},${newest.lng}`)}>
-                  <Text style={s.floatingAlertSecondaryText}>🧭 Directions ↗</Text>
+                  <Icon name="navigate-outline" size="sm" color={theme.text} />
+                      <Text style={s.floatingAlertSecondaryText}>Directions</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -1210,7 +1216,7 @@ export default function LiveRideScreen() {
       {/* Regroup Banner Toast */}
       {arrivingRegroupPoint && (
         <View style={[s.regroupBanner, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text numberOfLines={1} style={s.regroupBannerText}>📍 Near Regroup: {arrivingRegroupPoint.name}</Text>
+          <Text numberOfLines={1} style={s.regroupBannerText}>Near Regroup: {arrivingRegroupPoint.name}</Text>
           <TouchableOpacity style={s.confirmRegroupButton} disabled={busy} onPress={() => void confirmArrival(arrivingRegroupPoint.id)}>
             <Text style={s.confirmRegroupText}>Confirm arrival</Text>
           </TouchableOpacity>
@@ -1220,21 +1226,21 @@ export default function LiveRideScreen() {
       {/* Route Deviation Alert */}
       {gps.state === 'fresh' && routeDeviation != null && routeDeviation > (ride?.route_deviation_threshold_meters || 500) && (
         <View style={[s.deviationWarning, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text style={s.deviationWarningText}>⚠️ Route Deviation: ~{Math.round(routeDeviation)} m from planned route</Text>
+          <Text style={s.deviationWarningText}>Route Deviation: ~{Math.round(routeDeviation)} m from planned route</Text>
         </View>
       )}
 
       {/* Waypoint Arrival Toast */}
       {lastArrivedWaypoint && (
         <View style={[s.arrivalToast, { top: insets.top + (active ? 210 : 140) }]}>
-          <Text style={s.arrivalToastText}>🏁 Arrived at {lastArrivedWaypoint}! Next stop loaded.</Text>
+          <Text style={s.arrivalToastText}>Arrived at {lastArrivedWaypoint}! Next stop loaded.</Text>
         </View>
       )}
 
       {/* GPS Signal Restored Toast */}
       {gpsRecoveryStatus === 'recovered' && (
-        <View style={[s.arrivalToast, { backgroundColor: '#22c55e', top: insets.top + (active ? 210 : 140) }]}>
-          <Text style={s.arrivalToastText}>🛰️ GPS signal restored! Tracking resumed smoothly.</Text>
+        <View style={[s.arrivalToast, { top: insets.top + (active ? 210 : 140) }]}>
+          <Text style={s.arrivalToastText}>GPS signal restored. Tracking resumed.</Text>
         </View>
       )}
 
@@ -1283,7 +1289,7 @@ export default function LiveRideScreen() {
                 <View style={s.heroApexTargetCol}>
                   <Text style={s.apexSubLabel}>NEXT APEX TARGET</Text>
                   <View style={s.apexTitleRow}>
-                    <Text style={s.apexArrowIcon}>↗</Text>
+                    <Icon name="navigate" size="md" color={theme.accent} />
                     <Text style={s.apexTargetTitle} numberOfLines={1}>
                       {nextWaypoint ? nextWaypoint.name : ride.destination || 'Summit Base'}
                     </Text>
@@ -1330,7 +1336,7 @@ export default function LiveRideScreen() {
                 </View>
                 <View style={s.hudDivider} />
                 <View style={s.hudItem}>
-                  <Text style={[s.hudValue, { color: theme.accent }]}>📊</Text>
+                  <Icon name="stats-chart-outline" size="lg" color={theme.accent} />
                   <Text style={s.hudLabel}>STATS</Text>
                 </View>
               </TouchableOpacity>
@@ -1350,7 +1356,7 @@ export default function LiveRideScreen() {
                 accessibilityLabel={nextWaypoint ? `Navigate to ${nextWaypoint.name}` : 'Navigate'}
               >
                 <View style={s.giantBtnIconWrap}>
-                  <Text style={s.giantBtnIcon}>🧭</Text>
+                  <Icon name="navigate-outline" size="lg" color={theme.text} />
                 </View>
                 <View style={s.giantBtnTextCol}>
                   <Text style={s.giantBtnTitle}>NAVIGATE</Text>
@@ -1374,7 +1380,7 @@ export default function LiveRideScreen() {
                 accessibilityLabel="Broadcast alert to group"
               >
                 <View style={s.giantBtnIconWrap}>
-                  <Text style={s.giantBtnIcon}>📢</Text>
+                  <Icon name="megaphone-outline" size="lg" color={theme.text} />
                 </View>
                 <View style={s.giantBtnTextCol}>
                   <Text style={s.giantBtnTitle}>ALERT</Text>
@@ -1400,7 +1406,7 @@ export default function LiveRideScreen() {
                 accessibilityLabel="Regroup drop marker"
               >
                 <View style={s.giantBtnIconWrap}>
-                  <Text style={s.giantBtnIcon}>🚩</Text>
+                  <Icon name="flag-outline" size="lg" color={theme.text} />
                 </View>
                 <View style={s.giantBtnTextCol}>
                   <Text style={s.giantBtnTitle}>REGROUP</Text>
@@ -1429,14 +1435,14 @@ export default function LiveRideScreen() {
               <View style={s.formationContainer}>
                 <View style={s.formationHeader}>
                   <Text style={s.formationTitle}>FORMATION & SPACING</Text>
-                  {packFormation.some(p => p.isSeparated) && <Text style={s.separationBadge}>⚠️ Gap Alert</Text>}
+                  {packFormation.some(p => p.isSeparated) && <Text style={s.separationBadge}>Gap alert</Text>}
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.formationStrip}>
                   {packFormation.map(rider => (
                     <View key={rider.userId} style={s.formationItem}>
                       <View style={[s.formationBadge, rider.isLeader ? s.leaderBadge : rider.isTail ? s.tailBadge : s.memberBadge]}>
                         <Text style={s.formationBadgeText}>
-                          {rider.isLeader ? '👑 LEAD' : rider.isTail ? '🧹 SWEEP' : `#${rider.order}`}
+                          {rider.isLeader ? 'LEAD' : rider.isTail ? 'SWEEP' : `#${rider.order}`}
                         </Text>
                       </View>
                       <Text numberOfLines={1} style={s.formationName}>{rider.displayName}</Text>
@@ -1458,9 +1464,10 @@ export default function LiveRideScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={sharing ? 'Pause GPS tracking' : 'Resume GPS tracking'}
                   >
-                    <Text style={s.actionButtonText} numberOfLines={1}>
-                      {sharing ? '⏸ Pause GPS' : '▶ Resume GPS'}
-                    </Text>
+                    <View style={s.inlineRow}>
+                      <Icon name={sharing ? 'pause' : 'play'} size="sm" color={theme.text} />
+                      <Text style={s.actionButtonText} numberOfLines={1}>{sharing ? 'Pause GPS' : 'Resume GPS'}</Text>
+                    </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -1470,7 +1477,10 @@ export default function LiveRideScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Share live location with contact"
                   >
-                    <Text style={s.actionButtonText} numberOfLines={1}>📤 Share</Text>
+                    <View style={s.inlineRow}>
+                      <Icon name="share-outline" size="sm" color={theme.text} />
+                      <Text style={s.actionButtonText} numberOfLines={1}>Share</Text>
+                    </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -1479,7 +1489,10 @@ export default function LiveRideScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Trip workspace and details"
                   >
-                    <Text style={s.actionButtonText} numberOfLines={1}>✎ Details</Text>
+                    <View style={s.inlineRow}>
+                      <Icon name="document-text-outline" size="sm" color={theme.text} />
+                      <Text style={s.actionButtonText} numberOfLines={1}>Details</Text>
+                    </View>
                   </TouchableOpacity>
                 </View>
 
@@ -1493,7 +1506,7 @@ export default function LiveRideScreen() {
                         accessibilityLabel="Enable background GPS tracking"
                       >
                         <Text style={s.subActionText} numberOfLines={1}>
-                          📡 {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
+                          {backgroundPermissionGranted ? 'Start background GPS' : 'Enable background GPS'}
                         </Text>
                       </TouchableOpacity>
                     )}
@@ -1510,7 +1523,7 @@ export default function LiveRideScreen() {
                           ])
                         }
                       >
-                        <Text style={s.endRideText}>🏁 End Ride</Text>
+                        <Text style={s.endRideText}>End Ride</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1564,18 +1577,20 @@ export default function LiveRideScreen() {
                   setAnnouncementModal(true);
                 }}
               >
-                <Text style={[s.text, { color: theme.accent }]}>📢 Captain Announcement...</Text>
+                <Icon name="megaphone-outline" size="md" color={theme.accent} />
+                <Text style={[s.text, { color: theme.accent }]}>Captain Announcement…</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={[s.alertOption, { backgroundColor: theme.surfaceRaised, borderColor: '#F59E0B', borderWidth: 1 }]}
+              style={[s.alertOption, { backgroundColor: theme.surfaceRaised, borderColor: theme.warning, borderWidth: 1 }]}
               disabled={busy}
               onPress={() => {
                 setModal(false);
                 setMechanicalModalVisible(true);
               }}
             >
-              <Text style={[s.text, { color: '#D97706' }]}>🔧 Mechanical Breakdown...</Text>
+              <Icon name="construct-outline" size="md" color={theme.warning} />
+              <Text style={[s.text, { color: theme.warning }]}>Mechanical Breakdown…</Text>
             </TouchableOpacity>
             {(Object.keys(ALERT_LABELS) as AlertType[])
               .filter(t => t !== 'announcement' && t !== 'mechanical')
@@ -1586,7 +1601,8 @@ export default function LiveRideScreen() {
                   disabled={busy}
                   onPress={() => (type === 'emergency' ? triggerSosWorkflow() : void sendAlert(type))}
                 >
-                  <Text style={s.text}>{ALERT_LABELS[type]}</Text>
+                  <Icon name={ALERT_ICONS[type]} size="md" color={type === 'emergency' ? theme.danger : theme.textMuted} />
+                  <Text style={s.text}>{plainLabel(ALERT_LABELS[type])}</Text>
                 </TouchableOpacity>
               ))}
             <TouchableOpacity
@@ -1596,7 +1612,8 @@ export default function LiveRideScreen() {
                 void loadBreakdownDirectory();
               }}
             >
-              <Text style={s.text}>🛠️ Breakdown Assistance Directory (1033 / RSA)</Text>
+              <Icon name="call-outline" size="md" color={theme.textMuted} />
+              <Text style={s.text}>Breakdown Assistance Directory (1033 / RSA)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
               <Text style={s.text}>Cancel</Text>
@@ -1608,17 +1625,17 @@ export default function LiveRideScreen() {
       <Modal visible={announcementModal} transparent animationType="slide" onRequestClose={() => setAnnouncementModal(false)}>
         <View style={s.overlay}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.accent }]}>📢 Captain Announcement</Text>
+            <Text style={[s.heading, { color: theme.accent }]}>Captain Announcement</Text>
             {message && <Text style={s.warningText}>{message}</Text>}
             <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
             <View style={{ gap: 8, marginVertical: 4 }}>
               {[
-                '⛽ Fuel stop at next pump (~5km)',
-                '☕ Chai & stretch break ahead',
-                '🌧️ Wet roads / rain ahead — reduce speed',
-                '⚠️ Road hazard / debris observed',
-                '📢 Regroup at next junction',
-                '🛑 Pull over safely now',
+                'Fuel stop at next pump (~5km)',
+                'Chai & stretch break ahead',
+                'Wet roads / rain ahead — reduce speed',
+                'Road hazard / debris observed',
+                'Regroup at next junction',
+                'Pull over safely now',
               ].map((preset, idx) => (
                 <TouchableOpacity key={idx} style={s.presetOption} disabled={busy} onPress={() => void broadcastAnnouncement(preset)}>
                   <Text style={s.presetText}>{preset}</Text>
@@ -1652,16 +1669,18 @@ export default function LiveRideScreen() {
       <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
         <View style={s.overlay}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.danger }]}>🚨 Motorcycle Emergency SOS</Text>
+            <Text style={[s.heading, { color: theme.danger }]}>Motorcycle Emergency SOS</Text>
             <Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text>
             <TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}>
-              <Text style={s.sosEmergencyText}>🚨 Broadcast to Group Now</Text>
+              <Text style={s.sosEmergencyText}>Broadcast to Group Now</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
-              <Text style={s.text}>💬 SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
+              <Icon name="chatbubble-outline" size="md" color={theme.textMuted} />
+              <Text style={[s.text, { flexShrink: 1 }]}>SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}>
-              <Text style={s.text}>📞 Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
+              <Icon name="call-outline" size="md" color={theme.textMuted} />
+              <Text style={[s.text, { flexShrink: 1 }]}>Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1 }]}
@@ -1670,7 +1689,8 @@ export default function LiveRideScreen() {
                 void loadBreakdownDirectory();
               }}
             >
-              <Text style={[s.text, { color: theme.accent }]}>🛠️ Highway Assistance & RSA Directory (1033 / 112)</Text>
+              <Icon name="call-outline" size="md" color={theme.accent} />
+              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway Assistance & RSA Directory (1033 / 112)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
               <Text style={s.text}>Cancel</Text>
@@ -1685,16 +1705,16 @@ export default function LiveRideScreen() {
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={s.heading}>📊 Live Ride Telemetry & Statistics</Text>
-                <TouchableOpacity onPress={() => setStatsModalVisible(false)}>
-                  <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+                <Text style={s.heading}>Live Ride Telemetry & Statistics</Text>
+                <TouchableOpacity onPress={() => setStatsModalVisible(false)} accessibilityLabel="Close statistics">
+                  <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
               </View>
               <Text style={[s.muted, { marginBottom: 14 }]}>Real-time speed, pace, moving time, and pack spread statistics.</Text>
 
               {/* Time Stats */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>⏱️ TIME & DURATION</Text>
+                <Text style={s.statsCardHeader}>TIME & DURATION</Text>
                 <View style={s.statsGrid}>
                   <View style={s.statsGridItem}>
                     <Text style={s.statsValue}>{liveStats.formatted.elapsedTime}</Text>
@@ -1713,7 +1733,7 @@ export default function LiveRideScreen() {
 
               {/* Speed Stats */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>⚡ SPEED & DISTANCE</Text>
+                <Text style={s.statsCardHeader}>SPEED & DISTANCE</Text>
                 <View style={s.statsGrid}>
                   <View style={s.statsGridItem}>
                     <Text style={s.statsValue}>{liveStats.formatted.currentSpeed}</Text>
@@ -1746,7 +1766,7 @@ export default function LiveRideScreen() {
 
               {/* Pack Telemetry */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>🏍️ PACK FORMATION & TELEMETRY</Text>
+                <Text style={s.statsCardHeader}>PACK FORMATION & TELEMETRY</Text>
                 <View style={s.statsGrid}>
                   <View style={s.statsGridItem}>
                     <Text style={[s.statsValue, { color: theme.accent }]}>{liveStats.formatted.packSpread}</Text>
@@ -1766,7 +1786,7 @@ export default function LiveRideScreen() {
               {/* Battery Saver Option */}
               <View style={[s.statsCard, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                 <View style={{ flex: 1, paddingRight: 8 }}>
-                  <Text style={[s.statsCardHeader, { marginBottom: 2 }]}>🔋 TOURING BATTERY SAVER</Text>
+                  <Text style={[s.statsCardHeader, { marginBottom: 2 }]}>TOURING BATTERY SAVER</Text>
                   <Text style={s.muted}>Adapts GPS interval (15s/25m) for all-day tours to conserve phone battery.</Text>
                 </View>
                 <TouchableOpacity style={[s.control, batterySaver && s.selected]} onPress={() => setBatterySaver(v => !v)}>
@@ -1788,16 +1808,16 @@ export default function LiveRideScreen() {
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>👑 Captain Command Dashboard</Text>
-                <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)}>
-                  <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Captain Command Dashboard</Text>
+                <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)} accessibilityLabel="Close dashboard">
+                  <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
               </View>
               <Text style={[s.muted, { marginBottom: 14 }]}>Lead controls, pack spacing overview, speed advisories, and regroup coordination.</Text>
 
               {/* Pack Overview Card */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>🏍️ PACK STATUS & SPREAD</Text>
+                <Text style={s.statsCardHeader}>PACK STATUS & SPREAD</Text>
                 <View style={s.statsGrid}>
                   <View style={s.statsGridItem}>
                     <Text style={[s.statsValue, { color: theme.green }]}>{liveStats.packSummary.ridingCount}</Text>
@@ -1822,28 +1842,28 @@ export default function LiveRideScreen() {
 
               {/* Pace Advisory Actions */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>⚡ BROADCAST PACE ADVISORY</Text>
+                <Text style={s.statsCardHeader}>BROADCAST PACE ADVISORY</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
                   <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(40, 'Curves / Ghats')}>
-                    <Text style={s.paceButtonText}>🏔️ 40 km/h (Ghats)</Text>
+                    <Text style={s.paceButtonText}>40 km/h (Ghats)</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(60, 'Cruising')}>
-                    <Text style={s.paceButtonText}>🏍️ 60 km/h (Cruising)</Text>
+                    <Text style={s.paceButtonText}>60 km/h (Cruising)</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(80, 'Highway')}>
-                    <Text style={s.paceButtonText}>🛣️ 80 km/h (Highway)</Text>
+                    <Text style={s.paceButtonText}>80 km/h (Highway)</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.paceButton} onPress={() => void broadcastPaceAdvisory(30, 'Wet Road / Rain')}>
-                    <Text style={s.paceButtonText}>🌧️ 30 km/h (Rain)</Text>
+                    <Text style={s.paceButtonText}>30 km/h (Rain)</Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
               {/* Active Regroup Points Coordination */}
               <View style={s.statsCard}>
-                <Text style={s.statsCardHeader}>📍 REGROUP POINTS COORDINATION</Text>
+                <Text style={s.statsCardHeader}>REGROUP POINTS COORDINATION</Text>
                 {regroupPoints.length === 0 ? (
                   <Text style={s.muted}>No regroup points set for this ride. Add them in Trip Workspace.</Text>
                 ) : (
@@ -1873,7 +1893,7 @@ export default function LiveRideScreen() {
               {/* Announcements & Acknowledgements Monitor */}
               <View style={s.statsCard}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={s.statsCardHeader}>📢 ANNOUNCEMENT ACKNOWLEDGEMENTS</Text>
+                  <Text style={s.statsCardHeader}>ANNOUNCEMENT ACKNOWLEDGEMENTS</Text>
                   <TouchableOpacity
                     style={{ backgroundColor: theme.accentSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}
                     onPress={() => {
@@ -1901,7 +1921,7 @@ export default function LiveRideScreen() {
                               {ack ? `${ack.count}/${participants.length} acknowledged` : 'Checking...'}
                             </Text>
                           </View>
-                          {ack && ack.riders.length > 0 && <Text style={[s.muted, { fontSize: 10, marginTop: 2 }]}>✓ {ack.riders.join(', ')}</Text>}
+                          {ack && ack.riders.length > 0 && <Text style={[s.muted, { fontSize: 10, marginTop: 2 }]}>Acknowledged by {ack.riders.join(', ')}</Text>}
                         </View>
                       );
                     })
@@ -1909,13 +1929,14 @@ export default function LiveRideScreen() {
               </View>
 
               <TouchableOpacity
-                style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12 }]}
+                style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
                 onPress={() => {
                   setCaptainDashboardVisible(false);
                   void loadBreakdownDirectory();
                 }}
               >
-                <Text style={[s.text, { color: theme.accent, textAlign: 'center' }]}>🛠️ Open Roadside Breakdown Directory</Text>
+                <Icon name="call-outline" size="md" color={theme.accent} />
+                <Text style={[s.text, { color: theme.accent }]}>Open Roadside Breakdown Directory</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setCaptainDashboardVisible(false)}>
@@ -1932,9 +1953,9 @@ export default function LiveRideScreen() {
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: '#D97706' }]}>🔧 Mechanical Breakdown Alert</Text>
-                <TouchableOpacity onPress={() => setMechanicalModalVisible(false)}>
-                  <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+                <Text style={[s.heading, { color: theme.warning }]}>Mechanical Breakdown Alert</Text>
+                <TouchableOpacity onPress={() => setMechanicalModalVisible(false)} accessibilityLabel="Close">
+                  <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
               </View>
               <Text style={[s.muted, { marginBottom: 14 }]}>Notify your pack of bike issues and attach your exact live location so sweep and teammates can assist.</Text>
@@ -1947,9 +1968,8 @@ export default function LiveRideScreen() {
                     style={[s.issueChip, selectedMechanicalIssue === issue && s.issueChipSelected]}
                     onPress={() => setSelectedMechanicalIssue(issue)}
                   >
-                    <Text style={[s.issueChipText, selectedMechanicalIssue === issue && s.issueChipTextSelected]}>
-                      {MECHANICAL_ISSUE_LABELS[issue].icon} {MECHANICAL_ISSUE_LABELS[issue].label}
-                    </Text>
+                    <Icon name={MECHANICAL_ICONS[issue]} size="sm" color={selectedMechanicalIssue === issue ? theme.accent : theme.textMuted} />
+                    <Text style={[s.issueChipText, selectedMechanicalIssue === issue && s.issueChipTextSelected]}>{MECHANICAL_ISSUE_LABELS[issue].label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1964,18 +1984,19 @@ export default function LiveRideScreen() {
                 maxLength={140}
               />
 
-              <TouchableOpacity style={[s.primary, { backgroundColor: '#D97706', marginBottom: 10 }]} disabled={busy} onPress={() => void sendMechanicalBreakdownAlert()}>
-                <Text style={[s.buttonText, { color: '#FFFFFF' }]}>Broadcast Breakdown Alert</Text>
+              <TouchableOpacity style={[s.primary, { backgroundColor: theme.warningSoft, borderWidth: 1, borderColor: theme.warning, marginBottom: 10 }]} disabled={busy} onPress={() => void sendMechanicalBreakdownAlert()}>
+                <Text style={[s.buttonText, { color: theme.warning, fontWeight: '800' }]}>Broadcast Breakdown Alert</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[s.alertOption, { borderColor: theme.border, borderWidth: 1, marginBottom: 10 }]}
+                style={[s.alertOption, { borderColor: theme.border, borderWidth: 1, marginBottom: 10, justifyContent: 'center' }]}
                 onPress={() => {
                   setMechanicalModalVisible(false);
                   void loadBreakdownDirectory();
                 }}
               >
-                <Text style={[s.text, { textAlign: 'center' }]}>🛠️ View Roadside Assistance Numbers</Text>
+                <Icon name="call-outline" size="md" color={theme.textMuted} />
+                <Text style={s.text}>View Roadside Assistance Numbers</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setMechanicalModalVisible(false)}>
@@ -1992,41 +2013,43 @@ export default function LiveRideScreen() {
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>🛠️ Roadside Breakdown Directory</Text>
-                <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)}>
-                  <Text style={{ color: theme.muted, fontSize: 18, fontWeight: '700' }}>✕</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Roadside Breakdown Directory</Text>
+                <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)} accessibilityLabel="Close directory">
+                  <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
               </View>
               <Text style={[s.muted, { marginBottom: 14 }]}>24x7 verified highway helplines, motorcycle roadside recovery, and emergency towing.</Text>
 
               {/* National Helplines */}
-              <Text style={s.statsCardHeader}>🚨 24X7 NATIONAL HELPLINES</Text>
+              <Text style={s.statsCardHeader}>24X7 NATIONAL HELPLINES</Text>
               {NATIONAL_EMERGENCY_HELPLINES.map((helpline, idx) => (
                 <View key={idx} style={s.directoryCard}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1, paddingRight: 8 }}>
-                      <Text style={s.directoryName}>{helpline.icon} {helpline.name}</Text>
+                      <Text style={s.directoryName}>{helpline.name}</Text>
                       <Text style={s.directoryCoverage}>{helpline.purpose}</Text>
                     </View>
                     <TouchableOpacity style={s.callButton} onPress={() => void Linking.openURL('tel:' + helpline.number)}>
-                      <Text style={s.callButtonText}>📞 {helpline.number}</Text>
+                      <Icon name="call" size="xs" color={theme.onAccent} />
+                      <Text style={s.callButtonText}>{helpline.number}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ))}
 
               {/* Verified Breakdown Services */}
-              <Text style={[s.statsCardHeader, { marginTop: 10 }]}>🏍️ MOTORCYCLE RSA & TOWING SERVICES</Text>
+              <Text style={[s.statsCardHeader, { marginTop: 10 }]}>MOTORCYCLE RSA & TOWING SERVICES</Text>
               {breakdownServices.map((service, idx) => (
                 <View key={service.id || idx} style={s.directoryCard}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text style={s.directoryName}>{service.name}</Text>
-                      <Text style={s.directoryCoverage}>📍 {service.region} · {service.category}</Text>
+                      <Text style={s.directoryCoverage}>{service.region} · {service.category}</Text>
                       {(service.notes || service.description) && <Text style={s.directoryPhone}>{service.notes || service.description}</Text>}
                     </View>
                     <TouchableOpacity style={s.callButton} onPress={() => void Linking.openURL('tel:' + service.phone)}>
-                      <Text style={s.callButtonText}>📞 Call</Text>
+                      <Icon name="call" size="xs" color={theme.onAccent} />
+                      <Text style={s.callButtonText}>Call</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -2060,16 +2083,15 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 12,
       paddingVertical: 7,
-      borderRadius: 20,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 30,
     },
     statusPillItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    statusPillIcon: { fontSize: 12 },
     statusStripText: { color: c.text, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
 
     // Calm Offline Indicator
@@ -2111,8 +2133,6 @@ const makeStyles = (c: RidePalette) =>
       borderWidth: 1,
       borderColor: c.border,
     },
-    backIcon: { color: c.text, fontSize: 24, fontWeight: '700', lineHeight: 26, marginTop: -2 },
-    topBarIcon: { color: c.text, fontSize: 16, fontWeight: '700' },
     sosTopButton: {
       width: 46,
       height: 48,
@@ -2130,27 +2150,27 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      borderRadius: 12,
+      borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 25,
       maxWidth: '55%',
+      ...elevation('floating', c),
     },
-    apexPinIcon: { fontSize: 16 },
     apexPinTitle: { color: c.text, fontSize: 12, fontWeight: '800' },
     apexPinSub: { color: c.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
 
     controls: { position: 'absolute', right: 14, flexDirection: 'row', gap: 8, zIndex: 25 },
     control: {
-      backgroundColor: c.surface + 'EE',
+      backgroundColor: c.surface,
       paddingHorizontal: 14,
       minHeight: 40,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 20,
+      borderRadius: radius.sm,
       borderWidth: 1,
       borderColor: c.border,
     },
@@ -2164,25 +2184,25 @@ const makeStyles = (c: RidePalette) =>
       left: 14,
       right: 14,
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: radius.lg,
       padding: 14,
       borderWidth: 1.5,
       borderColor: c.accent,
       zIndex: 50,
+      ...elevation('overlay', c),
     },
-    floatingAlertEmergency: { backgroundColor: '#FEF2F2', borderColor: c.danger, borderWidth: 2 },
-    floatingAlertAnnouncement: { backgroundColor: '#FFF7ED', borderColor: '#F97316' },
-    floatingAlertFuel: { backgroundColor: '#FFFBEB', borderColor: '#F59E0B' },
-    floatingAlertBreak: { backgroundColor: '#FEF3C7', borderColor: '#D97706' },
+    floatingAlertEmergency: { backgroundColor: c.dangerSoft, borderColor: c.danger, borderWidth: 2 },
+    floatingAlertAnnouncement: { backgroundColor: c.accentSoft, borderColor: c.accent },
+    floatingAlertFuel: { backgroundColor: c.warningSoft, borderColor: c.warning },
+    floatingAlertBreak: { backgroundColor: c.warningSoft, borderColor: c.warning },
     floatingAlertHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
     floatingAlertTitle: { color: c.text, fontSize: 14, fontWeight: '800' },
     floatingAlertDismiss: { padding: 4, marginLeft: 8 },
-    floatingAlertDismissText: { color: c.muted, fontSize: 16, fontWeight: '800' },
     floatingAlertMessage: { color: c.text, fontSize: 13, fontWeight: '600', lineHeight: 18, marginBottom: 10 },
     floatingAlertActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
-    floatingAlertActionBtn: { backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    floatingAlertActionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-    floatingAlertSecondaryBtn: { backgroundColor: c.surfaceRaised, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border },
+    floatingAlertActionBtn: { flexDirection: 'row', gap: 6, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    floatingAlertActionText: { color: c.onAccent, fontSize: 12, fontWeight: '800' },
+    floatingAlertSecondaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.surfaceRaised, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: c.border },
     floatingAlertSecondaryText: { color: c.text, fontSize: 12, fontWeight: '700' },
 
     regroupBanner: {
@@ -2201,7 +2221,7 @@ const makeStyles = (c: RidePalette) =>
     },
     regroupBannerText: { color: c.text, fontSize: 13, fontWeight: '700', flex: 1 },
     confirmRegroupButton: { backgroundColor: c.accent, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-    confirmRegroupText: { color: '#000000', fontSize: 12, fontWeight: '800' },
+    confirmRegroupText: { color: c.onAccent, fontSize: 12, fontWeight: '800' },
 
     deviationWarning: {
       position: 'absolute',
@@ -2243,12 +2263,13 @@ const makeStyles = (c: RidePalette) =>
       left: 0,
       right: 0,
       backgroundColor: c.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
+      borderTopLeftRadius: radius.sheet,
+      borderTopRightRadius: radius.sheet,
       paddingHorizontal: 16,
       borderWidth: 1,
       borderColor: c.border,
       zIndex: 20,
+      ...elevation('sheet', c),
     },
     sheetExpanded: { maxHeight: '75%' },
     sheetHeader: { paddingTop: 8, paddingBottom: 6 },
@@ -2259,7 +2280,6 @@ const makeStyles = (c: RidePalette) =>
     heroApexTargetCol: { flex: 1, paddingRight: 10 },
     apexSubLabel: { color: c.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
     apexTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-    apexArrowIcon: { color: c.accent, fontSize: 18, fontWeight: '900' },
     apexTargetTitle: { color: c.text, fontSize: 18, fontWeight: '900', textTransform: 'uppercase' },
     heroApexDistCol: { alignItems: 'flex-end' },
     apexDistRow: { flexDirection: 'row', alignItems: 'baseline', gap: 2, marginTop: 2 },
@@ -2303,7 +2323,6 @@ const makeStyles = (c: RidePalette) =>
     actionButton: { flex: 1, backgroundColor: c.surfaceRaised, borderRadius: 16, minHeight: 64, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
     alertButton: { flex: 1, backgroundColor: c.surfaceRaised, borderRadius: 16, minHeight: 64, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
     giantBtnIconWrap: { width: 42, height: 42, borderRadius: 10, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-    giantBtnIcon: { fontSize: 22 },
     giantBtnTextCol: { flex: 1, justifyContent: 'center' },
     giantBtnTitle: { color: c.text, fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
     giantBtnSubtitle: { color: c.muted, fontSize: 10, fontWeight: '700', marginTop: 2 },
@@ -2320,7 +2339,7 @@ const makeStyles = (c: RidePalette) =>
     formationItem: { alignItems: 'center', minWidth: 68, backgroundColor: c.surface, borderRadius: 8, padding: 6, borderWidth: 1, borderColor: c.border },
     formationBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 4 },
     leaderBadge: { backgroundColor: c.accentSoft },
-    tailBadge: { backgroundColor: '#FEF3C7' },
+    tailBadge: { backgroundColor: c.warningSoft },
     memberBadge: { backgroundColor: c.surfaceRaised },
     formationBadgeText: { color: c.text, fontSize: 9, fontWeight: '800' },
     formationName: { color: c.text, fontSize: 11, fontWeight: '700', maxWidth: 70 },
@@ -2334,7 +2353,7 @@ const makeStyles = (c: RidePalette) =>
     subActionsRow: { flexDirection: 'row', gap: 8, alignItems: 'center', width: '100%', marginTop: 2 },
     subActionButton: { backgroundColor: c.surfaceRaised, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
     subActionText: { color: c.accent, fontSize: 12, fontWeight: '700' },
-    endRideButton: { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)', borderWidth: 1, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+    endRideButton: { backgroundColor: c.dangerSoft, borderColor: c.danger, borderWidth: 1, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
     endRideText: { color: c.danger, fontSize: 12, fontWeight: '800' },
 
     actions: { flexDirection: 'row', gap: 8, alignItems: 'center', marginVertical: 8 },
@@ -2348,7 +2367,8 @@ const makeStyles = (c: RidePalette) =>
     // Modals
     overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: c.shadow + '88' },
     modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, backgroundColor: c.surface, gap: 12 },
-    alertOption: { padding: 18, borderRadius: 12, backgroundColor: c.surfaceRaised },
+    alertOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, borderRadius: radius.md, backgroundColor: c.surfaceRaised },
+    inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     emergency: { backgroundColor: c.accentSoft },
     announcementInput: { flex: 1, backgroundColor: c.surfaceRaised, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 13 },
     sendAnnouncementBtn: { backgroundColor: c.accent, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10 },
@@ -2358,7 +2378,7 @@ const makeStyles = (c: RidePalette) =>
     disabled: { opacity: 0.5 },
 
     sosEmergencyOption: { padding: 16, borderRadius: 10, backgroundColor: c.danger, alignItems: 'center' },
-    sosEmergencyText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    sosEmergencyText: { color: c.onDanger, fontSize: 15, fontWeight: '800' },
 
     statsCard: { backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: c.border },
     statsCardHeader: { color: c.muted, fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 },
@@ -2372,10 +2392,10 @@ const makeStyles = (c: RidePalette) =>
     regroupActionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.surface, padding: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
     regroupCloseBtn: { backgroundColor: c.green, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
     regroupCloseBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-    acknowledgedBadge: { backgroundColor: c.greenSoft, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+    acknowledgedBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: c.greenSoft, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.sm },
     acknowledgedText: { color: c.green, fontSize: 12, fontWeight: '800' },
 
-    issueChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: 6 },
+    issueChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: spacing.xs },
     issueChipSelected: { backgroundColor: c.accentSoft, borderColor: c.accent },
     issueChipText: { color: c.text, fontSize: 12, fontWeight: '600' },
     issueChipTextSelected: { color: c.accent, fontWeight: '800' },
@@ -2384,6 +2404,6 @@ const makeStyles = (c: RidePalette) =>
     directoryName: { color: c.text, fontSize: 14, fontWeight: '800' },
     directoryCoverage: { color: c.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
     directoryPhone: { color: c.muted, fontSize: 12, marginTop: 2 },
-    callButton: { backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-    callButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+    callButton: { flexDirection: 'row', gap: 4, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    callButtonText: { color: c.onAccent, fontSize: 12, fontWeight: '800' },
   });

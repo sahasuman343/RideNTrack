@@ -15,10 +15,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, useRideThemeSettings, RidePalette } from '../../src/theme';
+import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
+import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
-import { LiveDot } from '../../src/components/ui';
+import { Icon } from '../../src/components/ui';
+import { SAVED_PLACE_ICONS } from '../../src/icons';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -237,7 +239,7 @@ export default function ProfileScreen() {
     }
   }
 
-  const dark = mode === 'dark' || (mode === 'system' && theme.background === '#111317');
+  const dark = mode === 'dark' || (mode === 'system' && theme.scheme === 'dark');
   const hasMotorcycle = Boolean(profile?.motorcycle_make?.trim() || profile?.motorcycle_model?.trim());
 
   const safeRangeKm =
@@ -252,13 +254,13 @@ export default function ProfileScreen() {
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
+  const swipeHandlers = useSwipeTab('profile');
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} {...swipeHandlers}>
       {/* Top Header Bar matching profile_garage.html */}
       <View style={[styles.topHeader, { paddingTop: safeHeaderTop }]}>
         <View style={styles.headerTitleRow}>
-          <Text style={styles.headerEmblemIcon}>🏍️</Text>
           <Text style={styles.headerTitleText}>GARAGE & FLEET</Text>
         </View>
 
@@ -270,7 +272,7 @@ export default function ProfileScreen() {
             accessibilityRole="button"
             accessibilityLabel="Edit Profile & Garage"
           >
-            <Text style={styles.headerActionIcon}>⚙️</Text>
+            <Icon name="settings-outline" size="md" color={theme.text} />
           </TouchableOpacity>
           {profile?.avatar_url ? (
             <Image source={{ uri: profile.avatar_url }} style={styles.headerAvatarImg} />
@@ -305,7 +307,7 @@ export default function ProfileScreen() {
                 </View>
               )}
               <View style={styles.verifiedCheckBadge}>
-                <Text style={styles.verifiedCheckText}>✓</Text>
+                <Icon name="checkmark" size="xs" color={theme.onAccent} />
               </View>
             </View>
 
@@ -321,7 +323,7 @@ export default function ProfileScreen() {
                 </View>
               </View>
               <View style={styles.careerRow}>
-                <Text style={styles.careerIcon}>🧭</Text>
+                <Icon name="ribbon-outline" size="sm" color={theme.tertiary} />
                 <Text style={styles.careerSubtitle}>
                   {analytics?.milestones && analytics.milestones.length > 0
                     ? analytics.milestones[analytics.milestones.length - 1].title
@@ -359,7 +361,7 @@ export default function ProfileScreen() {
           {analyticsUnavailable && <TouchableOpacity accessibilityRole="button" onPress={() => void loadAnalytics()}><Text style={styles.hint}>Statistics could not refresh. Tap to retry.</Text></TouchableOpacity>}
           <TouchableOpacity disabled={!profile} accessibilityRole="button" accessibilityLabel="Edit emergency details" onPress={() => openEditor('emergency')} style={styles.iceCard}>
             <View style={styles.iceLeft}>
-              <Text style={styles.iceIcon}>🏥</Text>
+              <Icon name="medkit-outline" size="sm" color={theme.danger} />
               <Text style={styles.iceBloodType}>
                 {profile?.blood_group ? profile.blood_group.toUpperCase() : 'Not recorded'}
               </Text>
@@ -376,7 +378,7 @@ export default function ProfileScreen() {
         {/* Motorcycle Fleet Section Header */}
         <View style={styles.fleetHeaderRow}>
           <View style={styles.fleetTitleRow}>
-            <Text style={styles.fleetIcon}>🏍️</Text>
+            <Icon name="speedometer-outline" size="md" color={theme.textMuted} />
             <Text style={styles.fleetTitleText}>Motorcycle profile & machine</Text>
           </View>
           {hasMotorcycle && (
@@ -398,7 +400,6 @@ export default function ProfileScreen() {
             <View style={styles.steedCoverBox}>
               <View style={styles.steedCoverBackdrop} />
               <View style={styles.primarySteedBadge}>
-                <LiveDot pulse color="#000000" size={6} />
                 <Text style={styles.primarySteedText}>Primary Steed</Text>
               </View>
               <View style={styles.steedHeroMeta}>
@@ -447,7 +448,7 @@ export default function ProfileScreen() {
         ) : (
           <View style={styles.steedEmptyCard}>
             <View style={styles.steedEmptyIconBox}>
-              <Text style={styles.steedEmptyIcon}>🏍️</Text>
+              <Icon name="speedometer-outline" size="xl" color={theme.textMuted} />
             </View>
             <Text style={styles.steedEmptyTitle}>No motorcycle added yet</Text>
             <Text style={styles.steedEmptySub}>
@@ -486,11 +487,14 @@ export default function ProfileScreen() {
             </Text>
           ) : (
             savedPlaces.map(place => {
-              const catMeta = SAVED_PLACE_CATEGORIES[place.category] || { label: place.category, icon: '📍' };
+              const catMeta = SAVED_PLACE_CATEGORIES[place.category] || { label: place.category };
               return (
                 <View key={place.id} style={styles.savedPlaceRow}>
                   <View style={styles.savedPlaceInfo}>
-                    <Text style={styles.savedPlaceName}>{catMeta.icon} {place.name}</Text>
+                    <View style={styles.savedPlaceTitleRow}>
+                      <Icon name={SAVED_PLACE_ICONS[place.category] ?? 'location-outline'} size="sm" color={theme.textMuted} />
+                      <Text style={styles.savedPlaceName}>{place.name}</Text>
+                    </View>
                     <Text style={styles.savedPlaceMeta}>
                       {catMeta.label} · {place.latitude.toFixed(4)}, {place.longitude.toFixed(4)}
                     </Text>
@@ -503,7 +507,7 @@ export default function ProfileScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`Delete ${place.name}`}
                   >
-                    <Text style={styles.deletePlaceIcon}>✕</Text>
+                    <Icon name="close" size="md" color={theme.danger} />
                   </TouchableOpacity>
                 </View>
               );
@@ -517,7 +521,7 @@ export default function ProfileScreen() {
           <View style={styles.systemCard}>
             <View style={styles.systemItem}>
               <View style={styles.systemItemIconBox}>
-                <Text style={styles.systemItemIcon}>📥</Text>
+                <Icon name="download-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Offline Topo Storage</Text>
@@ -528,8 +532,8 @@ export default function ProfileScreen() {
             <View style={styles.systemItemDivider} />
 
             <View style={styles.systemItem}>
-              <View style={[styles.systemItemIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Text style={styles.systemItemIcon}>🚨</Text>
+              <View style={[styles.systemItemIconBox, { backgroundColor: theme.dangerSoft }]}>
+                <Icon name="warning-outline" size="md" color={theme.danger} />
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Emergency SOS Protocols</Text>
@@ -541,7 +545,7 @@ export default function ProfileScreen() {
 
             <View style={styles.systemItem}>
               <View style={styles.systemItemIconBox}>
-                <Text style={styles.systemItemIcon}>📐</Text>
+                <Icon name="speedometer-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Units & Telemetry</Text>
@@ -553,7 +557,7 @@ export default function ProfileScreen() {
 
             <View style={styles.systemItem}>
               <View style={styles.systemItemIconBox}>
-                <Text style={styles.systemItemIcon}>☁️</Text>
+                <Icon name="cloud-download-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Cloud GPX & Telemetry Export</Text>
@@ -566,7 +570,7 @@ export default function ProfileScreen() {
             {/* Appearance Theme Toggle */}
             <View style={styles.systemItem}>
               <View style={styles.systemItemIconBox}>
-                <Text style={styles.systemItemIcon}>🌓</Text>
+                <Icon name="contrast-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
                 <Text style={styles.systemItemTitle}>Dark Theme</Text>
@@ -578,7 +582,7 @@ export default function ProfileScreen() {
                 value={dark}
                 onValueChange={value => setMode(value ? 'dark' : 'light')}
                 trackColor={{ false: theme.border, true: theme.accent }}
-                thumbColor="#FFFFFF"
+                thumbColor={theme.onAccent}
               />
             </View>
           </View>
@@ -592,7 +596,7 @@ export default function ProfileScreen() {
             accessibilityRole="button"
             accessibilityLabel="Sign out of account"
           >
-            <Text style={styles.signOutIcon}>🚪</Text>
+            <Icon name="log-out-outline" size="md" color={theme.text} />
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
 
@@ -654,7 +658,7 @@ export default function ProfileScreen() {
                 <Text style={styles.fieldLabel}>Share with active ride members</Text>
                 <Text style={styles.hint}>Only active members can view this. Turning it off removes consent immediately.</Text>
               </View>
-              <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor="#fff" />
+              <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor={theme.onAccent} />
             </View>
             </>}
             {section === 'bike' && <>
@@ -671,7 +675,7 @@ export default function ProfileScreen() {
                   style={[styles.catPill, category === cat && { backgroundColor: theme.accent, borderColor: theme.accent }]}
                   onPress={() => setCategory(cat)}
                 >
-                  <Text style={[styles.catPillText, category === cat && { color: '#000' }]}>{cat.toUpperCase()}</Text>
+                  <Text style={[styles.catPillText, category === cat && { color: theme.onAccent }]}>{cat.toUpperCase()}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -721,7 +725,8 @@ export default function ProfileScreen() {
                     style={[styles.catPill, isSelected && { backgroundColor: theme.accent, borderColor: theme.accent }]}
                     onPress={() => setPlaceCategory(cat)}
                   >
-                    <Text style={[styles.catPillText, isSelected && { color: '#000' }]}>{meta.icon} {meta.label}</Text>
+                    <Icon name={SAVED_PLACE_ICONS[cat]} size="sm" color={isSelected ? theme.onAccent : theme.textMuted} />
+                    <Text style={[styles.catPillText, isSelected && { color: theme.onAccent }]}>{meta.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -779,9 +784,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       gap: 8,
     },
-    headerEmblemIcon: {
-      fontSize: 20,
-    },
     headerTitleText: {
       color: c.text,
       fontSize: 14,
@@ -801,9 +803,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    headerActionIcon: {
-      fontSize: 18,
-    },
     headerAvatarImg: {
       width: 34,
       height: 34,
@@ -820,7 +819,7 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
     },
     headerAvatarText: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 14,
       fontWeight: '800',
     },
@@ -834,15 +833,11 @@ const makeStyles = (c: RidePalette) =>
     },
     riderCard: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
       gap: 14,
-      shadowColor: '#000',
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 2,
     },
     riderTopRow: {
       flexDirection: 'row',
@@ -866,7 +861,7 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
     },
     riderAvatarInitialText: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 24,
       fontWeight: '900',
     },
@@ -876,17 +871,12 @@ const makeStyles = (c: RidePalette) =>
       right: -2,
       width: 20,
       height: 20,
-      borderRadius: 10,
+      borderRadius: radius.round,
       backgroundColor: c.green,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 2,
       borderColor: c.surface,
-    },
-    verifiedCheckText: {
-      color: '#000000',
-      fontSize: 11,
-      fontWeight: '900',
     },
     riderMetaCol: {
       flex: 1,
@@ -920,9 +910,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       gap: 4,
       marginTop: 2,
-    },
-    careerIcon: {
-      fontSize: 13,
     },
     careerSubtitle: {
       fontSize: 12,
@@ -959,12 +946,12 @@ const makeStyles = (c: RidePalette) =>
       letterSpacing: 0.5,
     },
     iceCard: {
-      backgroundColor: 'rgba(239, 68, 68, 0.12)',
-      borderColor: 'rgba(239, 68, 68, 0.3)',
+      backgroundColor: c.dangerSoft,
+      borderColor: c.danger,
       borderWidth: 1,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
@@ -979,9 +966,6 @@ const makeStyles = (c: RidePalette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-    },
-    iceIcon: {
-      fontSize: 14,
     },
     iceBloodType: {
       fontSize: 10,
@@ -1015,9 +999,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       gap: 6,
     },
-    fleetIcon: {
-      fontSize: 16,
-    },
     fleetTitleText: {
       fontSize: 12,
       fontWeight: '900',
@@ -1038,7 +1019,7 @@ const makeStyles = (c: RidePalette) =>
     },
     steedCard: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       overflow: 'hidden',
@@ -1057,8 +1038,7 @@ const makeStyles = (c: RidePalette) =>
       right: 0,
       top: 0,
       bottom: 0,
-      backgroundColor: '#0c0e11',
-      opacity: 0.6,
+      backgroundColor: c.scrim,
     },
     primarySteedBadge: {
       alignSelf: 'flex-start',
@@ -1072,7 +1052,7 @@ const makeStyles = (c: RidePalette) =>
       zIndex: 2,
     },
     primarySteedText: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 9,
       fontWeight: '900',
       letterSpacing: 0.8,
@@ -1084,11 +1064,11 @@ const makeStyles = (c: RidePalette) =>
     steedModelTitle: {
       fontSize: 18,
       fontWeight: '900',
-      color: '#FFFFFF',
+      color: c.scheme === 'light' ? c.onAccent : c.text,
     },
     steedCategoryText: {
       fontSize: 11,
-      color: '#cbd5e1',
+      color: c.textMuted,
       fontWeight: '600',
       marginTop: 2,
     },
@@ -1125,7 +1105,7 @@ const makeStyles = (c: RidePalette) =>
     },
     steedEmptyCard: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 24,
@@ -1140,9 +1120,6 @@ const makeStyles = (c: RidePalette) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 2,
-    },
-    steedEmptyIcon: {
-      fontSize: 26,
     },
     steedEmptyTitle: {
       fontSize: 16,
@@ -1168,11 +1145,11 @@ const makeStyles = (c: RidePalette) =>
     primaryAddBikeBtnText: {
       fontSize: 13,
       fontWeight: '800',
-      color: '#0E1013',
+      color: c.onAccent,
     },
     card: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       padding: 16,
@@ -1196,7 +1173,7 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: 6,
     },
     addPlaceBtnText: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 10,
       fontWeight: '900',
       letterSpacing: 0.5,
@@ -1219,6 +1196,11 @@ const makeStyles = (c: RidePalette) =>
       paddingRight: 8,
       gap: 2,
     },
+    savedPlaceTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
     savedPlaceName: {
       color: c.text,
       fontSize: 13,
@@ -1240,11 +1222,6 @@ const makeStyles = (c: RidePalette) =>
     deletePlaceBtn: {
       padding: 6,
     },
-    deletePlaceIcon: {
-      color: c.danger,
-      fontSize: 14,
-      fontWeight: '800',
-    },
     systemSection: {
       gap: 8,
     },
@@ -1257,7 +1234,7 @@ const makeStyles = (c: RidePalette) =>
     },
     systemCard: {
       backgroundColor: c.surface,
-      borderRadius: 18,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
       overflow: 'hidden',
@@ -1275,9 +1252,6 @@ const makeStyles = (c: RidePalette) =>
       backgroundColor: c.surfaceRaised,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    systemItemIcon: {
-      fontSize: 18,
     },
     systemItemTextCol: {
       flex: 1,
@@ -1319,9 +1293,6 @@ const makeStyles = (c: RidePalette) =>
       justifyContent: 'center',
       gap: 8,
     },
-    signOutIcon: {
-      fontSize: 16,
-    },
     signOutText: {
       fontSize: 13,
       fontWeight: '800',
@@ -1360,7 +1331,7 @@ const makeStyles = (c: RidePalette) =>
     overlay: {
       flex: 1,
       justifyContent: 'flex-end',
-      backgroundColor: '#00000088',
+      backgroundColor: c.scrim,
     },
     modal: {
       backgroundColor: c.surface,
@@ -1392,6 +1363,9 @@ const makeStyles = (c: RidePalette) =>
       fontSize: 14,
     },
     catPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       borderWidth: 1,
       borderColor: c.border,
       borderRadius: 8,
@@ -1412,7 +1386,7 @@ const makeStyles = (c: RidePalette) =>
       marginTop: 20,
     },
     saveText: {
-      color: '#000000',
+      color: c.onAccent,
       fontSize: 14,
       fontWeight: '900',
     },

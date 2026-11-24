@@ -30,7 +30,6 @@ import {
   type JournalPhoto,
   formatShareableRideCard,
   ROLE_LABELS,
-  CHECKLIST_CATEGORY_LABELS,
   type TripChecklistItem,
   type RideParticipantRole,
   type TripChecklistCategory,
@@ -45,7 +44,7 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, RidePalette } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 import {
@@ -53,10 +52,13 @@ import {
   AvatarStack,
   Card,
   FallbackTripCover,
+  Icon,
+  IconName,
   LiveDot,
   RouteLine,
   StatusBadge,
 } from '../../src/components/ui';
+import { ATTENDANCE_ICONS, CHECKLIST_ICONS, EXPENSE_ICONS, ROLE_ICONS, weatherIcon } from '../../src/icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
@@ -1224,12 +1226,12 @@ export default function TripWorkspaceScreen() {
   const duration = trip?.estimated_duration_seconds ? Math.round(trip.estimated_duration_seconds / 3600) + ' hr map estimate' : 'Pending';
 
   function renderStageCard(stage: TripStage) {
-    const statusMeta = {
-      planned: { label: 'Planned', color: theme.muted, icon: '⏳' },
-      in_progress: { label: 'Riding', color: theme.accent, icon: '🟡' },
-      completed: { label: 'Completed', color: theme.green, icon: '✅' },
-      skipped: { label: 'Skipped', color: theme.subtle, icon: '⏭️' },
-    }[stage.status] || { label: 'Planned', color: theme.muted, icon: '⏳' };
+    const statusMeta: { label: string; color: string; icon: IconName } = {
+      planned: { label: 'Planned', color: theme.muted, icon: 'time-outline' as IconName },
+      in_progress: { label: 'Riding', color: theme.accent, icon: 'play-circle-outline' as IconName },
+      completed: { label: 'Completed', color: theme.green, icon: 'checkmark-circle-outline' as IconName },
+      skipped: { label: 'Skipped', color: theme.subtle, icon: 'play-skip-forward-outline' as IconName },
+    }[stage.status] || { label: 'Planned', color: theme.muted, icon: 'time-outline' };
 
     const dist = stage.estimated_distance_meters ? `${(stage.estimated_distance_meters / 1000).toFixed(0)} km` : null;
 
@@ -1245,13 +1247,12 @@ export default function TripWorkspaceScreen() {
             style={[styles.stageStatusPill, { borderColor: statusMeta.color }]}
             onPress={() => void cycleStageStatus(stage)}
           >
-            <Text style={[styles.stageStatusText, { color: statusMeta.color }]}>
-              {statusMeta.icon} {statusMeta.label}
-            </Text>
+            <Icon name={statusMeta.icon} size="xs" color={statusMeta.color} />
+            <Text style={[styles.stageStatusText, { color: statusMeta.color }]}>{statusMeta.label}</Text>
           </TouchableOpacity>
         </View>
         {!!stage.notes && (
-          <Text style={styles.stageNotes}>📝 {stage.notes}</Text>
+          <Text style={styles.stageNotes}>{stage.notes}</Text>
         )}
         {isAdmin && (
           <View style={styles.stageActions}>
@@ -1339,7 +1340,7 @@ export default function TripWorkspaceScreen() {
             accessibilityLabel="Go back"
             accessibilityRole="button"
           >
-            <Text style={styles.backButtonText}>←</Text>
+            <Icon name="arrow-back" size="lg" color={theme.text} />
           </TouchableOpacity>
           <View style={styles.topHeaderTitleContainer}>
             <Text style={styles.topHeaderEyebrow}>LIVE NAVIGATION</Text>
@@ -1379,7 +1380,8 @@ export default function TripWorkspaceScreen() {
                 onPress={() => void exportGpxFile()}
                 accessibilityLabel="Export GPX route"
               >
-                <Text style={styles.heroActionBtnText}>📥 GPX</Text>
+                <Icon name="download-outline" size="xs" color={theme.onAccent} />
+                <Text style={styles.heroActionBtnText}>GPX</Text>
               </TouchableOpacity>
             </View>
 
@@ -1428,7 +1430,7 @@ export default function TripWorkspaceScreen() {
                 onPress={() => setActiveTab('details')}
               >
                 <Text style={[styles.segmentBtnText, activeTab === 'details' && styles.segmentBtnTextActive]}>
-                  📋 Details
+                  Details
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1494,43 +1496,6 @@ export default function TripWorkspaceScreen() {
         {/* ================= DETAILS SECTION ================= */}
         {(activeTab === 'details' || !canShowLiveTracker) && (
           <>
-            {/* Elevation & Technical Surface Profile Card */}
-            <Card style={styles.cardSection}>
-              <View style={styles.sectionHeaderRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={styles.sectionTitle}>Route Difficulty & Surface Profile</Text>
-                </View>
-                <View style={styles.tierPill}>
-                  <Text style={styles.tierPillText}>Tier 4 Expedition (Advisory Preview)</Text>
-                </View>
-              </View>
-
-              {/* Topographic Elevation Profile Representation */}
-              <View style={styles.elevationSparklineBox}>
-                <View style={styles.elevationBarGraph}>
-                  {[35, 45, 60, 50, 75, 95, 80, 100, 70, 85, 90, 65, 40].map((h, idx) => (
-                    <View key={idx} style={[styles.elevationBar, { height: `${h}%` }]} />
-                  ))}
-                </View>
-                <View style={styles.elevationGradientFill} />
-              </View>
-
-              <View style={styles.elevationStatsRow}>
-                <View style={styles.elevationStatBlock}>
-                  <Text style={styles.elevationStatLabel}>MAX ALTITUDE</Text>
-                  <Text style={styles.elevationStatValue}>5,359 m (Advisory)</Text>
-                </View>
-                <View style={styles.elevationStatBlock}>
-                  <Text style={styles.elevationStatLabel}>OFF-ROAD</Text>
-                  <Text style={[styles.elevationStatValue, { color: theme.accent }]}>Estimated</Text>
-                </View>
-                <View style={styles.elevationStatBlock}>
-                  <Text style={styles.elevationStatLabel}>CURRENT PACK</Text>
-                  <Text style={[styles.elevationStatValue, { color: theme.green }]}>Pending Fix</Text>
-                </View>
-              </View>
-            </Card>
-
             {/* Participants & Formation Roster Section */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
@@ -1580,7 +1545,7 @@ export default function TripWorkspaceScreen() {
                 <View style={styles.expandedRosterContainer}>
                   {/* Search Bar */}
                   <View style={styles.searchBarBox}>
-                    <Text style={styles.searchIcon}>🔍</Text>
+                    <Icon name="search-outline" size="sm" color={theme.textMuted} style={styles.searchIcon} />
                     <TextInput
                       style={styles.searchInput}
                       value={participantSearch}
@@ -1589,8 +1554,12 @@ export default function TripWorkspaceScreen() {
                       placeholderTextColor={theme.subtle}
                     />
                     {participantSearch.length > 0 && (
-                      <TouchableOpacity onPress={() => setParticipantSearch('')}>
-                        <Text style={styles.searchClear}>✕</Text>
+                      <TouchableOpacity
+                        onPress={() => setParticipantSearch('')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear rider search"
+                      >
+                        <Icon name="close-circle" size="md" color={theme.muted} style={styles.searchClear} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1602,7 +1571,7 @@ export default function TripWorkspaceScreen() {
                       const isSweep = rider.role === 'sweeper';
                       const age = rider.last_seen ? now - Date.parse(rider.last_seen) : Number.POSITIVE_INFINITY;
                       const hasAlert = rider.is_active && (age > 120000 || age > 30000);
-                      const roleMeta = ROLE_LABELS[rider.role] || { title: rider.role, icon: '🏍️' };
+                      const roleMeta = ROLE_LABELS[rider.role] || { title: rider.role };
                       const attMeta = rider.attendance_status ? ATTENDANCE_STATUS_LABELS[rider.attendance_status] : null;
 
                       return (
@@ -1615,11 +1584,11 @@ export default function TripWorkspaceScreen() {
                                   {rider.display_name}{rider.user_id === user?.id ? ' (You)' : ''}
                                 </Text>
                                 {isLeader ? (
-                                  <View style={styles.leaderPill}><Text style={styles.leaderPillText}>★ LEADER</Text></View>
+                                  <View style={styles.leaderPill}><Text style={styles.leaderPillText}>LEADER</Text></View>
                                 ) : isSweep ? (
-                                  <View style={styles.sweepPill}><Text style={styles.sweepPillText}>▼ SWEEP</Text></View>
+                                  <View style={styles.sweepPill}><Text style={styles.sweepPillText}>SWEEP</Text></View>
                                 ) : hasAlert ? (
-                                  <View style={styles.alertPill}><Text style={styles.alertPillText}>! ALERT</Text></View>
+                                  <View style={styles.alertPill}><Text style={styles.alertPillText}>ALERT</Text></View>
                                 ) : null}
                               </View>
                               <Text style={styles.riderBikeText} numberOfLines={1}>
@@ -1640,7 +1609,8 @@ export default function TripWorkspaceScreen() {
                                   setRiderRoleModalVisible(true);
                                 }}
                               >
-                                <Text style={styles.manageRiderBtnText}>Manage ⚙</Text>
+                                <Icon name="settings-outline" size="xs" color={theme.muted} />
+                                <Text style={styles.manageRiderBtnText}>Manage</Text>
                               </TouchableOpacity>
                             )}
                           </View>
@@ -1674,9 +1644,8 @@ export default function TripWorkspaceScreen() {
                           style={[styles.rsvpBtn, isSelected && styles.rsvpBtnSelected]}
                           onPress={() => void handleUpdateAttendance(status)}
                         >
-                          <Text style={[styles.rsvpBtnText, isSelected && { color: '#FFFFFF' }]}>
-                            {meta.icon} {meta.label}
-                          </Text>
+                          <Icon name={ATTENDANCE_ICONS[status]} size="xs" color={isSelected ? theme.onAccent : theme.textMuted} />
+                          <Text style={[styles.rsvpBtnText, isSelected && { color: theme.onAccent }]}>{meta.label}</Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -1708,7 +1677,8 @@ export default function TripWorkspaceScreen() {
                     style={styles.navigateNextBtn}
                     onPress={() => void openDirections(nextStop)}
                   >
-                    <Text style={styles.navigateNextBtnText}>Navigate to next stop: {nextStop.name} ↗</Text>
+                    <Icon name="navigate-outline" size="sm" color={theme.accent} />
+                    <Text style={styles.navigateNextBtnText} numberOfLines={1}>Navigate to next stop: {nextStop.name}</Text>
                   </TouchableOpacity>
                 );
               })()}
@@ -1739,11 +1709,12 @@ export default function TripWorkspaceScreen() {
                           <View style={{ flex: 1 }}>
                             <Text style={styles.dayBlockTitle}>{day.title || 'Day ' + day.day_number}</Text>
                             <Text style={styles.mutedSmall}>{day.trip_date || 'Date not set'}</Text>
-                            {!!day.notes && <Text style={styles.mutedSmall}>📝 {day.notes}</Text>}
+                            {!!day.notes && <Text style={styles.mutedSmall}>{day.notes}</Text>}
                           </View>
                           {isAdmin && (
                             <TouchableOpacity style={styles.addStageBtn} onPress={() => openCreateStage(day.day_number)}>
-                              <Text style={styles.addStageBtnText}>＋ Add stage</Text>
+                              <Icon name="add" size="xs" color={theme.accent} />
+                              <Text style={styles.addStageBtnText}>Add stage</Text>
                             </TouchableOpacity>
                           )}
                         </View>
@@ -1764,10 +1735,11 @@ export default function TripWorkspaceScreen() {
                               <View key={wp.id} style={styles.dayStopRow}>
                                 <Text style={styles.dayStopText}>
                                   {wp.waypoint_type.toUpperCase()}: {wp.name}
-                                  {wp.notes ? ` · 📝 ${wp.notes}` : ''}
+                                  {wp.notes ? ` · ${wp.notes}` : ''}
                                 </Text>
-                                <TouchableOpacity onPress={() => void openDirections(wp)}>
-                                  <Text style={styles.link}>Navigate here ↗</Text>
+                                <TouchableOpacity style={styles.linkRow} onPress={() => void openDirections(wp)}>
+                                  <Icon name="navigate-outline" size="xs" color={theme.accent} />
+                                  <Text style={styles.linkText}>Navigate</Text>
                                 </TouchableOpacity>
                               </View>
                             ))}
@@ -1778,7 +1750,10 @@ export default function TripWorkspaceScreen() {
                         {dayStays.length > 0 && (
                           <View style={{ marginTop: 8 }}>
                             {dayStays.map(st => (
-                              <Text key={st.id} style={styles.dayStayText}>🏨 Overnight: {st.name}</Text>
+                              <View key={st.id} style={styles.inlineRow}>
+                                <Icon name="bed-outline" size="xs" color={theme.textMuted} />
+                                <Text style={styles.dayStayText}>Overnight: {st.name}</Text>
+                              </View>
                             ))}
                           </View>
                         )}
@@ -1803,17 +1778,30 @@ export default function TripWorkspaceScreen() {
                         <Text style={styles.waypointName}>{point.name}</Text>
                         {!!point.address && <Text style={styles.mutedSmall}>{point.address}</Text>}
                         {point.waypoint_type !== 'origin' && (
-                          <TouchableOpacity onPress={() => void openDirections(point)}>
-                            <Text style={styles.link}>Navigate here ↗</Text>
+                          <TouchableOpacity style={styles.linkRow} onPress={() => void openDirections(point)}>
+                            <Icon name="navigate-outline" size="xs" color={theme.accent} />
+                            <Text style={styles.linkText}>Navigate here</Text>
                           </TouchableOpacity>
                         )}
                         {isAdmin && (
                           <View style={styles.editorRow}>
-                            <TouchableOpacity style={styles.smallButton} disabled={index === 0} onPress={() => moveWaypoint(index, -1)}>
-                              <Text style={styles.smallButtonText}>↑</Text>
+                            <TouchableOpacity
+                              style={styles.smallButton}
+                              disabled={index === 0}
+                              onPress={() => moveWaypoint(index, -1)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Move waypoint up: ${point.name}`}
+                            >
+                              <Icon name="arrow-up" size="sm" color={index === 0 ? theme.subtle : theme.accent} />
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.smallButton} disabled={index === waypoints.length - 1} onPress={() => moveWaypoint(index, 1)}>
-                              <Text style={styles.smallButtonText}>↓</Text>
+                            <TouchableOpacity
+                              style={styles.smallButton}
+                              disabled={index === waypoints.length - 1}
+                              onPress={() => moveWaypoint(index, 1)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Move waypoint down: ${point.name}`}
+                            >
+                              <Icon name="arrow-down" size="sm" color={index === waypoints.length - 1 ? theme.subtle : theme.accent} />
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.smallButton} onPress={() => promptDayAssignment(point)}>
                               <Text style={styles.smallButtonText}>{assignedDay ? 'Day ' + assignedDay.day_number : 'Unassigned'} · change</Text>
@@ -1831,7 +1819,8 @@ export default function TripWorkspaceScreen() {
                       style={styles.primaryWide}
                       onPress={() => router.push('/trip/' + trip.id + '/route')}
                     >
-                      <Text style={styles.primaryText}>＋ Add stops & edit route in workshop →</Text>
+                      <Text style={styles.primaryText}>Add stops & edit route in workshop</Text>
+                      <Icon name="arrow-forward" size="sm" color={theme.onAccent} />
                     </TouchableOpacity>
                     {waypoints.length > 0 && (
                       <TouchableOpacity style={[styles.secondary, { alignItems: 'center' }]} disabled={saving} onPress={() => void saveItinerary()}>
@@ -1851,7 +1840,10 @@ export default function TripWorkspaceScreen() {
               ) : (
                 stays.map(stay => (
                   <View key={stay.id} style={styles.stayItem}>
-                    <Text style={styles.stayName}>🏨 {stay.name}</Text>
+                    <View style={styles.inlineRow}>
+                      <Icon name="bed-outline" size="sm" color={theme.textMuted} />
+                      <Text style={styles.stayName}>{stay.name}</Text>
+                    </View>
                     <Text style={styles.mutedSmall}>{stay.stay_type} · {stay.check_in || 'Check-in TBD'} – {stay.check_out || 'Check-out TBD'}</Text>
                     {!!stay.address && <Text style={styles.mutedSmall}>{stay.address}</Text>}
                     {stay.price_amount != null ? (
@@ -1886,7 +1878,7 @@ export default function TripWorkspaceScreen() {
 
               <View style={styles.intelBlock}>
                 <Text style={styles.intelTitle}>
-                  ⛽ Motorcycle Fuel Advisory · {profile?.motorcycle_model ? `${profile.motorcycle_make || ''} ${profile.motorcycle_model}` : 'Motorcycle'}
+                  Motorcycle Fuel Advisory · {profile?.motorcycle_model ? `${profile.motorcycle_make || ''} ${profile.motorcycle_model}` : 'Motorcycle'}
                 </Text>
                 <View style={styles.fuelRow}>
                   <View style={styles.fuelStat}>
@@ -1913,7 +1905,7 @@ export default function TripWorkspaceScreen() {
               </View>
 
               <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                <Text style={styles.intelTitle}>⛅ Route Weather Forecast</Text>
+                <Text style={styles.intelTitle}>Route Weather Forecast</Text>
                 {weatherLoading && weatherPoints.length === 0 ? (
                   <ActivityIndicator size="small" color={theme.accent} style={{ marginVertical: 8 }} />
                 ) : weatherPoints.length === 0 ? (
@@ -1922,7 +1914,7 @@ export default function TripWorkspaceScreen() {
                   <View style={{ gap: 8, marginVertical: 6 }}>
                     {weatherPoints.map(wp => (
                       <View key={wp.label} style={styles.weatherCard}>
-                        <Text style={{ fontSize: 24 }}>{wp.icon}</Text>
+                        <Icon name={weatherIcon(wp.weatherCode)} size="xl" color={theme.textMuted} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.pointName}>{wp.label}: {wp.condition}</Text>
                           <Text style={styles.mutedSmall}>
@@ -1940,7 +1932,7 @@ export default function TripWorkspaceScreen() {
 
               {advisories.length > 0 && (
                 <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                  <Text style={styles.intelTitle}>⚠️ Touring Advisories & Safety</Text>
+                  <Text style={styles.intelTitle}>Touring Advisories & Safety</Text>
                   {advisories.map((adv, idx) => (
                     <View
                       key={idx}
@@ -1974,7 +1966,6 @@ export default function TripWorkspaceScreen() {
                 <Text style={[styles.mutedSmall, { marginVertical: 10 }]}>No checklist items defined for this ride.</Text>
               ) : (
                 checklists.map(item => {
-                  const cat = CHECKLIST_CATEGORY_LABELS[item.category] || { title: item.category, icon: '🔧' };
                   return (
                     <TouchableOpacity
                       key={item.id}
@@ -1982,12 +1973,13 @@ export default function TripWorkspaceScreen() {
                       onPress={() => void toggleChecklist(item)}
                     >
                       <View style={[styles.checkbox, item.my_completed && styles.checkboxChecked]}>
-                        {item.my_completed && <Text style={styles.checkmark}>✓</Text>}
+                        {item.my_completed && <Icon name="checkmark" size="sm" color={theme.onAccent} />}
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>
-                          {cat.icon} {item.title}
-                        </Text>
+                        <View style={styles.inlineRow}>
+                          <Icon name={CHECKLIST_ICONS[item.category] ?? 'construct-outline'} size="sm" color={theme.textMuted} />
+                          <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>{item.title}</Text>
+                        </View>
                         {!!item.description && <Text style={styles.mutedSmall}>{item.description}</Text>}
                         <Text style={[styles.mutedSmall, { fontSize: 10, marginTop: 2, color: theme.accent }]}>
                           {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
@@ -2010,7 +2002,7 @@ export default function TripWorkspaceScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={styles.pointName}>{point.name}</Text>
                         <Text style={{ fontSize: 10, fontWeight: '800', color: isClosed ? theme.muted : theme.green }}>
-                          {isClosed ? 'CLOSED ✓' : 'OPEN'}
+                          {isClosed ? 'CLOSED' : 'OPEN'}
                         </Text>
                       </View>
                       <Text style={styles.mutedSmall}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)} · {point.arrived_count}/{roster.length} arrived</Text>
@@ -2018,7 +2010,7 @@ export default function TripWorkspaceScreen() {
                     <View style={{ flexDirection: 'row', gap: 6 }}>
                       {!isClosed && (
                         <TouchableOpacity style={styles.smallButton} disabled={saving || point.my_arrived} onPress={() => void confirmArrival(point)}>
-                          <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived ✓' : 'Confirm arrival'}</Text>
+                          <Text style={styles.smallButtonText}>{point.my_arrived ? 'Arrived' : 'Confirm arrival'}</Text>
                         </TouchableOpacity>
                       )}
                       {isAdmin && !isClosed && (
@@ -2055,21 +2047,24 @@ export default function TripWorkspaceScreen() {
             {/* Trip Expenses & Bill Splitting */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>💰 Trip Expenses & Splitting</Text>
+                <Text style={styles.sectionTitle}>Trip Expenses & Splitting</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={() => {
                   const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
                   setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
                   setExpenseModal(true);
                 }}>
-                  <Text style={styles.smallButtonText}>＋ Add expense</Text>
+                  <Text style={styles.smallButtonText}>Add expense</Text>
                 </TouchableOpacity>
               </View>
 
               {expenseError && (
-                <View style={{ backgroundColor: '#FEE2E2', borderColor: '#EF4444', borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 8 }}>
-                  <Text style={{ color: '#B91C1C', fontSize: 12, fontWeight: '700' }}>⚠️ {expenseError}</Text>
+                <View style={styles.expenseErrorBox}>
+                  <View style={styles.inlineRow}>
+                    <Icon name="warning-outline" size="sm" color={theme.danger} />
+                    <Text style={styles.expenseErrorText}>{expenseError}</Text>
+                  </View>
                   <TouchableOpacity onPress={() => void load()}>
-                    <Text style={{ color: '#B91C1C', fontSize: 11, fontWeight: '800', marginTop: 4 }}>Tap to retry</Text>
+                    <Text style={styles.expenseRetryText}>Tap to retry</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -2123,7 +2118,7 @@ export default function TripWorkspaceScreen() {
                 <View style={{ gap: 8, marginTop: 10 }}>
                   {expenses.map(exp => (
                     <View key={exp.id} style={styles.expenseItem}>
-                      <Text style={{ fontSize: 20 }}>{EXPENSE_CATEGORY_META[exp.category]?.icon || '💳'}</Text>
+                      <Icon name={EXPENSE_ICONS[exp.category] ?? 'card-outline'} size="lg" color={theme.textMuted} />
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Text style={styles.expenseItemTitle}>{exp.title}</Text>
@@ -2144,7 +2139,7 @@ export default function TripWorkspaceScreen() {
                           onPress={() => handleDeleteExpense(exp.id, exp.title)}
                           accessibilityLabel="Delete expense"
                         >
-                          <Text style={styles.deleteExpenseIcon}>✕</Text>
+                          <Icon name="close" size="sm" color={theme.muted} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -2156,9 +2151,9 @@ export default function TripWorkspaceScreen() {
             {/* Ride Journal & Travel Memories */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>📖 Ride Journal & Memories</Text>
+                <Text style={styles.sectionTitle}>Ride Journal & Memories</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={openJournalEditor}>
-                  <Text style={styles.smallButtonText}>{journalEntry ? 'Edit journal' : '＋ Add entry'}</Text>
+                  <Text style={styles.smallButtonText}>{journalEntry ? 'Edit journal' : 'Add entry'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -2166,13 +2161,13 @@ export default function TripWorkspaceScreen() {
                 <View style={{ marginTop: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Text style={styles.pointName}>{journalEntry.title}</Text>
-                    <Text style={{ color: '#EAB308', fontSize: 13, fontWeight: '800' }}>
+                    <Text style={{ color: theme.warning, fontSize: 13, fontWeight: '800' }}>
                       {'★'.repeat(journalEntry.rating || 5)}{'☆'.repeat(5 - (journalEntry.rating || 5))}
                     </Text>
                   </View>
                   {!!journalEntry.highlights && (
                     <Text style={[styles.mutedSmall, { color: theme.accent, fontWeight: '700', marginTop: 4 }]}>
-                      ✨ {journalEntry.highlights}
+                      {journalEntry.highlights}
                     </Text>
                   )}
                   {!!journalEntry.notes && (
@@ -2200,7 +2195,7 @@ export default function TripWorkspaceScreen() {
               )}
 
               <TouchableOpacity style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]} onPress={() => void shareRideCard()}>
-                <Text style={styles.secondaryText}>📱 Share Ride Card (WhatsApp / Instagram)</Text>
+                <Text style={styles.secondaryText}>Share Ride Card (WhatsApp / Instagram)</Text>
               </TouchableOpacity>
             </Card>
 
@@ -2220,11 +2215,11 @@ export default function TripWorkspaceScreen() {
                     });
                   }}
                 >
-                  <Text style={styles.primaryText}>Share Code 📲</Text>
+                  <Text style={styles.primaryText}>Share Code</Text>
                 </TouchableOpacity>
               </View>
               <Text style={[styles.mutedSmall, { marginTop: 8 }]}>
-                Access Mode: {trip.visibility?.toUpperCase() || 'INVITE_ONLY'} · {trip.visibility === 'public' ? '🌍 Public (Community Touring Feed)' : trip.visibility === 'private' ? '🔒 Private (Invited Members Only)' : '🔑 Invite Only (Requires Ride Code)'}
+                Access Mode: {trip.visibility?.toUpperCase() || 'INVITE_ONLY'} · {trip.visibility === 'public' ? 'Public (Community Touring Feed)' : trip.visibility === 'private' ? 'Private (Invited Members Only)' : 'Invite Only (Requires Ride Code)'}
               </Text>
             </Card>
 
@@ -2232,10 +2227,10 @@ export default function TripWorkspaceScreen() {
             <View style={styles.adminActionsCard}>
               <View style={styles.actions}>
                 <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={() => void shareItinerary()}>
-                  <Text style={styles.secondaryText}>📤 Share touring itinerary</Text>
+                  <Text style={styles.secondaryText}>Share touring itinerary</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.secondary, { flex: 1, alignItems: 'center' }]} onPress={duplicateTrip} disabled={saving}>
-                  <Text style={styles.secondaryText}>📋 Duplicate trip</Text>
+                  <Text style={styles.secondaryText}>Duplicate trip</Text>
                 </TouchableOpacity>
               </View>
 
@@ -2245,7 +2240,7 @@ export default function TripWorkspaceScreen() {
                     <Text style={styles.secondaryText}>Trip details</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.secondary} onPress={() => void toggleArchiveTrip()} disabled={saving}>
-                    <Text style={styles.secondaryText}>{trip.status === 'archived' ? '📂 Unarchive' : '📦 Archive'}</Text>
+                    <Text style={styles.secondaryText}>{trip.status === 'archived' ? 'Unarchive' : 'Archive'}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -2283,7 +2278,7 @@ export default function TripWorkspaceScreen() {
             }}
             accessibilityLabel="Open emergency controls"
           >
-            <Text style={styles.tacticalSosIcon}>🚨</Text>
+            <Icon name="warning-outline" size="lg" color={theme.danger} />
             <Text style={styles.tacticalSosLabel}>EMERG</Text>
           </TouchableOpacity>
 
@@ -2300,7 +2295,7 @@ export default function TripWorkspaceScreen() {
                 {isTripOngoing ? 'Open Live Tracker' : 'Start Tracking'}
               </Text>
             </View>
-            <Text style={styles.primaryRouteLauncherArrow}>→</Text>
+            <Icon name="arrow-forward" size="lg" color={theme.onAccent} />
           </TouchableOpacity>
         </View>
       </View>
@@ -2361,9 +2356,9 @@ export default function TripWorkspaceScreen() {
             <Text style={styles.label}>Access & Visibility</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
               {[
-                { key: 'private', label: '🔒 Private' },
-                { key: 'invite_only', label: '🔑 Invite Only' },
-                { key: 'public', label: '🌍 Public Community' },
+                { key: 'private', label: 'Private' },
+                { key: 'invite_only', label: 'Invite Only' },
+                { key: 'public', label: 'Public Community' },
               ].map(v => (
                 <TouchableOpacity
                   key={v.key}
@@ -2434,7 +2429,7 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={journalPhotoUrl} onChangeText={setJournalPhotoUrl} autoCapitalize="none" keyboardType="url" placeholder="https://... photo link" placeholderTextColor={theme.subtle} />
             <TextInput style={styles.input} value={journalPhotoCaption} onChangeText={setJournalPhotoCaption} placeholder="Caption (optional)" placeholderTextColor={theme.subtle} />
             <TouchableOpacity style={[styles.secondary, { marginTop: 8, alignItems: 'center' }]} onPress={addPhotoToJournal}>
-              <Text style={styles.secondaryText}>＋ Attach photo ({journalPhotos.length} attached)</Text>
+              <Text style={styles.secondaryText}>Attach photo ({journalPhotos.length} attached)</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveJournal()}>
@@ -2456,7 +2451,7 @@ export default function TripWorkspaceScreen() {
               <>
                 <Text style={styles.pointName}>{selectedRider.display_name}</Text>
                 <Text style={[styles.mutedSmall, { marginBottom: 14 }]}>
-                  Current Role: {ROLE_LABELS[selectedRider.role]?.icon || '🏍️'} {ROLE_LABELS[selectedRider.role]?.title || selectedRider.role}
+                  Current Role: {ROLE_LABELS[selectedRider.role]?.title || selectedRider.role}
                 </Text>
 
                 <Text style={styles.label}>Assign Role</Text>
@@ -2468,7 +2463,7 @@ export default function TripWorkspaceScreen() {
                       disabled={saving}
                       onPress={() => void updateRiderRole(r)}
                     >
-                      <Text style={{ fontSize: 16 }}>{ROLE_LABELS[r].icon}</Text>
+                      <Icon name={ROLE_ICONS[r]} size="md" color={selectedRider.role === r ? theme.accent : theme.textMuted} />
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.smallButtonText, { fontWeight: '800' }]}>{ROLE_LABELS[r].title}</Text>
                         <Text style={[styles.mutedSmall, { fontSize: 10 }]}>
@@ -2491,7 +2486,7 @@ export default function TripWorkspaceScreen() {
                       <TouchableOpacity
                         key={att}
                         disabled={updatingAttendance}
-                        style={[styles.smallButton, isSel && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
+                        style={[styles.smallButton, styles.inlineRow, isSel && styles.roleSelected, updatingAttendance && { opacity: 0.5 }]}
                         onPress={async () => {
                           const ok = await handleUpdateAttendance(att, selectedRider.user_id);
                           if (ok) {
@@ -2499,7 +2494,8 @@ export default function TripWorkspaceScreen() {
                           }
                         }}
                       >
-                        <Text style={[styles.smallButtonText, isSel && { color: '#fff' }]}>{meta.icon} {meta.label}</Text>
+                        <Icon name={ATTENDANCE_ICONS[att]} size="xs" color={isSel ? theme.accent : theme.textMuted} />
+                        <Text style={[styles.smallButtonText, isSel && { fontWeight: '800' }]}>{meta.label}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -2510,7 +2506,7 @@ export default function TripWorkspaceScreen() {
                   disabled={saving}
                   onPress={() => void transferLeadership(selectedRider)}
                 >
-                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>👑 Transfer Captain Role</Text>
+                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>Transfer Captain Role</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -2534,7 +2530,7 @@ export default function TripWorkspaceScreen() {
       <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>💰 Add Trip Expense</Text>
+            <Text style={styles.sectionTitle}>Add Trip Expense</Text>
             <Text style={styles.mutedSmall}>Log group spending and split equally among selected riders.</Text>
 
             <Text style={styles.label}>Expense Title *</Text>
@@ -2564,9 +2560,8 @@ export default function TripWorkspaceScreen() {
                   style={[styles.categoryPill, newExpenseCategory === cat && styles.categoryPillActive]}
                   onPress={() => setNewExpenseCategory(cat)}
                 >
-                  <Text style={[styles.categoryPillText, newExpenseCategory === cat && styles.categoryPillTextActive]}>
-                    {EXPENSE_CATEGORY_META[cat].icon} {EXPENSE_CATEGORY_META[cat].label}
-                  </Text>
+                  <Icon name={EXPENSE_ICONS[cat]} size="xs" color={newExpenseCategory === cat ? theme.accent : theme.textMuted} />
+                  <Text style={[styles.categoryPillText, newExpenseCategory === cat && styles.categoryPillTextActive]}>{EXPENSE_CATEGORY_META[cat].label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -2585,7 +2580,7 @@ export default function TripWorkspaceScreen() {
                       );
                     }}
                   >
-                    <Text style={{ fontSize: 16 }}>{isSelected ? '☑' : '☐'}</Text>
+                    <Icon name={isSelected ? 'checkbox' : 'square-outline'} size="md" color={isSelected ? theme.accent : theme.muted} />
                     <Text style={styles.splitUserName}>{r.display_name} {r.user_id === user?.id ? '(you)' : ''}</Text>
                   </TouchableOpacity>
                 );
@@ -2621,7 +2616,6 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   topHeader: { backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border },
   topHeaderInner: { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
   backButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
-  backButtonText: { color: c.text, fontSize: 24, fontWeight: '700' },
   topHeaderTitleContainer: { flex: 1, marginHorizontal: 8 },
   topHeaderEyebrow: { color: c.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
   topHeaderTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
@@ -2635,11 +2629,14 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   muted: { color: c.muted, fontSize: 13, lineHeight: 19 },
   mutedSmall: { color: c.muted, fontSize: 11, lineHeight: 16 },
   link: { color: c.accent, fontSize: 12, fontWeight: '700', marginTop: 4 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  linkText: { color: c.accent, ...typography.titleMd, fontSize: 12 },
+  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
   heroCoverWrapper: { borderRadius: 16, overflow: 'hidden', backgroundColor: c.surface, position: 'relative' },
   heroOverlayContent: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 14, justifyContent: 'space-between', backgroundColor: '#00000044' },
   heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  heroActionBtn: { backgroundColor: '#00000099', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: '#ffffff22' },
+  heroActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#00000099', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: '#ffffff22' },
   heroActionBtnText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   heroBottomBlock: { gap: 2 },
   heroEyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -2663,7 +2660,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   segmentBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   segmentBtnActive: { backgroundColor: c.accent },
   segmentBtnText: { color: c.muted, fontSize: 13, fontWeight: '800' },
-  segmentBtnTextActive: { color: '#000000' },
+  segmentBtnTextActive: { color: c.onAccent },
   liveSegmentInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
   liveRadarContainer: { marginVertical: 8 },
@@ -2676,29 +2673,19 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   liveRadarStatValue: { color: c.text, fontSize: 15, fontWeight: '800' },
   liveRadarStatLabel: { color: c.muted, fontSize: 9, fontWeight: '700', marginTop: 2 },
   launchRideModeBtn: { backgroundColor: c.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
-  launchRideModeBtnText: { color: '#000000', fontSize: 14, fontWeight: '800' },
+  launchRideModeBtnText: { color: c.onAccent, fontSize: 14, fontWeight: '800' },
 
   cardSection: { padding: 16, borderRadius: 16, marginTop: 12 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   sectionTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
   sectionSubtitle: { color: c.muted, fontSize: 12, marginTop: 2 },
-  tierPill: { backgroundColor: c.accentSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
-  tierPillText: { color: c.accent, fontSize: 10, fontWeight: '800' },
   counterBadge: { backgroundColor: c.surfaceRaised, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   counterBadgeText: { color: c.muted, fontSize: 10, fontWeight: '800' },
-  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10B98122', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
-  greenPulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.green },
+  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.greenSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.xs },
+  greenPulseDot: { width: 6, height: 6, borderRadius: radius.round, backgroundColor: c.green },
   activePillText: { color: c.green, fontSize: 10, fontWeight: '800' },
 
-  elevationSparklineBox: { height: 60, position: 'relative', marginVertical: 8, justifyContent: 'flex-end', overflow: 'hidden', borderRadius: 8 },
-  elevationBarGraph: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: '100%', paddingHorizontal: 4 },
-  elevationBar: { width: '6%', backgroundColor: c.accent, opacity: 0.65, borderRadius: 3 },
-  elevationGradientFill: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, backgroundColor: c.accent },
 
-  elevationStatsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: c.border },
-  elevationStatBlock: { alignItems: 'center', flex: 1 },
-  elevationStatLabel: { color: c.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  elevationStatValue: { color: c.text, fontSize: 14, fontWeight: '800', marginTop: 2 },
 
   collapsedRosterContainer: { marginTop: 6 },
   collapsedRosterTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
@@ -2710,9 +2697,9 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
 
   expandedRosterContainer: { marginTop: 6 },
   searchBarBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.background, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: c.border, height: 42, marginBottom: 10 },
-  searchIcon: { fontSize: 14, marginRight: 8 },
+  searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, color: c.text, fontSize: 13 },
-  searchClear: { color: c.muted, fontSize: 14, padding: 4 },
+  searchClear: { padding: 4 },
   rosterList: { gap: 8 },
   riderRowItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: c.surfaceRaised, borderRadius: 12 },
   riderRowAlert: { borderColor: c.danger, borderWidth: 1 },
@@ -2724,12 +2711,12 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   leaderPillText: { color: c.accent, fontSize: 9, fontWeight: '800' },
   sweepPill: { backgroundColor: c.surface, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
   sweepPillText: { color: c.tertiary, fontSize: 9, fontWeight: '800' },
-  alertPill: { backgroundColor: '#EF444422', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
+  alertPill: { backgroundColor: c.dangerSoft, paddingHorizontal: 5, paddingVertical: 1, borderRadius: radius.xs },
   alertPillText: { color: c.danger, fontSize: 9, fontWeight: '800' },
   riderBikeText: { color: c.muted, fontSize: 11, marginTop: 2 },
   riderRowRight: { alignItems: 'flex-end', gap: 4 },
   riderStatusText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  manageRiderBtn: { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: c.border },
+  manageRiderBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: c.border },
   manageRiderBtnText: { color: c.muted, fontSize: 10, fontWeight: '700' },
   collapseRosterBtn: { marginTop: 10, alignItems: 'center', paddingVertical: 8 },
   collapseRosterBtnText: { color: c.accent, fontSize: 11, fontWeight: '800' },
@@ -2737,18 +2724,18 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   rsvpBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border },
   rsvpTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 6 },
   rsvpButtonsRow: { flexDirection: 'row', gap: 6 },
-  rsvpBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceRaised },
+  rsvpBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 4, paddingVertical: 8, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceRaised },
   rsvpBtnSelected: { backgroundColor: c.accent, borderColor: c.accent },
   rsvpBtnText: { color: c.text, fontSize: 11, fontWeight: '700' },
 
-  navigateNextBtn: { backgroundColor: c.accentSoft, borderWidth: 1, borderColor: c.accent, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center', marginVertical: 8 },
-  navigateNextBtnText: { color: c.accent, fontSize: 12, fontWeight: '800' },
+  navigateNextBtn: { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: c.accentSoft, borderWidth: 1, borderColor: c.accent, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center', marginVertical: 8 },
+  navigateNextBtnText: { flexShrink: 1, color: c.accent, fontSize: 12, fontWeight: '800' },
 
   itineraryHeader: { color: c.text, fontSize: 14, fontWeight: '800', marginVertical: 6 },
   dayBlock: { borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 12 },
   dayBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   dayBlockTitle: { color: c.text, fontSize: 14, fontWeight: '800' },
-  addStageBtn: { borderWidth: 1, borderColor: c.accent, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  addStageBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: c.accent, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   addStageBtnText: { color: c.accent, fontSize: 10, fontWeight: '800' },
   stageSectionHeader: { color: c.muted, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 8, marginBottom: 4 },
   dayStopRow: { paddingVertical: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -2777,17 +2764,16 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   advisoryTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 2 },
   advisoryDesc: { color: c.muted, fontSize: 11, lineHeight: 16 },
   advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
-  advisoryCaution: { backgroundColor: '#FEF9C3', borderColor: '#CA8A04' },
+  advisoryCaution: { backgroundColor: c.warningSoft, borderColor: c.warning },
   advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
 
   statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
-  statusText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  statusText: { color: c.onAccent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
   checklistItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
   checklistItemDone: { opacity: 0.85 },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: c.muted, alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: c.accent, borderColor: c.accent },
-  checkmark: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
-  checklistTitle: { color: c.text, fontSize: 13, fontWeight: '700' },
+  checklistTitle: { flex: 1, color: c.text, fontSize: 13, fontWeight: '700' },
   checklistTitleDone: { textDecorationLine: 'line-through', color: c.muted },
 
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
@@ -2809,9 +2795,11 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   expenseItemTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
   expenseItemAmount: { color: c.accent, fontSize: 13, fontWeight: '900' },
   deleteExpenseBtn: { padding: 4 },
-  deleteExpenseIcon: { color: c.muted, fontSize: 12, fontWeight: '700' },
+  expenseErrorBox: { backgroundColor: c.dangerSoft, borderColor: c.danger, borderWidth: 1, borderRadius: radius.sm, padding: 10, marginTop: 8 },
+  expenseErrorText: { flex: 1, color: c.danger, fontSize: 12, fontWeight: '700' },
+  expenseRetryText: { color: c.danger, fontSize: 11, fontWeight: '800', marginTop: 4 },
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 },
-  categoryPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.background, borderWidth: 1, borderColor: c.border },
+  categoryPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.background, borderWidth: 1, borderColor: c.border },
   categoryPillActive: { backgroundColor: c.accentSoft, borderColor: c.accent },
   categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
   categoryPillTextActive: { color: c.accent, fontWeight: '800' },
@@ -2821,10 +2809,10 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   adminActionsCard: { padding: 8, marginTop: 12 },
   actions: { flexDirection: 'row', gap: 8, marginVertical: 6 },
   primary: { flex: 1, backgroundColor: c.accent, borderRadius: 10, padding: 12, alignItems: 'center' },
-  primaryText: { color: '#000000', fontWeight: '800', fontSize: 12 },
+  primaryText: { color: c.onAccent, fontWeight: '800', fontSize: 12 },
   secondary: { borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 12 },
   secondaryText: { color: c.text, fontWeight: '700', fontSize: 12 },
-  primaryWide: { backgroundColor: c.accent, borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 10 },
+  primaryWide: { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: c.accent, borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 10 },
   dangerButton: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 },
   dangerText: { color: c.danger, fontWeight: '900', fontSize: 12 },
   error: { color: c.danger, marginTop: 12, textAlign: 'center' },
@@ -2860,26 +2848,19 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tacticalSosIcon: { fontSize: 20 },
   tacticalSosLabel: { color: c.danger, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginTop: 2 },
   primaryRouteLauncherBtn: {
     flex: 1,
     height: 64,
-    borderRadius: 16,
+    borderRadius: radius.md,
     backgroundColor: c.accent,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 6,
   },
   routeLauncherLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  primaryRouteLauncherText: { color: '#000000', fontSize: 16, fontWeight: '900', letterSpacing: 0.4 },
-  primaryRouteLauncherArrow: { color: '#000000', fontSize: 22, fontWeight: '900' },
+  primaryRouteLauncherText: { color: c.onAccent, fontSize: 16, fontWeight: '900', letterSpacing: 0.4 },
 
   // Stage card & modal styles
   stageCard: { backgroundColor: c.background, borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 6 },
@@ -2887,7 +2868,7 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   stageTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
   stageEndpoints: { color: c.muted, fontSize: 11, marginTop: 2 },
   stageMetaText: { color: c.accent, fontSize: 10, fontWeight: '700', marginTop: 3 },
-  stageStatusPill: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  stageStatusPill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
   stageStatusText: { fontSize: 10, fontWeight: '800' },
   stageNotes: { color: c.text, fontSize: 11, lineHeight: 15, marginTop: 6, fontStyle: 'italic' },
   stageActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
