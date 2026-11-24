@@ -26,7 +26,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+[.][0-9]+[.][0-9]+-beta[.][0-9]+$ ]]; then
             echo "::error::Expected a tag like v1.0.0-beta.1; got $RELEASE_TAG"
             exit 1
           fi
