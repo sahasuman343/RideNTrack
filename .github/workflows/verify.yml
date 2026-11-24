@@ -1,7 +1,8 @@
 name: Verify ride reliability
 on:
   push:
-    branches: [main, 'fix/**']
+    branches: ['**']
+    tags: ['v*-beta.*']
   pull_request:
 permissions:
   contents: read
