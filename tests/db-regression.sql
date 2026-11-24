@@ -448,7 +448,7 @@ BEGIN
   EXCEPTION WHEN foreign_key_violation THEN NULL; END;
   UPDATE public.trip_stays SET trip_day_id = day_a WHERE id = stay_id;
   UPDATE public.trip_waypoints SET trip_day_id = day_a WHERE id = waypoint_id;
-  DELETE FROM public.trip_days WHERE id = day_a;
+  DELETE FROM public.trip_days WHERE id IN (day_a, day_b);
   IF NOT EXISTS (SELECT 1 FROM public.trip_stays WHERE id = stay_id AND ride_id = ride_a AND trip_day_id IS NULL)
     OR NOT EXISTS (SELECT 1 FROM public.trip_waypoints WHERE id = waypoint_id AND ride_id = ride_a AND trip_day_id IS NULL) THEN
     RAISE EXCEPTION 'day deletion must preserve unassigned stays and waypoints';
