@@ -10,6 +10,24 @@ const RIDE_CHANNEL_ID = 'ride-alerts';
 // A non-emergency alert that synced late from an offline queue is no longer actionable.
 const MAX_ROUTINE_ALERT_AGE_MS = 10 * 60 * 1000;
 
+// Rate limiting: bound push notifications from the same user to prevent alert spamming.
+const recentAlerts = new Map<string, number>();
+
+function isRateLimited(key: string, minIntervalMs: number): boolean {
+  const now = Date.now();
+  const lastTime = recentAlerts.get(key);
+  if (lastTime && now - lastTime < minIntervalMs) {
+    return true;
+  }
+  recentAlerts.set(key, now);
+  if (recentAlerts.size > 1000) {
+    for (const [k, timestamp] of recentAlerts.entries()) {
+      if (now - timestamp > 60_000) recentAlerts.delete(k);
+    }
+  }
+  return false;
+}
+
 const LABELS: Record<string, string> = {
   emergency: '🚨 SOS',
   break: '☕ Break',
@@ -53,6 +71,13 @@ Deno.serve(async req => {
   const age = Date.now() - Date.parse(alert.created_at);
   if (!emergency && Number.isFinite(age) && age > MAX_ROUTINE_ALERT_AGE_MS) {
     return new Response('Stale alert', { status: 202 });
+  }
+
+  // Throttle rapid repeated alerts to prevent denial-of-service notification floods
+  const throttleKey = `${alert.ride_id}:${alert.user_id}:${alert.type}`;
+  const throttleInterval = emergency ? 5_000 : 15_000;
+  if (isRateLimited(throttleKey, throttleInterval)) {
+    return new Response('Rate limited', { status: 429 });
   }
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
