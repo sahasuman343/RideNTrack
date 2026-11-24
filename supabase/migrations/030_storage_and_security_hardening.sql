@@ -18,7 +18,7 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'storage' AND tablename = 'objects') THEN
-    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+    -- Note: storage.objects has RLS enabled by default in Supabase; omit ALTER TABLE as storage.objects is owned by supabase_storage_admin
 
     -- Avatars: User can insert/update/delete their own avatar within their user_id prefix folder
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Users manage own avatar') THEN
