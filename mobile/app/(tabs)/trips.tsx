@@ -29,6 +29,7 @@ import {
   Skeleton,
   Button,
   FallbackTripCover,
+  Icon,
 } from '../../src/components/ui';
 
 export type TripsFilter = 'all' | 'live' | 'planned' | 'past' | 'archived' | 'community';
@@ -53,7 +54,8 @@ export default function TripsScreen() {
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
   const safeHeaderTop = Math.max(topInset, Platform.OS === 'android' ? 48 : 44) + 18;
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const swipeHandlers = useSwipeTab('trips', { ignoreTopArea: true });
+  const [headerBottom, setHeaderBottom] = useState(180);
+  const swipeHandlers = useSwipeTab('trips', { ignoreTopArea: true, topBoundary: headerBottom });
 
   useFocusEffect(
     useCallback(() => {
@@ -204,7 +206,8 @@ export default function TripsScreen() {
       case 'completed':
         return theme.textMuted;
       case 'archived':
-        return theme.scheme === 'dark' ? theme.subtle : '#607D8B';
+        // #607D8B legacy archived color migrated to theme.muted
+        return theme.muted;
       default:
         return theme.textMuted;
     }
@@ -258,7 +261,10 @@ export default function TripsScreen() {
   return (
     <View style={styles.container} {...swipeHandlers}>
       {/* Top Header */}
-      <View style={[styles.header, { paddingTop: safeHeaderTop }]}>
+      <View
+        style={[styles.header, { paddingTop: safeHeaderTop }]}
+        onLayout={e => setHeaderBottom(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}
+      >
         <View style={styles.headerLeft}>
           <Text style={styles.pageTitle}>Trips</Text>
         </View>
@@ -309,8 +315,9 @@ export default function TripsScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Sort by date: ${sortBy === 'date_desc' ? 'Newest first' : 'Oldest first'}`}
           >
+            <Icon name={sortBy === 'date_desc' ? 'arrow-down' : 'arrow-up'} size="xs" color={theme.text} />
             <Text style={styles.sortBtnText}>
-              Date {sortBy === 'date_desc' ? '↓' : '↑'}
+              Date
             </Text>
           </TouchableOpacity>
         </View>
@@ -430,7 +437,7 @@ export default function TripsScreen() {
                         : 'ROUTE'}
                     </Text>
                     <Text style={styles.openLabel}>
-                      BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'} ↗
+                      BY {item.organizer_name?.toUpperCase() || 'CAPTAIN'}
                     </Text>
                   </View>
                 </Card>
@@ -625,11 +632,11 @@ export default function TripsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Enter Live HUD for ${item.name}`}
                     >
-                      <Text style={styles.liveHudBtnText}>Live HUD ↗</Text>
+                      <Text style={styles.liveHudBtnText}>Live HUD</Text>
                     </TouchableOpacity>
                   ) : (
                     <Text style={styles.openAction}>
-                      View ↗
+                      View
                     </Text>
                   )}
                 </View>
@@ -715,7 +722,9 @@ const makeStyles = (c: RidePalette) =>
     },
     sortBtn: {
       minHeight: 32,
-      justifyContent: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       paddingHorizontal: 10,
       borderRadius: radius.sm,
       borderWidth: 1,
@@ -896,7 +905,7 @@ const makeStyles = (c: RidePalette) =>
     liveHudBtnText: {
       fontSize: 12,
       fontWeight: '700',
-      color: c.scheme === 'light' ? '#FFFFFF' : c.background,
+      color: c.scheme === 'light' ? c.onAccent : c.background,
     },
     openAction: {
       fontSize: 13,

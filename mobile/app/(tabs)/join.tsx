@@ -14,7 +14,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../src/lib/supabase';
-import { useRideTheme, RidePalette, radius } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing } from '../../src/theme';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Icon, LiveDot } from '../../src/components/ui';
 
@@ -983,7 +983,7 @@ const makeStyles = (c: RidePalette) =>
     clearCodeRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      gap: spacing.xs,
     },
     clearCodeAction: {
       fontSize: 11,

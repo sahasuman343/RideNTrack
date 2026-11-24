@@ -53,14 +53,14 @@ export function FallbackTripCover({
       .reduce((acc, char) => acc + char.charCodeAt(0), 0)
   );
 
-  // Muted map-paper tones; the route line stays brand terracotta so covers read as one family.
-  const coverTones = ['#16201B', '#1A1E22', '#201C17'];
+  // Theme-aware map-paper tones; the route line follows brand accent so covers read as one family.
+  const coverTones = theme.coverTones;
   const coverTone = coverTones[hash % coverTones.length];
   // Live cards always feature scenic motorcycle photo; other cards prefer imageUri or scenic fallback
   const resolvedPhoto = imageUri || (isLive ? SCENIC_TOURING_PHOTOS[hash % SCENIC_TOURING_PHOTOS.length] : null);
   const shouldRenderPhoto = !!resolvedPhoto && !imageFailed;
 
-  const routeLineColor = COVER_ROUTE_COLOR;
+  const routeLineColor = theme.coverRoute;
 
   return (
     <View style={[styles.container, { backgroundColor: coverTone }]}>
@@ -308,7 +308,7 @@ const makeStyles = (c: RidePalette, hero: boolean) =>
     floatingLiveText: {
       fontSize: 11,
       fontWeight: '800',
-      color: '#86BFA0',
+      color: c.green,
       letterSpacing: 0.8,
     },
     topRightWrap: {

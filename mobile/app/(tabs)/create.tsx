@@ -22,7 +22,7 @@ import {
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import * as Location from 'expo-location';
-import { useRideTheme, RidePalette, radius } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
 import { Icon } from '../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../src/icons';
@@ -1212,7 +1212,7 @@ export default function CreateRideScreen() {
               </View>
 
               <View style={styles.telemetrySummaryCard}>
-                <Text style={styles.telemetrySummaryLabel}>MAX APEX</Text>
+                <Text style={styles.telemetrySummaryLabel}>TRIP DURATION</Text>
                 <View style={styles.telemetryValueRow}>
                   <Text style={styles.telemetryValueNum}>{days.length > 0 ? days.length : '—'}</Text>
                   <Text style={styles.telemetryValueUnitMuted}>{days.length === 1 ? 'DAY' : days.length > 1 ? 'DAYS' : ''}</Text>
@@ -1230,7 +1230,7 @@ export default function CreateRideScreen() {
               <View style={styles.ascentHeader}>
                 <View style={styles.ascentTitleRow}>
                   <Icon name="trending-up-outline" size="sm" color={theme.accent} />
-                  <Text style={styles.ascentTitleText}>Ascent Profile</Text>
+                  <Text style={styles.ascentTitleText}>Ascent Profile (MAX APEX)</Text>
                 </View>
                 <View style={styles.ascentNetClimbBadge}>
                   <Text style={styles.ascentNetClimbText}>+2,314m Net Climb (Est.)</Text>
@@ -1561,10 +1561,10 @@ const makeStyles = (c: RidePalette) =>
     telemetrySummaryCard: {
       flex: 1,
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: c.border,
-      padding: 12,
+      padding: spacing.md,
       justifyContent: 'space-between',
     },
     ascentProfileCard: {
@@ -1572,8 +1572,8 @@ const makeStyles = (c: RidePalette) =>
       borderRadius: radius.md,
       borderWidth: 1,
       borderColor: c.border,
-      padding: 12,
-      gap: 8,
+      padding: spacing.md,
+      gap: spacing.sm,
     },
     ascentHeader: {
       flexDirection: 'row',
@@ -1583,22 +1583,20 @@ const makeStyles = (c: RidePalette) =>
     ascentTitleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: spacing.xs,
     },
     ascentTitleText: {
-      fontSize: 14,
-      fontWeight: '800',
+      ...typography.titleMd,
       color: c.text,
     },
     ascentNetClimbBadge: {
       backgroundColor: c.accentSoft,
-      paddingHorizontal: 8,
+      paddingHorizontal: spacing.sm,
       paddingVertical: 3,
       borderRadius: radius.xs,
     },
     ascentNetClimbText: {
-      fontSize: 10,
-      fontWeight: '800',
+      ...typography.labelCaps,
       color: c.accent,
     },
     telemetrySummaryLabel: {
@@ -1835,7 +1833,7 @@ const makeStyles = (c: RidePalette) =>
     reviewItineraryRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: spacing.sm,
     },
     reviewWaypoint: {
       fontSize: 13,

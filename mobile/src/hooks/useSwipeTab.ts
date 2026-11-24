@@ -4,8 +4,9 @@ import { useRouter } from 'expo-router';
 
 export type TabName = 'home' | 'trips' | 'profile';
 
-interface SwipeTabOptions {
+export interface SwipeTabOptions {
   ignoreTopArea?: boolean;
+  topBoundary?: number;
 }
 
 export function useSwipeTab(currentTab: TabName, options?: SwipeTabOptions) {
@@ -16,7 +17,7 @@ export function useSwipeTab(currentTab: TabName, options?: SwipeTabOptions) {
       PanResponder.create({
         onMoveShouldSetPanResponder: (evt, gestureState) => {
           // If specified, do not capture touches in the top header/segmented control region
-          if (options?.ignoreTopArea && evt.nativeEvent.pageY < 180) {
+          if (options?.ignoreTopArea && evt.nativeEvent.pageY < (options.topBoundary ?? 180)) {
             return false;
           }
           const dx = Math.abs(gestureState.dx);
@@ -47,7 +48,7 @@ export function useSwipeTab(currentTab: TabName, options?: SwipeTabOptions) {
           }
         },
       }),
-    [currentTab, router, options?.ignoreTopArea]
+    [currentTab, router, options?.ignoreTopArea, options?.topBoundary]
   );
 
   return panResponder.panHandlers;

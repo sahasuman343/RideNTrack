@@ -51,7 +51,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
-import { useRideTheme, RidePalette, typography, elevation, radius } from '../../src/theme';
+import { useRideTheme, RidePalette, typography, elevation, radius, spacing } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
 import {
@@ -1676,11 +1676,11 @@ export default function LiveRideScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
               <Icon name="chatbubble-outline" size="md" color={theme.textMuted} />
-              <Text style={s.text}>SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
+              <Text style={[s.text, { flexShrink: 1 }]}>SMS GPS to Contact ({profile?.emergency_contact || 'None set'})</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void dialEmergencyContact()}>
               <Icon name="call-outline" size="md" color={theme.textMuted} />
-              <Text style={s.text}>Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
+              <Text style={[s.text, { flexShrink: 1 }]}>Call Emergency Contact ({profile?.emergency_contact || '112'})</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1 }]}
@@ -1690,7 +1690,7 @@ export default function LiveRideScreen() {
               }}
             >
               <Icon name="call-outline" size="md" color={theme.accent} />
-              <Text style={[s.text, { color: theme.accent }]}>Highway Assistance & RSA Directory (1033 / 112)</Text>
+              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway Assistance & RSA Directory (1033 / 112)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
               <Text style={s.text}>Cancel</Text>
@@ -2367,8 +2367,8 @@ const makeStyles = (c: RidePalette) =>
     // Modals
     overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: c.shadow + '88' },
     modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, backgroundColor: c.surface, gap: 12 },
-    alertOption: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 18, borderRadius: 12, backgroundColor: c.surfaceRaised },
-    inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    alertOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, borderRadius: radius.md, backgroundColor: c.surfaceRaised },
+    inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     emergency: { backgroundColor: c.accentSoft },
     announcementInput: { flex: 1, backgroundColor: c.surfaceRaised, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, color: c.text, fontSize: 13 },
     sendAnnouncementBtn: { backgroundColor: c.accent, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 10 },
@@ -2392,10 +2392,10 @@ const makeStyles = (c: RidePalette) =>
     regroupActionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.surface, padding: 10, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: c.border },
     regroupCloseBtn: { backgroundColor: c.green, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
     regroupCloseBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-    acknowledgedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.greenSoft, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+    acknowledgedBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, backgroundColor: c.greenSoft, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.sm },
     acknowledgedText: { color: c.green, fontSize: 12, fontWeight: '800' },
 
-    issueChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: 6 },
+    issueChip: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm, backgroundColor: c.surfaceRaised, borderWidth: 1, borderColor: c.border, marginBottom: spacing.xs },
     issueChipSelected: { backgroundColor: c.accentSoft, borderColor: c.accent },
     issueChipText: { color: c.text, fontSize: 12, fontWeight: '600' },
     issueChipTextSelected: { color: c.accent, fontWeight: '800' },

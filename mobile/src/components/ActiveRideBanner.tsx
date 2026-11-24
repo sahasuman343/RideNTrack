@@ -55,7 +55,7 @@ export function ActiveRideBanner() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
           <Icon name="location-outline" size="sm" color={theme.accent} />
-          <Text style={[styles.text, { color: theme.text }]} numberOfLines={1}>Sharing your location · Open live ride</Text>
+          <Text style={[styles.text, { color: theme.text, flex: 1 }]} numberOfLines={1}>Sharing your location · Open live ride</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity

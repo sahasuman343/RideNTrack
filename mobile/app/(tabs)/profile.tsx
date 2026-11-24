@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, useRideThemeSettings, RidePalette, radius } from '../../src/theme';
+import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
@@ -582,7 +582,7 @@ export default function ProfileScreen() {
                 value={dark}
                 onValueChange={value => setMode(value ? 'dark' : 'light')}
                 trackColor={{ false: theme.border, true: theme.accent }}
-                thumbColor="#FFFFFF"
+                thumbColor={theme.onAccent}
               />
             </View>
           </View>
@@ -658,7 +658,7 @@ export default function ProfileScreen() {
                 <Text style={styles.fieldLabel}>Share with active ride members</Text>
                 <Text style={styles.hint}>Only active members can view this. Turning it off removes consent immediately.</Text>
               </View>
-              <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor="#fff" />
+              <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor={theme.onAccent} />
             </View>
             </>}
             {section === 'bike' && <>
@@ -946,12 +946,12 @@ const makeStyles = (c: RidePalette) =>
       letterSpacing: 0.5,
     },
     iceCard: {
-      backgroundColor: 'rgba(239, 68, 68, 0.12)',
-      borderColor: 'rgba(239, 68, 68, 0.3)',
+      backgroundColor: c.dangerSoft,
+      borderColor: c.danger,
       borderWidth: 1,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
@@ -1064,7 +1064,7 @@ const makeStyles = (c: RidePalette) =>
     steedModelTitle: {
       fontSize: 18,
       fontWeight: '900',
-      color: '#FFFFFF',
+      color: c.scheme === 'light' ? c.onAccent : c.text,
     },
     steedCategoryText: {
       fontSize: 11,

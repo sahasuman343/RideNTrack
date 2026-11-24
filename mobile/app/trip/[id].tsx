@@ -44,7 +44,7 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
-import { useRideTheme, RidePalette, radius } from '../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
 import {
@@ -1380,7 +1380,7 @@ export default function TripWorkspaceScreen() {
                 onPress={() => void exportGpxFile()}
                 accessibilityLabel="Export GPX route"
               >
-                <Icon name="download-outline" size="xs" color="#FFFFFF" />
+                <Icon name="download-outline" size="xs" color={theme.onAccent} />
                 <Text style={styles.heroActionBtnText}>GPX</Text>
               </TouchableOpacity>
             </View>
@@ -1554,7 +1554,11 @@ export default function TripWorkspaceScreen() {
                       placeholderTextColor={theme.subtle}
                     />
                     {participantSearch.length > 0 && (
-                      <TouchableOpacity onPress={() => setParticipantSearch('')}>
+                      <TouchableOpacity
+                        onPress={() => setParticipantSearch('')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear rider search"
+                      >
                         <Icon name="close-circle" size="md" color={theme.muted} style={styles.searchClear} />
                       </TouchableOpacity>
                     )}
@@ -1781,10 +1785,22 @@ export default function TripWorkspaceScreen() {
                         )}
                         {isAdmin && (
                           <View style={styles.editorRow}>
-                            <TouchableOpacity style={styles.smallButton} disabled={index === 0} onPress={() => moveWaypoint(index, -1)}>
+                            <TouchableOpacity
+                              style={styles.smallButton}
+                              disabled={index === 0}
+                              onPress={() => moveWaypoint(index, -1)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Move waypoint up: ${point.name}`}
+                            >
                               <Icon name="arrow-up" size="sm" color={index === 0 ? theme.subtle : theme.accent} />
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.smallButton} disabled={index === waypoints.length - 1} onPress={() => moveWaypoint(index, 1)}>
+                            <TouchableOpacity
+                              style={styles.smallButton}
+                              disabled={index === waypoints.length - 1}
+                              onPress={() => moveWaypoint(index, 1)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Move waypoint down: ${point.name}`}
+                            >
                               <Icon name="arrow-down" size="sm" color={index === waypoints.length - 1 ? theme.subtle : theme.accent} />
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.smallButton} onPress={() => promptDayAssignment(point)}>
@@ -2613,9 +2629,9 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   muted: { color: c.muted, fontSize: 13, lineHeight: 19 },
   mutedSmall: { color: c.muted, fontSize: 11, lineHeight: 16 },
   link: { color: c.accent, fontSize: 12, fontWeight: '700', marginTop: 4 },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  linkText: { color: c.accent, fontSize: 12, fontWeight: '700' },
-  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  linkText: { color: c.accent, ...typography.titleMd, fontSize: 12 },
+  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
   heroCoverWrapper: { borderRadius: 16, overflow: 'hidden', backgroundColor: c.surface, position: 'relative' },
   heroOverlayContent: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 14, justifyContent: 'space-between', backgroundColor: '#00000044' },

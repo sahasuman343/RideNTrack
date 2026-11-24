@@ -149,7 +149,7 @@ export function HoldToConfirmButton({
       />
 
       <View style={styles.content}>
-        <Icon name="warning" size="lg" color={isHolding ? theme.onDanger : theme.danger} />
+        <Icon name="warning" size="lg" color={theme.danger} />
         <View style={styles.textContainer}>
           <Text style={styles.title}>
             {isHolding ? `ARMING SOS (${secondsRemaining.toFixed(1)}s)` : title}

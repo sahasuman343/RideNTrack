@@ -38,6 +38,9 @@ export type RidePalette = {
   input: string;
   shadow: string;
   scrim: string;
+  coverTones: [string, string, string];
+  coverRoute: string;
+  overlayForeground: string;
 };
 
 export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
@@ -50,7 +53,7 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     surfaceHigh: '#DEDACD',
     text: '#1D2621',
     textMuted: '#5E6A62',
-    muted: '#5E6A62',
+    muted: '#47534C',
     subtle: '#7E897F',
     border: '#D8D9CF',
     borderStrong: '#B9BCAF',
@@ -69,6 +72,9 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     input: '#FFFDF7',
     shadow: 'rgba(29, 38, 33, 0.16)',
     scrim: 'rgba(16, 20, 18, 0.55)',
+    coverTones: ['#DEDACD', '#E9E6DC', '#DFDBCF'],
+    coverRoute: '#AD4C24',
+    overlayForeground: '#1D2621',
   },
   // Night: pine-tinted neutrals rather than an inverted light theme; desaturated accents avoid glare.
   dark: {
@@ -98,6 +104,9 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     input: '#141E19',
     shadow: '#000000',
     scrim: 'rgba(0, 0, 0, 0.6)',
+    coverTones: ['#16201B', '#1A1E22', '#201C17'],
+    coverRoute: '#E2804F',
+    overlayForeground: '#ECEAE2',
   },
   // Ride HUD: maximum contrast for handlebar glances; saturated status colours are functional, not decorative.
   ride: {
@@ -127,6 +136,9 @@ export const palettes: Record<'light' | 'dark' | 'ride', RidePalette> = {
     input: '#0D110F',
     shadow: '#000000',
     scrim: 'rgba(0, 0, 0, 0.7)',
+    coverTones: ['#0A0E0C', '#0E1210', '#121614'],
+    coverRoute: '#FF8A3D',
+    overlayForeground: '#FFFFFF',
   },
 };
 

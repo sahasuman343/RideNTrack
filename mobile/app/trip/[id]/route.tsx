@@ -15,7 +15,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../src/lib/supabase';
 import { useAuth } from '../../../src/hooks/useAuth';
-import { useRideTheme, RidePalette, radius } from '../../../src/theme';
+import { useRideTheme, RidePalette, radius, spacing } from '../../../src/theme';
 import { Icon } from '../../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../../src/icons';
 import {
@@ -793,6 +793,8 @@ export default function RouteEditorScreen() {
                             style={[styles.arrowButton, index === 1 && styles.disabledButton]}
                             disabled={index === 1}
                             onPress={() => handleMoveStop(index, -1)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Move waypoint up: ${point.name}`}
                           >
                             <Icon name="chevron-up" size="sm" color={index === 1 ? theme.subtle : theme.text} />
                           </TouchableOpacity>
@@ -800,6 +802,8 @@ export default function RouteEditorScreen() {
                             style={[styles.arrowButton, index === points.length - 2 && styles.disabledButton]}
                             disabled={index === points.length - 2}
                             onPress={() => handleMoveStop(index, 1)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Move waypoint down: ${point.name}`}
                           >
                             <Icon name="chevron-down" size="sm" color={index === points.length - 2 ? theme.subtle : theme.text} />
                           </TouchableOpacity>
@@ -933,7 +937,12 @@ export default function RouteEditorScreen() {
                     : 'Search for a replacement location for this waypoint.'}
                 </Text>
               </View>
-              <TouchableOpacity style={styles.modalCloseButton} onPress={closeSearchModal}>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={closeSearchModal}
+                accessibilityRole="button"
+                accessibilityLabel="Close place search"
+              >
                 <Icon name="close" size="md" color={theme.text} />
               </TouchableOpacity>
             </View>
@@ -1002,7 +1011,12 @@ export default function RouteEditorScreen() {
                 returnKeyType="search"
               />
               {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
+                <TouchableOpacity
+                  onPress={() => setSearchQuery('')}
+                  style={styles.clearSearchButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear place search"
+                >
                   <Icon name="close-circle" size="md" color={theme.muted} />
                 </TouchableOpacity>
               )}
@@ -1243,7 +1257,7 @@ const makeStyles = (c: RidePalette) =>
     typeBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      gap: spacing.xs,
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -1253,7 +1267,7 @@ const makeStyles = (c: RidePalette) =>
     dayBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      gap: spacing.xs,
       marginLeft: 'auto',
       backgroundColor: c.surfaceRaised,
       paddingHorizontal: 8,
