@@ -14,15 +14,25 @@ concurrency:
 
 jobs:
   check_tag:
-    name: Check beta version tag
+    name: Check beta version tag and main-branch ancestry
     runs-on: ubuntu-24.04
     steps:
-      - name: Validate beta tag format
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate beta tag format and release branch
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$ ]]; then
             echo "::error::Expected a tag like v1.0.0-beta.1; got $RELEASE_TAG"
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
+            echo "::error::Beta tags must point to a commit already merged into main."
             exit 1
           fi
 
