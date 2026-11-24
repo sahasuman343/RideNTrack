@@ -2,8 +2,8 @@ name: Verify ride reliability
 on:
   push:
     branches: ['**']
-    tags: ['v*-beta.*']
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
