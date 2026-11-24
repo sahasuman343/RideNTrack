@@ -28,6 +28,14 @@
           ]
         }
       ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": false
+          }
+        }
+      ],
       "expo-sqlite"
     ],
     "ios": {
@@ -45,6 +53,7 @@
     },
     "android": {
       "package": "com.ridentrack.app",
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#1a1a2e",
         "foregroundImage": "./assets/RnT_logo.png",

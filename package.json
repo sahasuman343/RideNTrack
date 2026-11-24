@@ -22,5 +22,9 @@
   "overrides": {
     "react-native-safe-area-context": "5.7.0",
     "react-native-screens": "4.26.2"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-darwin-arm64": "^4.3.5",
+    "lightningcss-darwin-arm64": "^1.33.0"
   }
 }
