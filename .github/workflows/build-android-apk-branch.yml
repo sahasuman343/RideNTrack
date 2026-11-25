@@ -100,7 +100,7 @@ jobs:
             echo "## RideNTrack test APK"
             echo
             echo "- **Branch:** \`${BRANCH}\`"
-            echo "- **Commit:** \`${GITHUB_SHA}\`"
+            echo "- **Commit:** \`${HEAD_SHA}\`"
             echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
             echo "- **EAS profile:** \`preview\` (internal APK)"
             echo
