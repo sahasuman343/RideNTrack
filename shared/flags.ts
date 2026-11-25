@@ -32,6 +32,10 @@ export const FLAG_DEFAULTS = {
   voice_notes: true,
   /** F13/F18: language picker and following the phone language. Off until a native speaker has reviewed hi.ts. */
   languages: false,
+  /** F14: lighter ride screen on 3 GB Android phones. Payload {"tier":"low"} forces a tier. */
+  low_end_tuning: true,
+  /** F14: sample ride-screen frame rate (no location) into analytics. */
+  perf_sampling: false,
   /** F15: clubs. */
   clubs: true,
   /** F17: referral prompts on the spectator page and recap card. */

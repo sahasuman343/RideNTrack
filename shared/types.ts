@@ -455,3 +455,5 @@ export * from './touringKnowledge';
 export * from './roadReports';
 export * from './voice';
 export * from './i18n';
+export * from './performance';
+export * from './crashTuning';

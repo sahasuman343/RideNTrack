@@ -58,3 +58,16 @@ BEGIN
   IF (SELECT count(*) FROM public.crash_telemetry) <> 1 THEN RAISE EXCEPTION 'withdrawing consent kept samples or lost feedback'; END IF;
 END $$;
 RESET ROLE;
+
+-- F7 GA report: service role only, counts by kind.
+SET ROLE authenticated;
+DO $$ BEGIN
+  IF has_function_privilege('authenticated', 'public.crash_beta_report(timestamptz)', 'EXECUTE') THEN RAISE EXCEPTION 'crash_beta_report callable by riders'; END IF;
+END $$;
+RESET ROLE;
+DO $$
+DECLARE v jsonb;
+BEGIN
+  v := public.crash_beta_report(now() - interval '1 day');
+  IF NOT (v ? 'riding_hours' AND v ? 'counts' AND jsonb_typeof(v->'rows') = 'array') THEN RAISE EXCEPTION 'crash_beta_report shape %', v; END IF;
+END $$;

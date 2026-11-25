@@ -154,7 +154,9 @@ test('ride screen is split: no banner bypasses the attention bar and the HUD is 
   for (const legacy of ['floatingAlertBanner', 'regroupBanner', 'deviationWarning', 'arrivalToast', 's.warning,']) {
     assert.ok(!screen.includes(legacy), `${legacy} must be an attention item, not a banner`);
   }
-  assert.match(screen, /useThrottledValue\(position, 1000\)/);
+  // HUD at most 1 Hz (F14: 0.5 Hz on low-end phones).
+  assert.match(screen, /useThrottledValue\(position, perf\.hudIntervalMs\)/);
+  assert.ok(require('./loader.cjs').loader()('shared/types.ts').PERFORMANCE_PROFILES.standard.hudIntervalMs >= 1000);
   assert.match(read('mobile/src/components/ride/RideMap.tsx'), /const RidersLayer = memo/);
   assert.match(read('mobile/src/components/ride/RideHud.tsx'), /export const RideHud = memo/);
 });

@@ -69,6 +69,7 @@ import { useRideAlerts } from '../../src/hooks/ride/useRideAlerts';
 import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
 import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
 import { useT } from '../../src/hooks/useLocale';
+import { usePerformanceProfile, useFrameRateSampler } from '../../src/hooks/ride/usePerformanceProfile';
 import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useRideChat } from '../../src/hooks/ride/useRideChat';
 import { useSpectatorLinks } from '../../src/hooks/ride/useSpectatorLinks';
@@ -151,6 +152,7 @@ export default function LiveRideScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
   const t = useT();
+  const perf = usePerformanceProfile();
   const userId = user?.id;
   const name = profile?.display_name || 'Rider';
   const nameRef = useRef(name);
@@ -162,7 +164,7 @@ export default function LiveRideScreen() {
   const { ride, participants, alerts, messages, error, publish, refresh, setRide } = useRide(id, userId || '', sync.isOnline);
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
   const [position, setPosition] = useState<LocationUpdate | null>(null);
-  const { geoJson: actualTrailGeoJson, distanceMeters: distanceCoveredMeters } = useRideTrail(id, userId, position);
+  const { geoJson: actualTrailGeoJson, distanceMeters: distanceCoveredMeters } = useRideTrail(id, userId, position, perf.trailMaxPoints);
   const [tracking, setTracking] = useState<TrackerMode>('waiting');
   const gpsSession = useRef(0);
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -202,6 +204,7 @@ export default function LiveRideScreen() {
   const [sheetHeight, setSheetHeight] = useState(320);
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
+  useFrameRateSampler(active, perf);
   const rideLoaded = Boolean(ride);
   // destination_coords is [lng, lat]. Kept in a ref so the tracker effect does
   // not restart GPS when the ride row refreshes with the same coordinates.
@@ -604,14 +607,14 @@ export default function LiveRideScreen() {
   }, [position?.lat, position?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude, targetWaypointIndex, upcomingWaypoints.length]);
 
   // The HUD reads throttled values: at most one repaint a second.
-  const hudPosition = useThrottledValue(position, 1000);
+  const hudPosition = useThrottledValue(position, perf.hudIntervalMs);
   const distanceToNextStopMeters = useMemo(() => {
     if (!hudPosition || !nextWaypoint) return null;
     return Math.round(distanceMeters(hudPosition, { lat: nextWaypoint.latitude, lng: nextWaypoint.longitude }));
   }, [hudPosition?.lat, hudPosition?.lng, nextWaypoint?.latitude, nextWaypoint?.longitude]);
 
   const currentSpeedKmh = gps.state === 'fresh' && hudPosition ? Math.round(hudPosition.speed * 3.6) : '—';
-  const hudDistanceCovered = useThrottledValue(distanceCoveredMeters, 1000);
+  const hudDistanceCovered = useThrottledValue(distanceCoveredMeters, perf.hudIntervalMs);
 
   useEffect(() => {
     if (!position) return;
@@ -1137,6 +1140,7 @@ export default function LiveRideScreen() {
   return (
     <View style={s.screen}>
       <RideMap
+        perf={perf}
         offline={!sync.isOnline}
         s={s}
         theme={theme}

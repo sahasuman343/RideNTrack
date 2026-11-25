@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocales } from 'expo-localization';
 import { isLocale, lineHeightFor, pickLocale, translator, type Locale, type Translate } from '@ridentrack/shared';
 import { useFlag } from './useFeatureFlags';
+import { track } from '../services/analytics';
 
 const KEY = 'ridentrack.locale';
 
@@ -50,6 +51,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 
   const setLocale = useCallback((next: Locale | null) => {
     setChosen(next);
+    track('language_changed', { locale: next ?? 'phone' });
     (next ? AsyncStorage.setItem(KEY, next) : AsyncStorage.removeItem(KEY)).catch(() => {});
   }, []);
 

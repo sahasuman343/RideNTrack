@@ -1,7 +1,7 @@
 import React, { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { Camera } from '@rnmapbox/maps';
-import type { Ride, roadReportFeatures } from '@ridentrack/shared';
+import type { PerformanceProfile, Ride, roadReportFeatures } from '@ridentrack/shared';
 import type { RidePalette } from '../../theme';
 import type { RideStyles } from './rideStyles';
 
@@ -73,7 +73,7 @@ const EndpointsLayer = memo(function EndpointsLayer({ origin, destination, surfa
   );
 });
 
-const RidersLayer = memo(function RidersLayer({ features, theme }: { features: RiderFeatureCollection; theme: RidePalette }) {
+const RidersLayer = memo(function RidersLayer({ features, theme, labelMinZoom = 0 }: { features: RiderFeatureCollection; theme: RidePalette; labelMinZoom?: number }) {
   if (!Mapbox) return null;
   return (
     <Mapbox.ShapeSource id="riders" shape={features}>
@@ -97,6 +97,7 @@ const RidersLayer = memo(function RidersLayer({ features, theme }: { features: R
       />
       <Mapbox.SymbolLayer
         id="rider-label"
+        minZoomLevel={labelMinZoom}
         style={{
           // Old positions say how old they are, right under the name.
           textField: [
@@ -119,7 +120,7 @@ const RidersLayer = memo(function RidersLayer({ features, theme }: { features: R
 export type RoadReportFeatureCollection = ReturnType<typeof roadReportFeatures>;
 
 /** F11: rider road reports. Severe ones (landslide, closure) are red, others amber; pending ones are hollow. */
-const RoadReportsLayer = memo(function RoadReportsLayer({ features, theme, onPress }: { features: RoadReportFeatureCollection; theme: RidePalette; onPress?: (id: string) => void }) {
+const RoadReportsLayer = memo(function RoadReportsLayer({ features, theme, onPress, labelMinZoom = 11 }: { features: RoadReportFeatureCollection; theme: RidePalette; onPress?: (id: string) => void; labelMinZoom?: number }) {
   if (!Mapbox || !features.features.length) return null;
   return (
     <Mapbox.ShapeSource
@@ -142,7 +143,7 @@ const RoadReportsLayer = memo(function RoadReportsLayer({ features, theme, onPre
       />
       <Mapbox.SymbolLayer
         id="road-report-label"
-        minZoomLevel={11}
+        minZoomLevel={labelMinZoom}
         style={{
           textField: ['get', 'label'],
           textOffset: [0, 1.5],
@@ -157,6 +158,8 @@ const RoadReportsLayer = memo(function RoadReportsLayer({ features, theme, onPre
 });
 
 export interface RideMapProps {
+  /** F14: fewer labels on low-end phones. */
+  perf?: PerformanceProfile;
   /** F11: road reports along the ride. */
   roadReports?: RoadReportFeatureCollection;
   onRoadReportPress?: (id: string) => void;
@@ -207,8 +210,8 @@ export const RideMap = memo(function RideMap(props: RideMapProps) {
       {hasRoute && <RouteLayer route={route} />}
       {trail && <TrailLayer trail={trail} />}
       <EndpointsLayer origin={origin} destination={destination} surface={theme.surface} />
-      {props.roadReports && <RoadReportsLayer features={props.roadReports} theme={theme} onPress={props.onRoadReportPress} />}
-      <RidersLayer features={riders} theme={theme} />
+      {props.roadReports && <RoadReportsLayer features={props.roadReports} theme={theme} onPress={props.onRoadReportPress} labelMinZoom={props.perf?.roadReportLabelMinZoom} />}
+      <RidersLayer features={riders} theme={theme} labelMinZoom={props.perf?.riderLabelMinZoom} />
     </Mapbox.MapView>
   );
 });

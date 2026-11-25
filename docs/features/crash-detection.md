@@ -59,6 +59,24 @@ stop(): void
 The module was left out on purpose: native code that cannot be built and run
 on a device here would risk breaking the EAS build.
 
+## General availability (F7 GA)
+
+The go / no-go numbers come from the beta telemetry:
+
+1. Run `select public.crash_beta_report(now() - interval '90 days');` with the
+   service role (SQL editor). It returns consenting riders, their riding hours
+   and every event's peak and speed before it, with no ids or locations.
+2. Save the JSON and run `node scripts/crash-tune.cjs report.json`. It sweeps
+   impact and speed thresholds (`shared/crashTuning.ts`) and prints, for each
+   pair, false alarms per 1,000 riding hours, crashes caught and crashes missed.
+3. GA when the best pair has **no missed crash**, **under 1 false alarm per
+   1,000 riding hours** and at least **500 riding hours** of data
+   (`GA_TARGET`). The script prints the flag payload to use.
+4. Set that payload on `crash_detection_beta`, raise its rollout percentage
+   step by step (10, 50, 100), and watch `crash_false_alarm` analytics.
+5. Once at 100% for a month, rename the flag in a release and remove the
+   "beta" wording from Profile.
+
 ## Needs Suman
 
 - Play Console: the `USE_FULL_SCREEN_INTENT` declaration (Android 14+), so the

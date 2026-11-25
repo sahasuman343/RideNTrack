@@ -36,3 +36,7 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION public.notify_family(uuid, uuid, text, jsonb, text) FROM PUBLIC, anon, authenticated;
+
+-- Hindi stays off until a native speaker has reviewed it (matches shared/flags.ts).
+UPDATE public.app_flags SET enabled = false, description = 'F13/F18: language picker and following the phone language'
+ WHERE key = 'languages';
