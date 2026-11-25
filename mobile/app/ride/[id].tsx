@@ -27,9 +27,12 @@ import {
   type AlertType,
   ALERT_LABELS,
   isStale,
+  validCoordinates,
   distanceMeters,
   distanceToRouteMeters,
   buildGoogleMapsNavigationUrl,
+  type ExternalNavProvider,
+  type RoutePoint,
   getRiderLiveStatus,
   type RiderLiveStatus,
   type RideIceContact,
@@ -41,10 +44,14 @@ import {
   MECHANICAL_ISSUE_LABELS,
   type AlertAcknowledgement,
   formatEmergencySms,
+  evaluateStationaryOffRouteCheckIn,
   formatMechanicalBreakdownMessage,
   NATIONAL_EMERGENCY_HELPLINES,
   SEEDED_BREAKDOWN_DIRECTORY,
   type VerifiedBreakdownService,
+  sendRideMessage,
+  type RideMessageType,
+  resolveRideEntitlements,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -53,7 +60,16 @@ import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
 import { useRideTheme, RidePalette, typography, elevation, radius, spacing } from '../../src/theme';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
+import {
+  formatNavProviderLabel,
+  getDefaultNavProvider,
+  getPreferredNavProvider,
+  openExternalNavLeg,
+  setPreferredNavProvider,
+} from '../../src/lib/externalNav';
 import { gpsStatus, type TrackerMode } from '../../src/lib/gpsStatus';
+import { TripChatSheet } from '../../src/components/ride/TripChatSheet';
+import { UpgradePromptModal } from '../../src/components/ui/UpgradePromptModal';
 import {
   detachBackgroundLocationCallbacks,
   enableBackgroundLocationUpdates,
@@ -62,7 +78,7 @@ import {
 } from '../../src/services/backgroundLocation';
 import { playAlertSound } from '../../src/services/alertSound';
 import { registerPushToken } from '../../src/services/pushNotifications';
-import { HoldToConfirmButton, Icon, LiveDot } from '../../src/components/ui';
+import { HoldToConfirmButton, Icon, LiveDot, SheetModal } from '../../src/components/ui';
 import { ALERT_ICONS, MECHANICAL_ICONS, plainLabel } from '../../src/icons';
 import { RiderRoster } from '../../src/components/ride/RiderRoster';
 
@@ -112,8 +128,8 @@ export default function LiveRideScreen() {
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const s = React.useMemo(() => makeStyles(theme), [theme]);
-  const { ride, participants, alerts, error, publish, refresh, setRide } = useRide(id, userId || '');
   const sync = useOfflineSync();
+  const { ride, participants, alerts, messages, error, publish, refresh, setRide } = useRide(id, userId || '', sync.isOnline);
   const camera = useRef<React.ComponentRef<typeof Camera>>(null);
   const [position, setPosition] = useState<LocationUpdate | null>(null);
   const { geoJson: actualTrailGeoJson, distanceMeters: distanceCoveredMeters } = useRideTrail(id, userId, position);
@@ -155,6 +171,15 @@ export default function LiveRideScreen() {
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
   const rideLoaded = Boolean(ride);
+  // destination_coords is [lng, lat]. Kept in a ref so the tracker effect does
+  // not restart GPS when the ride row refreshes with the same coordinates.
+  const destinationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  {
+    const coords = ride?.destination_coords;
+    destinationRef.current = Array.isArray(coords) && validCoordinates(coords[1], coords[0])
+      ? { latitude: coords[1], longitude: coords[0] }
+      : null;
+  }
 
   const cameraPadding = useMemo(() => {
     const maxTop = Math.max(20, Math.floor(windowHeight * 0.25));
@@ -198,11 +223,150 @@ export default function LiveRideScreen() {
   const [selectedMechanicalIssue, setSelectedMechanicalIssue] = useState<MechanicalIssueType>('puncture');
   const [mechanicalDetails, setMechanicalDetails] = useState('');
   const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
+  const [chatVisible, setChatVisible] = useState(false);
+  const [upgradePromptVisible, setUpgradePromptVisible] = useState(false);
+  const [hasActiveSpectatorLink, setHasActiveSpectatorLink] = useState(false);
+  const [rideProAccess, setRideProAccess] = useState(false);
+
+  useEffect(() => {
+    if (!id || !userId) return;
+    let cancelled = false;
+    void supabase.rpc('ride_has_pro_access', { p_ride_id: id }).then(({ data }) => {
+      if (!cancelled && typeof data === 'boolean') setRideProAccess(data);
+    });
+    void supabase
+      .from('ride_share_links')
+      .select('id')
+      .eq('ride_id', id)
+      .is('revoked_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .limit(1)
+      .then(({ data }) => {
+        if (!cancelled) setHasActiveSpectatorLink(Boolean(data && data.length > 0));
+      });
+    return () => { cancelled = true; };
+  }, [id, userId]);
+
+  const entitlements = useMemo(
+    () =>
+      resolveRideEntitlements({
+        userTier: profile?.subscription_tier ?? 'free',
+        hasExpeditionPass: rideProAccess,
+      }),
+    [profile?.subscription_tier, rideProAccess],
+  );
+
+  async function shareFamilySpectatorLink(hours = 24) {
+    if (!ride || !userId) return;
+    if (!entitlements.limits.supportsSpectatorLink) {
+      setUpgradePromptVisible(true);
+      return;
+    }
+    try {
+      // The database generates the token (crypto-random); Math.random() on the
+      // phone is guessable and this link reveals live rider positions.
+      const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+      const { data: link, error: linkErr } = await supabase
+        .from('ride_share_links')
+        .insert({ ride_id: ride.id, created_by: userId, expires_at: expiresAt })
+        .select('token')
+        .single();
+      if (linkErr) throw linkErr;
+      const token = (link as { token: string }).token;
+      setHasActiveSpectatorLink(true);
+      await Share.share({
+        title: `${ride.name} · Live Family Link`,
+        message: `Track our ride live on RideNTrack: https://ridentrack.app/track/${token}`,
+      });
+    } catch (e: any) {
+      Dialog.alert('Could not create spectator link', e?.message || 'Pro Tourer or Expedition Pass required.');
+    }
+  }
+
+  async function revokeFamilySpectatorLink() {
+    if (!ride) return;
+    const { error: revErr } = await supabase
+      .from('ride_share_links')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('ride_id', ride.id)
+      .is('revoked_at', null);
+    if (!revErr) {
+      setHasActiveSpectatorLink(false);
+      setMessage('All active family spectator links revoked.');
+    }
+    else Dialog.alert('Could not turn off the family links', revErr.message);
+  }
+  const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
+
+  useEffect(() => {
+    void getPreferredNavProvider().then(setNavProvider);
+  }, []);
+
+  const [now, setNow] = useState(() => Date.now());
+  const [batteryBannerDismissed, setBatteryBannerDismissed] = useState(false);
+  const [stationaryCountdown, setStationaryCountdown] = useState<number | null>(null);
+  const stationarySinceRef = useRef<number | null>(null);
+  const stationaryAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
+  const stationaryCooldownUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!active || !position) {
+      stationarySinceRef.current = null;
+      stationaryAnchorRef.current = null;
+      setStationaryCountdown(null);
+      return;
+    }
+    const nowMs = Date.now();
+    const speedKmh = (position.speed || 0) * 3.6;
+    const anchor = stationaryAnchorRef.current;
+    const moved = anchor ? distanceMeters(anchor, { lat: position.lat, lng: position.lng }) >= 25 : true;
+    if (speedKmh >= 2 || moved) {
+      stationaryAnchorRef.current = { lat: position.lat, lng: position.lng };
+      stationarySinceRef.current = nowMs;
+      if (stationaryCountdown !== null) setStationaryCountdown(null);
+      return;
+    }
+    if (!stationarySinceRef.current) {
+      stationarySinceRef.current = nowMs;
+      return;
+    }
+    if (nowMs < stationaryCooldownUntilRef.current) return;
+    const check = evaluateStationaryOffRouteCheckIn({
+      stationaryDurationMs: nowMs - stationarySinceRef.current,
+      currentLat: position.lat,
+      currentLng: position.lng,
+      waypoints: upcomingWaypoints,
+      routeCoordinates: route?.geometry?.coordinates,
+    });
+    if (check.shouldPrompt && stationaryCountdown === null) {
+      setStationaryCountdown(120);
+    }
+  }, [active, position?.lat, position?.lng, position?.speed, position?.timestamp, now, upcomingWaypoints, route, stationaryCountdown]);
+
+  useEffect(() => {
+    if (stationaryCountdown === null) return;
+    if (stationaryCountdown <= 0) {
+      setStationaryCountdown(null);
+      stationaryCooldownUntilRef.current = Date.now() + 10 * 60 * 1000;
+      if (userId && ride) {
+        void sendAlert('emergency', 'Stationary off-route check-in unanswered — please check on rider.');
+      }
+      return;
+    }
+    const t = setTimeout(() => setStationaryCountdown(c => (c !== null ? c - 1 : null)), 1000);
+    return () => clearTimeout(t);
+  }, [stationaryCountdown]);
+
+  async function toggleNavProvider() {
+    const next: ExternalNavProvider = navProvider === 'google_maps' ? 'apple_maps' : 'google_maps';
+    setNavProvider(next);
+    await setPreferredNavProvider(next);
+    setMessage(`Maps app set to ${formatNavProviderLabel(next)}`);
+  }
   const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
   const [iceByRider, setIceByRider] = useState<Record<string, RideIceContact>>({});
   const [acknowledgedAlertIds, setAcknowledgedAlertIds] = useState<string[]>([]);
   const [acknowledgementMap, setAcknowledgementMap] = useState<Record<string, { count: number; riders: string[] }>>({});
-  const [now, setNow] = useState(() => Date.now());
   const gps = gpsStatus(active && sharing ? tracking : 'paused', position?.timestamp, now);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const gpsRecoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,11 +538,21 @@ export default function LiveRideScreen() {
       displayName: nameRef.current,
       publish,
       batterySaver,
+      destination: destinationRef.current,
       onLocationUpdate: p => {
         if (!cancelled) { setNow(Date.now()); setPosition(p); }
       },
       onError: e => {
         if (!cancelled) setGpsError(e);
+      },
+      onAutoStop: reason => {
+        if (!cancelled) {
+          setSharing(false);
+          setTracking('paused');
+          setMessage(reason === 'arrived'
+            ? 'You reached the destination, so location sharing stopped.'
+            : 'Location sharing stopped after 12 hours. Turn it back on if you are still riding.');
+        }
       },
       onGpsRecovered: () => {
         if (!cancelled) {
@@ -522,12 +696,44 @@ export default function LiveRideScreen() {
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
     try {
+      // Only a fresh fix may be the route origin. Without one, hand the maps
+      // app just the next stop so it starts from the phone's real location
+      // instead of from a stale point or from a planned waypoint.
+      if (position && !isStale(position.timestamp) && validCoordinates(position.lat, position.lng)) {
+        const remaining = upcomingWaypoints.slice(targetWaypointIndex);
+        const legPoints: RoutePoint[] = [
+          {
+            sequence: 0,
+            waypoint_type: 'origin',
+            name: 'Current Location',
+            latitude: position.lat,
+            longitude: position.lng,
+          },
+          ...remaining.map((wp, idx) => ({
+            sequence: idx + 1,
+            waypoint_type: (idx === remaining.length - 1 ? 'destination' : 'stop') as RoutePoint['waypoint_type'],
+            name: wp.name,
+            latitude: wp.latitude,
+            longitude: wp.longitude,
+            provider_place_id: wp.provider_place_id,
+          })),
+        ];
+
+        const result = await openExternalNavLeg(legPoints, navProvider);
+        if (result.legCount > 1) {
+          setMessage(`Opened leg 1 of ${result.legCount} in ${formatNavProviderLabel(result.provider)}`);
+        }
+        return;
+      }
+
       await Linking.openURL(
-        buildGoogleMapsNavigationUrl({
-          latitude: nextWaypoint.latitude,
-          longitude: nextWaypoint.longitude,
-          placeId: nextWaypoint.provider_place_id,
-        })
+        navProvider === 'apple_maps'
+          ? `https://maps.apple.com/?daddr=${nextWaypoint.latitude},${nextWaypoint.longitude}&dirflg=d`
+          : buildGoogleMapsNavigationUrl({
+              latitude: nextWaypoint.latitude,
+              longitude: nextWaypoint.longitude,
+              placeId: nextWaypoint.provider_place_id,
+            })
       );
     } catch (e: any) {
       Dialog.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
@@ -606,6 +812,15 @@ export default function LiveRideScreen() {
         displayName: name,
         publish,
         batterySaver,
+        destination: destinationRef.current,
+        onAutoStop: reason => {
+          if (session !== gpsSession.current) return;
+          setSharing(false);
+          setTracking('paused');
+          setMessage(reason === 'arrived'
+            ? 'You reached the destination, so location sharing stopped.'
+            : 'Location sharing stopped after 12 hours. Turn it back on if you are still riding.');
+        },
         onLocationUpdate: p => {
           if (session === gpsSession.current) { setNow(Date.now()); setPosition(p); }
         },
@@ -651,13 +866,24 @@ export default function LiveRideScreen() {
   }
 
   async function sendAlert(type: AlertType, customMessage?: string): Promise<'sent' | 'queued' | 'failed'> {
-    if (!position || !userId || isStale(position.timestamp)) {
+    if (!userId) return 'failed';
+    const hasFreshFix = Boolean(position && !isStale(position.timestamp));
+    // An SOS must never be blocked by GPS: in a tunnel, a valley, or right
+    // after unlocking a phone that only had foreground permission, the last
+    // known position (with its age) is far better than nothing.
+    if (!hasFreshFix && type !== 'emergency') {
       setMessage('Wait for a fresh GPS fix before sending an alert.');
       return 'failed';
     }
+    const fix = position && validCoordinates(position.lat, position.lng) ? position : null;
     setBusy(true);
     try {
-      const alert = { id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() };
+      const alert = {
+        id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage,
+        lat: fix ? fix.lat : null, lng: fix ? fix.lng : null,
+        location_recorded_at: fix ? fix.timestamp : null,
+        created_at: new Date().toISOString(),
+      };
       if (sync.isOnline) {
         const { error, status } = await supabase.from('alerts').upsert(alert, { onConflict: 'id', ignoreDuplicates: true });
         if (!error) {
@@ -836,12 +1062,15 @@ export default function LiveRideScreen() {
 
   async function broadcastSosToGroup() {
     setSosModal(false);
-    if (!position || !userId || isStale(position.timestamp)) {
-      setMessage('Wait for a fresh GPS fix before sending an emergency alert.');
-      return;
-    }
-    if ((await sendAlert('emergency')) !== 'sent') return;
-    setMessage('Emergency alert broadcast to group with your live coordinates.');
+    const outcome = await sendAlert('emergency');
+    if (outcome === 'failed') return;
+    const fixAgeMin = position ? Math.floor((Date.now() - Date.parse(position.timestamp)) / 60000) : null;
+    const where = !position
+      ? 'GPS has no fix yet, so the alert has no location.'
+      : isStale(position.timestamp)
+        ? `It includes your last known location from ${Math.max(1, fixAgeMin ?? 1)} min ago.`
+        : 'It includes your live location.';
+    setMessage((outcome === 'sent' ? 'Emergency alert sent to the group. ' : 'No signal: emergency alert saved and will send as soon as you are back online. ') + where);
   }
 
   async function dialEmergencyContact() {
@@ -862,9 +1091,9 @@ export default function LiveRideScreen() {
     }
     const phone = profile?.emergency_contact || '';
     if (!phone) {
-      Dialog.alert('No Emergency Contact Set', 'Set an emergency contact in your Profile to send 1-tap SOS SMS.', [
+      Dialog.alert('No emergency contact', 'Set an emergency contact in your Profile to send 1-tap SOS SMS.', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Go to Profile', onPress: () => router.push('/(tabs)/profile') },
+        { text: 'Go to profile', onPress: () => router.push('/(tabs)/profile') },
       ]);
       return;
     }
@@ -1039,7 +1268,7 @@ export default function LiveRideScreen() {
         </Mapbox.MapView>
       ) : (
         <View style={s.fallback}>
-          <Text style={s.heading}>Cockpit Ride Mode Active</Text>
+          <Text style={s.heading}>Ride mode on</Text>
           <Text style={s.muted}>The native map is unavailable. GPS status and ride controls are shown below.</Text>
         </View>
       )}
@@ -1095,6 +1324,9 @@ export default function LiveRideScreen() {
         <TouchableOpacity accessibilityLabel="Emergency SOS" style={s.sosTopButton} onPress={triggerSosWorkflow}>
           <Text style={s.sosTopButtonText}>SOS</Text>
         </TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Trip Chat" style={s.square} onPress={() => setChatVisible(true)}>
+          <Icon name="chatbubbles-outline" size="md" color={theme.text} />
+        </TouchableOpacity>
         {admin && (
           <TouchableOpacity accessibilityLabel="Captain Dashboard" style={[s.square, { borderColor: theme.accent }]} onPress={() => setCaptainDashboardVisible(true)}>
             <Icon name="ribbon-outline" size="md" color={theme.accent} />
@@ -1135,6 +1367,62 @@ export default function LiveRideScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Android Pre-Ride Battery Readiness Banner */}
+      {Platform.OS === 'android' && !active && !batteryBannerDismissed && (
+        <View style={[s.floatingAlertBanner, { top: insets.top + 64 }]}>
+          <View style={s.floatingAlertHeader}>
+            <Icon name="battery-charging-outline" size="sm" color={theme.warning} />
+            <Text style={[s.floatingAlertTitle, { flex: 1 }]}>Disable battery optimization for uninterrupted background GPS</Text>
+            <TouchableOpacity onPress={() => setBatteryBannerDismissed(true)} accessibilityLabel="Dismiss battery check">
+              <Icon name="close" size="sm" color={theme.textMuted} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+            <TouchableOpacity style={s.floatingAlertSecondaryBtn} onPress={() => void Linking.openSettings()}>
+              <Text style={s.floatingAlertActionText}>Open battery settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Stationary Off-Route Safety Check-In */}
+      {stationaryCountdown !== null && (
+        <View style={[s.floatingAlertBanner, s.floatingAlertEmergency, { top: insets.top + 118 }]}>
+          <View style={s.floatingAlertHeader}>
+            <Icon name="alert-circle-outline" size="sm" color={theme.danger} />
+            <Text style={[s.floatingAlertTitle, { flex: 1 }]}>Stopped off-route — Are you okay? ({stationaryCountdown}s)</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+            <TouchableOpacity
+              style={s.floatingAlertSecondaryBtn}
+              onPress={() => {
+                setStationaryCountdown(null);
+                stationaryCooldownUntilRef.current = Date.now() + 10 * 60 * 1000;
+              }}
+            >
+              <Text style={s.floatingAlertActionText}>I&apos;m Okay</Text>
+            </TouchableOpacity>
+            {!!profile?.emergency_contact && !!position && !!ride && (
+              <TouchableOpacity
+                style={s.floatingAlertSecondaryBtn}
+                onPress={() => {
+                  const smsBody = formatEmergencySms({
+                    riderName: name,
+                    motorcycleModel: profile.motorcycle_model,
+                    rideName: ride.name,
+                    latitude: position.lat,
+                    longitude: position.lng,
+                  });
+                  void Linking.openURL(`sms:${profile.emergency_contact}?body=${encodeURIComponent(smsBody)}`);
+                }}
+              >
+                <Text style={s.floatingAlertActionText}>Send SOS SMS</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* Prominent Floating Alert Overlay Card */}
       {newest && (
         <View
@@ -1160,17 +1448,24 @@ export default function LiveRideScreen() {
           </View>
 
           {newest.message ? <Text style={s.floatingAlertMessage}>"{newest.message}"</Text> : null}
+          {newest.type === 'emergency' && (newest.lat == null
+            ? <Text style={s.floatingAlertMessage}>No GPS fix was available when this was sent.</Text>
+            : newest.location_recorded_at && Date.parse(newest.created_at) - Date.parse(newest.location_recorded_at) > 60_000
+              ? <Text style={s.floatingAlertMessage}>
+                  Location is the last known fix, {Math.round((Date.parse(newest.created_at) - Date.parse(newest.location_recorded_at)) / 60000)} min before the alert.
+                </Text>
+              : null)}
 
           <View style={s.floatingAlertActionsRow}>
             {newest.type === 'announcement' && (
               acknowledgedAlertIds.includes(newest.id) ? (
                 <View style={s.acknowledgedBadge}>
                   <Icon name="checkmark" size="sm" color={theme.green} />
-                  <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+                  <Text style={s.acknowledgedText}>Seen</Text>
                 </View>
               ) : (
                 <TouchableOpacity style={s.floatingAlertActionBtn} onPress={() => void acknowledgeAnnouncement(newest.id)}>
-                  <Text style={s.floatingAlertActionText}>👍 Acknowledge</Text>
+                  <Text style={s.floatingAlertActionText}>Got it</Text>
                 </TouchableOpacity>
               )
             )}
@@ -1182,7 +1477,7 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             )}
 
-            {newest.lat && newest.lng && (
+            {newest.lat != null && newest.lng != null && (
               <>
                 <TouchableOpacity
                   style={s.floatingAlertSecondaryBtn}
@@ -1349,24 +1644,25 @@ export default function LiveRideScreen() {
           <View style={s.giantActionDeck}>
             <View style={s.actionGridRow}>
               {/* Action 1: Navigate External Maps */}
-              <TouchableOpacity
+                <TouchableOpacity
                 style={[s.giantActionBtn, s.actionButton]}
                 onPress={() => void navigateToNextWaypoint()}
+                onLongPress={() => void toggleNavProvider()}
                 accessibilityRole="button"
-                accessibilityLabel={nextWaypoint ? `Navigate to ${nextWaypoint.name}` : 'Navigate'}
+                accessibilityLabel={nextWaypoint ? `Navigate leg to ${nextWaypoint.name} in ${formatNavProviderLabel(navProvider)}` : 'Navigate Leg'}
               >
                 <View style={s.giantBtnIconWrap}>
                   <Icon name="navigate-outline" size="lg" color={theme.text} />
                 </View>
                 <View style={s.giantBtnTextCol}>
-                  <Text style={s.giantBtnTitle}>NAVIGATE</Text>
+                  <Text style={s.giantBtnTitle}>NAVIGATE LEG</Text>
                   {active && nextWaypoint ? (
                     <Text style={s.giantBtnSubtitle} numberOfLines={1}>
-                      Navigate to {nextWaypoint.name}
+                      Navigate to {nextWaypoint.name} ({formatNavProviderLabel(navProvider)})
                     </Text>
                   ) : (
                     <Text style={s.giantBtnSubtitle} numberOfLines={1}>
-                      Turn Prompts
+                      {formatNavProviderLabel(navProvider)} (hold to switch)
                     </Text>
                   )}
                 </View>
@@ -1563,8 +1859,7 @@ export default function LiveRideScreen() {
       </View>
 
       {/* Modals */}
-      <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={modal} onRequestClose={() => setModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
             <Text style={s.heading}>Let your group know</Text>
             <Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>
@@ -1613,19 +1908,17 @@ export default function LiveRideScreen() {
               }}
             >
               <Icon name="call-outline" size="md" color={theme.textMuted} />
-              <Text style={s.text}>Breakdown Assistance Directory (1033 / RSA)</Text>
+              <Text style={s.text}>Roadside help (1033 / RSA)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={announcementModal} transparent animationType="slide" onRequestClose={() => setAnnouncementModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={announcementModal} onRequestClose={() => setAnnouncementModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.accent }]}>Captain Announcement</Text>
+            <Text style={[s.heading, { color: theme.accent }]}>Announcement</Text>
             {message && <Text style={s.warningText}>{message}</Text>}
             <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
             <View style={{ gap: 8, marginVertical: 4 }}>
@@ -1663,16 +1956,14 @@ export default function LiveRideScreen() {
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={sosModal} onRequestClose={() => setSosModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.danger }]}>Motorcycle Emergency SOS</Text>
+            <Text style={[s.heading, { color: theme.danger }]}>Emergency</Text>
             <Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text>
             <TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}>
-              <Text style={s.sosEmergencyText}>Broadcast to Group Now</Text>
+              <Text style={s.sosEmergencyText}>Send to group</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
               <Icon name="chatbubble-outline" size="md" color={theme.textMuted} />
@@ -1690,22 +1981,20 @@ export default function LiveRideScreen() {
               }}
             >
               <Icon name="call-outline" size="md" color={theme.accent} />
-              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway Assistance & RSA Directory (1033 / 112)</Text>
+              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway help (1033 / 112)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Live Ride Statistics Modal */}
-      <Modal visible={statsModalVisible} transparent animationType="slide" onRequestClose={() => setStatsModalVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={statsModalVisible} onRequestClose={() => setStatsModalVisible(false)}>
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={s.heading}>Live Ride Telemetry & Statistics</Text>
+                <Text style={s.heading}>Ride stats</Text>
                 <TouchableOpacity onPress={() => setStatsModalVisible(false)} accessibilityLabel="Close statistics">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -1799,16 +2088,14 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Captain Command Dashboard Modal */}
-      <Modal visible={captainDashboardVisible} transparent animationType="slide" onRequestClose={() => setCaptainDashboardVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={captainDashboardVisible} onRequestClose={() => setCaptainDashboardVisible(false)}>
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>Captain Command Dashboard</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Captain's view</Text>
                 <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)} accessibilityLabel="Close dashboard">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -1881,7 +2168,7 @@ export default function LiveRideScreen() {
                           </View>
                         ) : (
                           <TouchableOpacity style={s.regroupCloseBtn} disabled={busy} onPress={() => void handleCloseRegroup(point.id)}>
-                            <Text style={s.regroupCloseBtnText}>Close & Resume</Text>
+                            <Text style={s.regroupCloseBtnText}>Close</Text>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -1930,13 +2217,30 @@ export default function LiveRideScreen() {
 
               <TouchableOpacity
                 style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
+                onPress={() => void shareFamilySpectatorLink(24)}
+              >
+                <Icon name="share-social-outline" size="md" color={theme.accent} />
+                <Text style={[s.text, { color: theme.accent }]}>Share live link with family (24 h)</Text>
+              </TouchableOpacity>
+              {hasActiveSpectatorLink && (
+                <TouchableOpacity
+                  style={[s.alertOption, { borderColor: theme.danger, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
+                  onPress={() => void revokeFamilySpectatorLink()}
+                >
+                  <Icon name="close-circle-outline" size="md" color={theme.danger} />
+                  <Text style={[s.text, { color: theme.danger }]}>Turn off family links</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1, marginBottom: 12, justifyContent: 'center' }]}
                 onPress={() => {
                   setCaptainDashboardVisible(false);
                   void loadBreakdownDirectory();
                 }}
               >
                 <Icon name="call-outline" size="md" color={theme.accent} />
-                <Text style={[s.text, { color: theme.accent }]}>Open Roadside Breakdown Directory</Text>
+                <Text style={[s.text, { color: theme.accent }]}>Find roadside help</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setCaptainDashboardVisible(false)}>
@@ -1944,16 +2248,35 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
+
+      {/* Upgrade Prompt Modal */}
+      <UpgradePromptModal
+        visible={upgradePromptVisible}
+        featureTitle="Live Family Spectator Link"
+        featureDescription="Share a read-only live map link with family and friends (no app install required). Unlock with Pro Tourer or an Expedition Pass."
+        onClose={() => setUpgradePromptVisible(false)}
+      />
+
+      {/* Trip Chat Sheet */}
+      <TripChatSheet
+        visible={chatVisible}
+        onClose={() => setChatVisible(false)}
+        messages={messages}
+        currentUserId={userId}
+        isOnline={sync.isOnline}
+        onSend={async (body: string, messageType: RideMessageType) => {
+          if (!userId || !id) return;
+          await sendRideMessage(supabase, { rideId: id, senderId: userId, body, messageType });
+        }}
+      />
 
       {/* Mechanical Breakdown Modal */}
-      <Modal visible={mechanicalModalVisible} transparent animationType="slide" onRequestClose={() => setMechanicalModalVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={mechanicalModalVisible} onRequestClose={() => setMechanicalModalVisible(false)}>
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.warning }]}>Mechanical Breakdown Alert</Text>
+                <Text style={[s.heading, { color: theme.warning }]}>Report a breakdown</Text>
                 <TouchableOpacity onPress={() => setMechanicalModalVisible(false)} accessibilityLabel="Close">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -1985,7 +2308,7 @@ export default function LiveRideScreen() {
               />
 
               <TouchableOpacity style={[s.primary, { backgroundColor: theme.warningSoft, borderWidth: 1, borderColor: theme.warning, marginBottom: 10 }]} disabled={busy} onPress={() => void sendMechanicalBreakdownAlert()}>
-                <Text style={[s.buttonText, { color: theme.warning, fontWeight: '800' }]}>Broadcast Breakdown Alert</Text>
+                <Text style={[s.buttonText, { color: theme.warning, fontWeight: '800' }]}>Send breakdown alert</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1996,7 +2319,7 @@ export default function LiveRideScreen() {
                 }}
               >
                 <Icon name="call-outline" size="md" color={theme.textMuted} />
-                <Text style={s.text}>View Roadside Assistance Numbers</Text>
+                <Text style={s.text}>Roadside assistance numbers</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setMechanicalModalVisible(false)}>
@@ -2004,16 +2327,14 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Breakdown Directory Modal */}
-      <Modal visible={breakdownDirectoryVisible} transparent animationType="slide" onRequestClose={() => setBreakdownDirectoryVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={breakdownDirectoryVisible} onRequestClose={() => setBreakdownDirectoryVisible(false)}>
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>Roadside Breakdown Directory</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Roadside help</Text>
                 <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)} accessibilityLabel="Close directory">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -2060,8 +2381,7 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }
@@ -2365,7 +2685,6 @@ const makeStyles = (c: RidePalette) =>
     sync: { paddingVertical: 10, alignItems: 'center' },
 
     // Modals
-    overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: c.shadow + '88' },
     modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, backgroundColor: c.surface, gap: 12 },
     alertOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, borderRadius: radius.md, backgroundColor: c.surfaceRaised },
     inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

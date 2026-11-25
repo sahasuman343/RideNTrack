@@ -63,6 +63,7 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
       else if(url.includes('/rpc/get_ride_members'))data=riders.map(p=>({user_id:p.user_id,display_name:p.display_name}));
       else if(url.includes('/rpc/get_latest_ride_locations'))data=riders;
       else if(url.includes('/rest/v1/alerts'))data=alerts;
+      else if(url.includes('/rest/v1/ride_messages'))data=[];
       else if(url.includes('/rest/v1/rides'))data=url.includes(secondRideId) ? {...ride,id:secondRideId,name:'Sunday Morning Ride'} : ride;
       else if(url.includes('/rest/v1/profiles'))data={id:userId,display_name:'Suman',username:'suman'};
       else if(url.includes('/rest/v1/ride_participants'))data=[{ride_id:rideId,rides:ride}];

@@ -52,9 +52,18 @@ export async function playAlertSound(isEmergency: boolean = false): Promise<void
       }
     }
 
-    // Native platform audio playback via expo-audio
+    // Native platform audio playback via expo-audio with transient ducking over Maps voice guidance
     try {
-      const { createAudioPlayer } = require('expo-audio');
+      const expoAudio = require('expo-audio');
+      if (typeof expoAudio.setAudioModeAsync === 'function') {
+        await expoAudio.setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionMode: 'duckOthers',
+          interruptionModeAndroid: 'duckOthers',
+        }).catch(() => {});
+      }
+      const { createAudioPlayer } = expoAudio;
       if (!audioPlayer) {
         const soundAsset = require('../../assets/sounds/alert_chime.wav');
         audioPlayer = createAudioPlayer(soundAsset);

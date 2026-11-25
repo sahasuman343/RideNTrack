@@ -38,7 +38,7 @@ export default function LoginScreen() {
           resizeMode="contain"
         />
         <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack</Text>
-        <Text style={styles.subtitle}>Indian Riders Community</Text>
+        <Text style={styles.subtitle}>Indian riders community</Text>
       </View>
 
       <View style={styles.form}>

@@ -204,7 +204,7 @@ test('lost acknowledgements retain local samples; retry is single-flight', async
   let ack = 0, calls = 0;
   const service = loader({
     '../lib/supabase': { supabase: { auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},rpc:async()=>{calls++;return {data:ack,error:null};} } },
-    '../lib/offlineQueue': {
+    '../lib/offlineQueue': { pruneQueue: async () => {},
       getQueueCounts:async()=>({locations:batch.length,alerts:0}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>batch,
       clearQueuedItems:async(user,ids)=>{assert.equal(user,'u');batch=batch.filter(p=>!ids.includes(p.id));},
     },
@@ -224,7 +224,7 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
       from:()=>({upsert:async()=>({error:{message:'temporary'}})}),
       rpc:async()=>({data:1,error:null}),
     }},
-    '../lib/offlineQueue':{
+    '../lib/offlineQueue':{ pruneQueue: async () => {},
       getQueueCounts:async()=>({locations:locations.length,alerts:1}),getQueuedAlerts:async()=>[{id:'a',user_id:'u'}],
       getQueuedLocations:async()=>locations,
       clearQueuedItems:async(_user,ids)=>{deleted.push(...ids);locations=[];},
@@ -256,7 +256,7 @@ test('unauthorized or stale breadcrumbs are isolated and cleared without blockin
         },
       },
     },
-    '../lib/offlineQueue': {
+    '../lib/offlineQueue': { pruneQueue: async () => {},
       getQueueCounts: async () => ({ locations: locations.length, alerts: 0 }),
       getQueuedAlerts: async () => [],
       getQueuedLocations: async () => locations,
@@ -287,7 +287,7 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
       setItem:async(key,value)=>{storage.set(key,value);},removeItem:async key=>{storage.delete(key);},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async point=>{saved.push(point);notifySave();await committed;}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async point=>{saved.push(point);notifySave();await committed;}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   await service.startBackgroundLocationUpdates({rideId:'first',userId:'u',displayName:'Rider',publish:()=>published.push('first')});
@@ -318,7 +318,7 @@ test('foreground GPS subscription failure is not a successful start and a retry 
       setItem:async(_,value)=>{stored=value;}, removeItem:async()=>{stored=null;},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async()=>{}}, './syncQueue':{syncQueue:async()=>{}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async()=>{}}, './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   const {gpsStatus} = loader()('mobile/src/lib/gpsStatus.ts');
   let fix;
@@ -402,7 +402,7 @@ test('Android background permission and native GPS service start are separate us
       removeItem:async key=>{storage.delete(key);},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async()=>{}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async()=>{}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   const params={rideId:'ride',userId:'u',displayName:'Rider'};
@@ -497,7 +497,7 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
     react,
     '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
     '../services/pushNotifications': { unregisterPushToken: async () => {} },
-    '../lib/offlineQueue': { clearQueuedItemsForUser: async () => {} },
+    '../lib/offlineQueue': { pruneQueue: async () => {}, clearQueuedItemsForUser: async () => {} },
     '../lib/tripCache': { clearAllCachedTripsForUser: async () => {} },
     '../lib/supabase': { supabase: {
       auth: {
@@ -791,7 +791,10 @@ test('leave_ride migration exists and trip workspace exposes self-service leave 
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
   assert.match(tripSource, /confirmLeaveRide/);
   assert.match(tripSource, /leaveRide/);
-  assert.match(tripSource, /supabase\.rpc\('leave_ride'/);
+  assert.match(tripSource, /leaveRideSafely\(id, user\.id\)/);
+  const leaveSource = fs.readFileSync(path.resolve('mobile/src/services/leaveRide.ts'), 'utf8');
+  // Breadcrumbs upload while the rider is still a member; leaving first would get them rejected and deleted.
+  assert.match(leaveSource, /stopBackgroundLocationUpdates\(rideId\)[\s\S]*syncQueue\(\)[\s\S]*getQueuedCountForRide[\s\S]*supabase\.rpc\('leave_ride'/);
   assert.match(tripSource, /Leave group ride/);
   assert.match(tripSource, /!isAdmin && roster\.some/);
 });
@@ -933,7 +936,8 @@ test('emergency SOS workflow supports group broadcast, SMS with GPS, and selecte
   assert.match(rideSource, /dialEmergencyContact/);
   assert.match(rideSource, /shareLiveLocation/);
   assert.match(rideSource, /maps\.google\.com\/\?q=/);
-  assert.match(rideSource, /Emergency alert broadcast to group with your live coordinates/);
+  assert.match(rideSource, /Emergency alert sent to the group/);
+  assert.match(rideSource, /It includes your last known location from/);
 });
 
 test('motorcycle profile migration defines fuel tank, mileage, reserve, and category columns', () => {
@@ -1004,11 +1008,11 @@ test('profile screen supports motorcycle configuration and displays safe fuel ra
 
 test('trip workspace renders touring intelligence, motorcycle fuel advisory, and weather forecast', () => {
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
-  assert.match(tripSource, /Touring Intelligence & Motorcycle Fuel/);
+  assert.match(tripSource, /Fuel and touring notes/);
   assert.match(tripSource, /Motorcycle Fuel Advisory/);
-  assert.match(tripSource, /Route Weather Forecast/);
+  assert.match(tripSource, /Weather on the route/);
   assert.match(tripSource, /Open-Meteo/);
-  assert.match(tripSource, /Touring Advisories & Safety/);
+  assert.match(tripSource, /Before you ride/);
 });
 
 test('formatShareableRideCard produces formatted text for social sharing', () => {
@@ -1048,8 +1052,8 @@ test('plan limits and payment architecture config enforce free vs pro tourer bou
   assert.equal(shared.canCreateMoreTrips(5, 'free'), false);
   assert.equal(shared.canCreateMoreTrips(5, 'pro_tourer'), true);
 
-  assert.equal(shared.canAddMoreWaypoints(14, 'free'), true);
-  assert.equal(shared.canAddMoreWaypoints(15, 'free'), false);
+  assert.equal(shared.canAddMoreWaypoints(4, 'free'), true);
+  assert.equal(shared.canAddMoreWaypoints(5, 'free'), false);
   assert.equal(shared.canAddMoreWaypoints(15, 'pro_tourer'), true);
 
   assert.equal(shared.PAYMENT_CONFIG.provider, 'razorpay');
@@ -1071,8 +1075,8 @@ test('trip workspace renders journal entries, photos, and shareable ride card ac
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
   assert.match(tripSource, /trip_journal_entries/);
   assert.match(tripSource, /save_trip_journal_entry/);
-  assert.match(tripSource, /Ride Journal & Memories/);
-  assert.match(tripSource, /Share Ride Card \(WhatsApp \/ Instagram\)/);
+  assert.match(tripSource, /Ride journal/);
+  assert.match(tripSource, /Share ride card/);
   assert.match(tripSource, /formatShareableRideCard/);
 });
 
@@ -1094,7 +1098,7 @@ test('trip cards expose a direct delete button with confirmation and RPC executi
   const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(indexSource, /handleDeleteTrip/);
   assert.match(indexSource, /delete_trip/);
-  assert.match(indexSource, /leave_ride/);
+  assert.match(indexSource, /leaveRideSafely/);
   assert.match(indexSource, /cardDeleteBtn/);
   assert.match(indexSource, /Permanently delete/);
 });
@@ -1113,12 +1117,12 @@ test('trip planner allows quick creation with essentials, calendar date picker, 
   assert.match(createSource, /handlePresetNextWeekend/);
 
   // Quick creation with essentials (Name, Origin, Destination, Dates)
-  assert.match(createSource, /Quick Trip Setup/);
+  assert.match(createSource, /Quick setup/);
   assert.match(createSource, /Create trip plan/);
   assert.match(createSource, /Customize Trip/);
 
   // CalendarPickerModal logic
-  assert.match(calendarSource, /Select Trip Dates/);
+  assert.match(calendarSource, /Select trip dates/);
   assert.match(calendarSource, /This Weekend/);
   assert.match(calendarSource, /formatDateNice/);
   assert.match(calendarSource, /formatYMD/);
@@ -1334,7 +1338,7 @@ test('live ride screen renders pack formation strip and captain announcement mod
   assert.match(rideSource, /FORMATION & SPACING/);
   assert.match(rideSource, /formationBadge/);
   assert.match(rideSource, /announcementModal/);
-  assert.match(rideSource, /Captain Announcement/);
+  assert.match(rideSource, /Announcement/);
   assert.match(rideSource, /broadcastAnnouncement/);
   assert.match(rideSource, /Fuel stop at next pump/);
   assert.match(rideSource, /Wet roads \/ rain ahead/);
@@ -1345,7 +1349,7 @@ test('trip workspace integrates GPX export, group expenses, and settlements', ()
   assert.match(tripSource, /exportGpxFile/);
   assert.match(tripSource, /exportTripToGpx/);
   assert.match(tripSource, /Export GPX route/);
-  assert.match(tripSource, /Trip Expenses & Splitting/);
+  assert.match(tripSource, /Expenses/);
   assert.match(tripSource, /expenseSummary/);
   assert.match(tripSource, /settlements/);
   assert.match(tripSource, /calculateExpenseSettlement/);
@@ -1472,7 +1476,7 @@ test('profile screen integrates saved places and touring destination bookmarking
   assert.match(profileSource, /get_user_saved_places/);
   assert.match(profileSource, /add_saved_place/);
   assert.match(profileSource, /delete_saved_place/);
-  assert.match(profileSource, /Bookmark Saved Place/);
+  assert.match(profileSource, /Save a place/);
 });
 
 test('trip workspace integrates trip sharing, pack capacity, ride rules, and rider attendance', () => {
@@ -1484,7 +1488,7 @@ test('trip workspace integrates trip sharing, pack capacity, ride rules, and rid
   assert.match(tripSource, />Share Code</);
   assert.match(tripSource, /Your Attendance RSVP/);
   assert.match(tripSource, /ATTENDANCE_STATUS_LABELS/);
-  assert.match(tripSource, /Group Ride Rules & Safety Guidelines/);
+  assert.match(tripSource, /Group ride rules/);
 });
 
 test('live ride screen integrates complete live ride statistics and touring battery saver', () => {
@@ -1493,7 +1497,7 @@ test('live ride screen integrates complete live ride statistics and touring batt
   assert.match(rideSource, /liveStats/);
   assert.match(rideSource, /statsModalVisible/);
   assert.match(rideSource, /batterySaver/);
-  assert.match(rideSource, /Live Ride Telemetry & Statistics/);
+  assert.match(rideSource, /Ride stats/);
   assert.match(rideSource, /TOURING BATTERY SAVER/);
   assert.match(rideSource, /GPS signal restored/);
 });
@@ -1588,18 +1592,18 @@ test('trip workspace exposes regroup point closure controls for trip captains', 
 test('live ride screen integrates Captain Dashboard, announcement acknowledgements, mechanical alerts, and breakdown directory', () => {
   const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
   assert.match(rideSource, /captainDashboardVisible/);
-  assert.match(rideSource, /Captain Command Dashboard/);
+  assert.match(rideSource, /Captain's view/);
   assert.match(rideSource, /acknowledgeAnnouncement/);
   assert.match(rideSource, /acknowledge_alert/);
-  assert.match(rideSource, /👍 Acknowledge/);
-  assert.match(rideSource, /✓ Acknowledged/);
+  assert.match(rideSource, /Got it/);
+  assert.match(rideSource, /Seen/);
   assert.match(rideSource, /handleCloseRegroup/);
   assert.match(rideSource, /close_regroup_point/);
   assert.match(rideSource, /broadcastPaceAdvisory/);
   assert.match(rideSource, /sendMechanicalBreakdownAlert/);
-  assert.match(rideSource, /Mechanical Breakdown Alert/);
+  assert.match(rideSource, /Report a breakdown/);
   assert.match(rideSource, /breakdownDirectoryVisible/);
-  assert.match(rideSource, /Roadside Breakdown Directory/);
+  assert.match(rideSource, /Roadside help/);
   assert.match(rideSource, /escalateEmergency/);
   assert.match(rideSource, /escalate_emergency_alert/);
 });
@@ -1737,7 +1741,9 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
   const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
 
   assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
-  assert.match(rideSource, /isStale\(position.timestamp\)\)\s*\{[^}]*return 'failed'/);
+  // Routine alerts need a fresh fix; an SOS is never blocked by GPS.
+  assert.match(rideSource, /!hasFreshFix && type !== 'emergency'\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /location_recorded_at: fix \? fix\.timestamp : null/);
   assert.match(rideSource, /if \(outcome === 'sent'\) \{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
 });
 
@@ -1886,7 +1892,7 @@ test('navigation architecture defines exactly three bottom tabs with Home as def
   assert.match(tripsSource, /Skeleton/);
   assert.match(tripsSource, /a\.status === 'active' && b\.status !== 'active'/); // Pinned live trips
   assert.match(tripsSource, /delete_trip[\s\S]*stopBackgroundLocationUpdates/);
-  assert.match(tripsSource, /leave_ride[\s\S]*stopBackgroundLocationUpdates/);
+  assert.match(tripsSource, /leaveRideSafely\(item\.id, user\.id\)/);
 });
 
 test('Home screen renders time-based greeting, default motorcycle, active trip details, and next planned trip', () => {
@@ -1932,7 +1938,7 @@ test('Trip Details renders sticky section switcher, sticky bottom action bar, da
   assert.match(tripSource, /tacticalSosBtn/);
   assert.match(tripSource, /EMERG/);
   assert.match(tripSource, /primaryRouteLauncherBtn/);
-  assert.match(tripSource, /Open Live Tracker/);
+  assert.match(tripSource, /Open live map/);
   assert.match(tripSource, /Start Tracking/);
 
   // Compact expandable participants with AvatarStack, search, and pinned roles
@@ -2014,9 +2020,9 @@ test('Trip Planner delivers 6-step full-screen flow, draft autosave, telemetry H
   assert.match(createSource, /Net Climb/);
 
   // Pass routing calibration
-  assert.match(createSource, /Prefer Technical Twisties & Passes/);
-  assert.match(createSource, /Avoid Commercial Tollways/);
-  assert.match(createSource, /Offline Vector & Radar Pack/);
+  assert.match(createSource, /Prefer twisty roads and passes/);
+  assert.match(createSource, /Avoid tolls/);
+  assert.match(createSource, /Offline maps and radar/);
 
   // Sticky bottom footer
   assert.match(createSource, /stickyFooter/);
@@ -2052,9 +2058,9 @@ test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboa
   assert.match(joinSource, /errorContainer/);
   assert.match(joinSource, /errorCard/);
   assert.match(joinSource, /Code Expired/);
-  assert.match(joinSource, /Try Another Code/);
+  assert.match(joinSource, /Try another code/);
   assert.match(joinSource, /Scan Pack QR Pass/);
-  assert.match(joinSource, /Dismiss & Return to Solo Ride Mode/);
+  assert.match(joinSource, /Back to solo ride/);
 
   // Cold-start deep link support
   assert.match(joinSource, /useLocalSearchParams/);
@@ -2105,9 +2111,9 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
   // System and sync settings list
   assert.match(profileSource, /systemSection/);
   assert.match(profileSource, /SYSTEM & SYNC/);
-  assert.match(profileSource, /Offline Topo Storage/);
+  assert.match(profileSource, /Offline topo maps/);
   assert.match(profileSource, /Emergency SOS Protocols/);
-  assert.match(profileSource, /Units & Telemetry/);
+  assert.match(profileSource, /Units/);
   assert.match(profileSource, /Cloud GPX & Telemetry Export/);
 
   // Sign out and build version footer
@@ -2172,7 +2178,7 @@ function trackingFixture({ nativeStarted = false, savedContext = null } = {}) {
       removeItem: async key => { storage.delete(key); },
     },
     '../lib/supabase': { supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } } },
-    '../lib/offlineQueue': { enqueueLocation: async () => {} },
+    '../lib/offlineQueue': { pruneQueue: async () => {}, enqueueLocation: async () => {} },
     './syncQueue': { syncQueue: async () => {} },
   })('mobile/src/services/backgroundLocation.ts');
   return { service, calls, storage, native, fix: () => listener({ coords: { latitude: 1, longitude: 2, speed: 0, heading: 0, accuracy: 5 }, timestamp: Date.now() }) };
@@ -2272,4 +2278,263 @@ test('lockfile includes Linux CSS native binaries required by CI builds', () => 
     assert.deepEqual(binary?.cpu, ['x64']);
     assert.equal(packageJson.optionalDependencies?.[name], version);
   }
+});
+
+test('Phase 1 external navigation slices multi-stop legs and builds Google/Apple Maps URLs', () => {
+  const nav = loader()('shared/navigation.ts');
+  const points = Array.from({ length: 15 }, (_, i) => ({
+    sequence: i,
+    waypoint_type: i === 0 ? 'origin' : i === 14 ? 'destination' : 'stop',
+    name: `Stop ${i}`,
+    latitude: 12 + i * 0.1,
+    longitude: 77 + i * 0.1,
+  }));
+
+  const legs = nav.sliceNavigationLegs(points, 8);
+  assert.equal(legs.length, 2);
+  assert.equal(legs[0].length, 10);
+  assert.equal(legs[1].length, 6);
+  assert.equal(legs[1][0].sequence, legs[0][legs[0].length - 1].sequence);
+
+  const directGoogle = new URL(nav.buildExternalNavUrl('google_maps', points.slice(0, 2)));
+  assert.equal(directGoogle.searchParams.get('origin'), '12,77');
+  assert.equal(directGoogle.searchParams.get('destination'), '12.1,77.1');
+  assert.equal(directGoogle.searchParams.get('waypoints'), null);
+  assert.equal(directGoogle.searchParams.get('travelmode'), 'driving');
+
+  const multiGoogle = new URL(nav.buildExternalNavUrl('google_maps', legs[0], { avoidTolls: true }));
+  assert.equal(multiGoogle.searchParams.get('avoid'), 'tolls');
+  assert.equal(multiGoogle.searchParams.get('waypoints')?.split('|').length, 8);
+
+  const appleUrl = new URL(nav.buildExternalNavUrl('apple_maps', legs[0]));
+  assert.equal(appleUrl.hostname, 'maps.apple.com');
+  assert.equal(appleUrl.searchParams.get('saddr'), '12,77');
+  assert.equal(appleUrl.searchParams.get('daddr'), '12.1,77.1');
+  assert.equal(appleUrl.searchParams.get('dirflg'), 'd');
+
+  const appleHops = nav.sliceNavigationLegsForProvider('apple_maps', points.slice(0, 4));
+  assert.equal(appleHops.length, 3);
+  assert.equal(appleHops[0].length, 2);
+  assert.equal(appleHops[1][0].sequence, 1);
+  assert.equal(appleHops[2][1].sequence, 3);
+
+  assert.throws(() => nav.sliceNavigationLegs([points[0]]), /at least 2/i);
+  assert.throws(() => nav.buildExternalNavUrl('google_maps', [{ ...points[0], latitude: 95 }, points[1]]), /invalid navigation coordinate/i);
+});
+
+test('Phase 2 classifies rider freshness and evaluates stationary off-route safety check-in', () => {
+  const live = loader()('shared/live.ts');
+  const safety = loader()('shared/safety.ts');
+  const now = Date.parse('2026-11-25T10:00:00Z');
+
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:59:00Z', now), 'live');
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:55:00Z', now), 'stale');
+  assert.equal(live.classifyRiderFreshness('2026-11-25T09:45:00Z', now), 'offline');
+  assert.equal(live.formatLastSeenAgo('2026-11-25T09:55:00Z', now), 'Last seen 5 min ago');
+
+  const waypoints = [{ latitude: 12.9716, longitude: 77.5946, waypoint_type: 'fuel' }];
+  const nearFuel = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000,
+    currentLat: 12.9717,
+    currentLng: 77.5947,
+    waypoints,
+  });
+  assert.equal(nearFuel.shouldPrompt, false);
+
+  const offRoute = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000,
+    currentLat: 13.05,
+    currentLng: 77.65,
+    waypoints,
+  });
+  assert.equal(offRoute.shouldPrompt, true);
+  assert.ok(offRoute.nearestWaypointMeters > 300);
+});
+
+test('Phase 3 ride_messages migration enforces non-recursive RLS and shared chat helpers work', async () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/031_ride_messages.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.ride_messages/i);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /public\.is_ride_participant\(ride_id, auth\.uid\(\)\)/);
+  assert.match(migration, /supabase_realtime/);
+
+  assert.ok(shared.QUICK_REPLY_PRESETS.includes('Copy'));
+  assert.ok(shared.QUICK_REPLY_PRESETS.includes('Need assistance'));
+
+  const inserted = [];
+  const client = {
+    from: table => {
+      assert.equal(table, 'ride_messages');
+      return {
+        insert: row => {
+          inserted.push(row);
+          return { select: () => ({ single: async () => ({ data: { id: 'm1', created_at: '2026-11-25T10:00:00Z', ...row }, error: null }) }) };
+        },
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({ data: [{ id: 'm2', body: 'Two' }, { id: 'm1', body: 'One' }], error: null }),
+            }),
+          }),
+        }),
+      };
+    },
+  };
+  const msg = await shared.sendRideMessage(client, { rideId: 'r1', senderId: 'u1', body: ' Copy ', messageType: 'quick_reply' });
+  assert.equal(msg.body, 'Copy');
+  assert.equal(inserted[0].message_type, 'quick_reply');
+  const list = await shared.fetchRideMessages(client, 'r1', 50);
+  assert.deepEqual(list.map(m => m.id), ['m1', 'm2']);
+});
+
+test('Phase 4 pack-minimum fuel, GPX round-trip, and daylight/ghat advisories', () => {
+  const gpxXml = shared.exportTripToGpx({
+    tripName: 'Spiti & Leh',
+    description: 'High altitude ride',
+    waypoints: [
+      { name: 'Manali', latitude: 32.2396, longitude: 77.1887, waypoint_type: 'origin', notes: 'Fuel up & check' },
+      { name: 'Kaza', latitude: 32.2276, longitude: 78.0706, waypoint_type: 'destination' },
+    ],
+    routeCoordinates: [[77.1887, 32.2396], [78.0706, 32.2276]],
+    trailCoordinates: [[77.1887, 32.2396], [77.6, 32.23], [78.0706, 32.2276]],
+  });
+  const parsed = shared.parseGpx(gpxXml);
+  assert.equal(parsed.name, 'Spiti & Leh');
+  assert.equal(parsed.waypoints.length, 2);
+  assert.equal(parsed.waypoints[0].notes, 'Fuel up & check');
+  assert.equal(parsed.routePoints.length, 2);
+  assert.equal(parsed.trackPoints.length, 3);
+
+  const malformed = shared.parseGpx(
+    '<!-- <wpt lat="10" lon="20"><name>Commented</name></wpt> -->' +
+    '<gpx><wpt lat = "999" lon="77"><name>Bad</name></wpt>' +
+    '<wpt lat="" lon="77"><name>Blank</name></wpt>' +
+    '<wpt lat = "12.9" lon = "77.5"><name>Good</name></wpt></gpx>'
+  );
+  assert.equal(malformed.waypoints.length, 1);
+  assert.equal(malformed.waypoints[0].name, 'Good');
+  assert.equal(malformed.warnings.length, 2);
+
+  const packFuel = shared.calculatePackFuelPlan([
+    { id: 'r1', displayName: 'ADV', tankLiters: 20, mileageKmPerL: 25, reserveLiters: 2 }, // 450 km
+    { id: 'r2', displayName: 'Cruiser', tankLiters: 12, mileageKmPerL: 22, reserveLiters: 2 }, // 220 km
+    { id: 'r3', displayName: 'Unconfigured' },
+  ], 500);
+  assert.equal(packFuel.limitingRider?.id, 'r2');
+  assert.equal(packFuel.limitingRider?.safeRangeKm, 220);
+  assert.equal(packFuel.fuelIntervalKm, 220);
+  assert.equal(packFuel.recommendedFuelStops, 2);
+  assert.equal(packFuel.ridersMissingSpecs.length, 1);
+
+  const ghatNight = shared.evaluateDaylightRisk('2026-11-25T08:00:00Z', 6 * 3600, '2026-11-25T16:30:00Z', 'ghat');
+  assert.equal(ghatNight.risk, 'night');
+  assert.equal(ghatNight.multiplier, 1.45);
+  assert.ok(ghatNight.advisory);
+
+  const highwayDay = shared.evaluateDaylightRisk('2026-11-25T06:00:00Z', 4 * 3600, '2026-11-25T18:00:00Z', 'highway');
+  assert.equal(highwayDay.risk, 'daylight');
+  assert.equal(highwayDay.advisory, null);
+});
+
+test('Phase 5 tier entitlements enforce Host-Unlocks-Group and server-side limits', () => {
+  const freeJoinFreeHost = shared.resolveRideEntitlements({ hostTier: 'free', userTier: 'free', hasExpeditionPass: false });
+  assert.equal(freeJoinFreeHost.effectiveTier, 'free');
+  assert.equal(freeJoinFreeHost.limits.maxTripDays, 2);
+  assert.equal(freeJoinFreeHost.limits.maxWaypointsPerTrip, 5);
+  assert.equal(freeJoinFreeHost.limits.maxParticipantsPerRide, 6);
+  assert.equal(freeJoinFreeHost.canJoinAnyRide, true);
+  assert.equal(freeJoinFreeHost.canUseSos, true);
+
+  const freeJoinProHost = shared.resolveRideEntitlements({ hostTier: 'pro_tourer', userTier: 'free', hasExpeditionPass: false });
+  assert.equal(freeJoinProHost.effectiveTier, 'pro_tourer');
+  assert.equal(freeJoinProHost.isHostUnlocked, true);
+  assert.equal(freeJoinProHost.limits.maxTripDays, null);
+  assert.equal(freeJoinProHost.limits.maxWaypointsPerTrip, 50);
+  assert.equal(freeJoinProHost.limits.supportsSpectatorLink, true);
+
+  const passUnlock = shared.resolveRideEntitlements({ hostTier: 'free', userTier: 'free', hasExpeditionPass: true });
+  assert.equal(passUnlock.effectiveTier, 'pro_tourer');
+  assert.equal(passUnlock.isHostUnlocked, true);
+
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/033_tier_enforcement.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.trip_passes/i);
+  assert.match(migration, /ride_has_pro_access\(p_ride_id uuid\)/);
+  assert.match(migration, /enforce_trip_day_limit/);
+  assert.match(migration, /enforce_participant_limit/);
+  assert.match(migration, /NOT public\.ride_has_pro_access\(lu\.ride_id\)/);
+});
+
+test('Phase 6 spectator links migration enforces Pro gating and zero-PII public snapshot', () => {
+  const migration = fs.readFileSync(path.resolve('supabase/migrations/034_spectator_links.sql'), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.ride_share_links/i);
+  assert.match(migration, /public\.ride_has_pro_access\(ride_id\)/);
+  assert.match(migration, /get_public_ride_snapshot\(p_token text\)/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.get_public_ride_snapshot\(text\) TO anon, authenticated/);
+  assert.doesNotMatch(migration, /emergency_contact|blood_group|ride_messages|ride_code/i);
+
+  const trackPage = fs.readFileSync(path.resolve('web/src/app/track/[token]/track-view.tsx'), 'utf8');
+  assert.match(trackPage, /get_public_ride_snapshot/);
+  assert.match(trackPage, /Link expired or revoked/);
+});
+
+test('a rider stopped on the planned road between sparse stops is not treated as off-route', () => {
+  const safety = loader()('shared/safety.ts');
+  const waypoints = [
+    { latitude: 12.97, longitude: 77.59, waypoint_type: 'origin' },
+    { latitude: 13.34, longitude: 77.12, waypoint_type: 'destination' },
+  ];
+  const route = [[77.59, 12.97], [77.355, 13.155], [77.12, 13.34]];
+  // Midway along the road, tens of km from either waypoint.
+  const onRoad = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000, currentLat: 13.155, currentLng: 77.355, waypoints, routeCoordinates: route,
+  });
+  assert.equal(onRoad.shouldPrompt, false);
+  assert.ok(onRoad.routeDistanceMeters < 50);
+  const offRoad = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000, currentLat: 13.155, currentLng: 77.45, waypoints, routeCoordinates: route,
+  });
+  assert.equal(offRoad.shouldPrompt, true);
+});
+
+test('alerts the server will never accept are dropped; network failures stay queued', async () => {
+  const deleted = [];
+  const alerts = [
+    { id: 'rejected', user_id: 'u', ride_id: 'left-ride' },
+    { id: 'network', user_id: 'u', ride_id: 'r' },
+  ];
+  const service = loader({
+    '../lib/supabase': { supabase: {
+      auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) },
+      from: () => ({ upsert: async row => Array.isArray(row)
+        ? { error: { message: 'batch failed', code: '42501' } }
+        : row.id === 'rejected'
+          ? { error: { message: 'new row violates row-level security policy', code: '42501' } }
+          : { error: { message: 'Network request failed', code: '' } } }),
+      rpc: async () => ({ data: 0, error: null }),
+    } },
+    '../lib/offlineQueue': {
+      pruneQueue: async () => {},
+      getQueueCounts: async () => ({ locations: 0, alerts: alerts.length }),
+      getQueuedAlerts: async () => alerts,
+      getQueuedLocations: async () => [],
+      clearQueuedItems: async (_user, ids) => { deleted.push(...ids); },
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await assert.rejects(service.syncQueue(), /Some alerts remain queued: Network request failed/);
+  assert.deepEqual(deleted, ['rejected']);
+});
+
+test('SOS pushes are never throttled and other alerts throttle only against the same type', () => {
+  const fn = fs.readFileSync(path.resolve('supabase/functions/notify-ride-alert/index.ts'), 'utf8');
+  assert.match(fn, /if \(!emergency\) \{[\s\S]*isLocalRateLimited[\s\S]*\.eq\('type', alert\.type\)/);
+  assert.doesNotMatch(fn, /emergency \? 5_000/);
+});
+
+test('safety migration closes the review findings', () => {
+  const sql = fs.readFileSync(path.resolve('supabase/migrations/036_safety_and_access_fixes.sql'), 'utf8');
+  assert.match(sql, /keep_ride_message_identity/);
+  assert.match(sql, /FUNCTION public\.get_trip_stages[\s\S]*is_ride_participant\(p_ride_id, auth\.uid\(\)\)/);
+  assert.match(sql, /type = 'emergency' AND lat IS NULL AND lng IS NULL/);
+  assert.match(sql, /ALTER COLUMN token SET DEFAULT/);
+  assert.match(sql, /FUNCTION public\.get_ride_fuel_specs/);
 });

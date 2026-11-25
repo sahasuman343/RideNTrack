@@ -1,5 +1,18 @@
 import { supabase } from '../lib/supabase';
-import { getQueueCounts, getQueuedAlerts, getQueuedLocations, clearQueuedItems } from '../lib/offlineQueue';
+import { getQueueCounts, getQueuedAlerts, getQueuedLocations, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
+
+// Queued items older than this are not useful to the group and would only
+// grow the device database on a phone that stays offline for weeks.
+const MAX_QUEUE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A Postgres error in class 22 (bad data), 23 (constraint) or 42 (permission /
+ * RLS) will fail the same way on every retry, e.g. an alert queued just before
+ * the rider left the ride. Network and server errors are worth retrying.
+ */
+function isPermanentRejection(error: { code?: string | null } | null | undefined) {
+  return Boolean(error?.code && /^(22|23|42)/.test(error.code));
+}
 
 let running: Promise<void> | null = null;
 const LOCATION_BATCH_SIZE = 100;
@@ -17,6 +30,7 @@ async function flush() {
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const userId = sessionRes?.data?.session?.user.id;
   if (!userId) return;
+  await pruneQueue(MAX_QUEUE_AGE_MS).catch(() => {});
   const counts = await getQueueCounts(userId);
   if (counts.locations === 0 && counts.alerts === 0) return;
 
@@ -40,6 +54,12 @@ async function flush() {
           ignoreDuplicates: true,
         });
         if (result.error) {
+          if (isPermanentRejection(result.error)) {
+            // Retrying forever would keep the "alerts remain queued" banner up
+            // and block nothing useful; the server will never accept it.
+            await clearQueuedItems(userId, [alert.id]);
+            continue;
+          }
           firstError ||= result.error.message;
           continue;
         }

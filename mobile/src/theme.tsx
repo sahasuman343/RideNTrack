@@ -165,6 +165,19 @@ export const radius = {
   round: 9999, // avatars and status dots only
 } as const;
 
+/**
+ * Motion tokens. Sheets and presses use springs so they settle the way a
+ * physical object does; exits are quicker than entrances so the UI never
+ * makes a rider wait on an animation.
+ */
+export const motion = {
+  sheetIn: { damping: 26, stiffness: 280, mass: 0.9, overshootClamping: true },
+  sheetOutMs: 170,
+  pressIn: { speed: 50, bounciness: 0 },
+  pressOut: { speed: 24, bounciness: 6 },
+  pressScale: 0.97,
+} as const;
+
 export type ElevationLevel = 'none' | 'floating' | 'overlay' | 'sheet';
 
 /**

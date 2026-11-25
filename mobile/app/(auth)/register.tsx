@@ -46,7 +46,7 @@ export default function RegisterScreen() {
             resizeMode="contain"
           />
           <Text style={styles.kicker}>THE ROAD IS BETTER TOGETHER</Text><Text style={styles.logo}>RideNTrack</Text>
-          <Text style={styles.subtitle}>Join the Community</Text>
+          <Text style={styles.subtitle}>Join the community</Text>
         </View>
 
         <View style={styles.form}>

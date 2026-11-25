@@ -20,9 +20,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   buildGoogleMapsNavigationUrl,
+  type ExternalNavProvider,
+  type RoutePoint,
   type TripStage,
   type StageStatus,
   calculateMotorcycleFuelPlan,
+  calculatePackFuelPlan,
+  evaluateDaylightRisk,
   generateTouringAdvisories,
   getWeatherConditionFromCode,
   type RouteWeatherPoint,
@@ -46,7 +50,15 @@ import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import { saveCachedTrip, getCachedTrip, clearCachedTrip } from '../../src/lib/tripCache';
+import {
+  formatNavProviderLabel,
+  getDefaultNavProvider,
+  getPreferredNavProvider,
+  openExternalNavLeg,
+  setPreferredNavProvider,
+} from '../../src/lib/externalNav';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { leaveRideSafely } from '../../src/services/leaveRide';
 import {
   Avatar,
   AvatarStack,
@@ -57,6 +69,7 @@ import {
   LiveDot,
   RouteLine,
   StatusBadge,
+  SheetModal,
 } from '../../src/components/ui';
 import { ATTENDANCE_ICONS, CHECKLIST_ICONS, EXPENSE_ICONS, ROLE_ICONS, weatherIcon } from '../../src/icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -121,6 +134,13 @@ type Regroup = {
   closed_at?: string | null;
 };
 
+type RiderFuelSpec = {
+  user_id: string;
+  display_name: string;
+  fuel_tank_capacity_liters: number | string | null;
+  mileage_km_per_liter: number | string | null;
+  fuel_reserve_liters: number | string | null;
+};
 type Rider = {
   user_id: string;
   display_name: string;
@@ -156,7 +176,35 @@ export default function TripWorkspaceScreen() {
   const [days, setDays] = useState<Day[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
   const [stages, setStages] = useState<TripStage[]>([]);
+  const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
+  const [navLegIndex, setNavLegIndex] = useState(0);
+  const [navLegCount, setNavLegCount] = useState(1);
+
+  useEffect(() => {
+    void getPreferredNavProvider().then(setNavProvider);
+  }, []);
+
+  async function toggleNavProvider() {
+    const next: ExternalNavProvider = navProvider === 'google_maps' ? 'apple_maps' : 'google_maps';
+    setNavProvider(next);
+    setNavLegIndex(0);
+    setNavLegCount(1);
+    await setPreferredNavProvider(next);
+  }
+
+  async function navigateLeg(points: RoutePoint[], legIndex = 0, trackState = false) {
+    try {
+      const res = await openExternalNavLeg(points, navProvider, { legIndex });
+      if (trackState) {
+        setNavLegCount(res.legCount);
+        setNavLegIndex(res.legIndex);
+      }
+    } catch (e: any) {
+      Alert.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
+    }
+  }
   const [roster, setRoster] = useState<Rider[]>([]);
+  const [fuelSpecs, setFuelSpecs] = useState<Record<string, RiderFuelSpec>>({});
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<RideParticipantRole>('member');
@@ -288,13 +336,81 @@ export default function TripWorkspaceScreen() {
     });
   }, [trip?.estimated_distance_meters, profile]);
 
+  const packFuelPlan = useMemo(() => {
+    const distKm = (trip?.estimated_distance_meters || 0) / 1000;
+    return calculatePackFuelPlan(
+      roster.map(r => {
+        // Your own profile is freshest; other riders come from the ride's fuel specs.
+        const own = r.user_id === user?.id;
+        const spec = fuelSpecs[r.user_id];
+        const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+        return {
+          id: r.user_id,
+          displayName: r.display_name,
+          tankLiters: own ? profile?.fuel_tank_capacity_liters : num(spec?.fuel_tank_capacity_liters),
+          mileageKmPerL: own ? profile?.mileage_km_per_liter : num(spec?.mileage_km_per_liter),
+          reserveLiters: own ? profile?.fuel_reserve_liters : num(spec?.fuel_reserve_liters),
+        };
+      }),
+      distKm,
+    );
+  }, [trip?.estimated_distance_meters, roster, fuelSpecs, user?.id, profile]);
+
   const advisories = useMemo(() => {
-    return generateTouringAdvisories({
+    const base = generateTouringAdvisories({
       distanceMeters: trip?.estimated_distance_meters || 0,
       fuelPlan,
       weatherPoints,
     });
-  }, [trip?.estimated_distance_meters, fuelPlan, weatherPoints]);
+    if (trip?.start_date && trip?.estimated_duration_seconds) {
+      // Judge each riding day against its own departure and sunset. A
+      // multi-day trip is not one 07:00 start with the whole route in a day.
+      const terrain = trip.trip_type === 'expedition' ? 'ghat' : 'mixed';
+      const startMs = Date.parse(`${trip.start_date.slice(0, 10)}T00:00:00`);
+      const dayDurations = new Map<number, number>();
+      for (const stage of stages) {
+        const day = stage.day_number || 1;
+        const secs = Number(stage.estimated_duration_seconds) || 0;
+        if (secs > 0) dayDurations.set(day, (dayDurations.get(day) || 0) + secs);
+      }
+      if (dayDurations.size === 0) {
+        const endMs = trip.end_date ? Date.parse(`${trip.end_date.slice(0, 10)}T00:00:00`) : startMs;
+        const dayCount = Math.max(1, days.length, Number.isFinite(endMs) ? Math.round((endMs - startMs) / 86_400_000) + 1 : 1);
+        for (let d = 1; d <= dayCount; d++) dayDurations.set(d, trip.estimated_duration_seconds / dayCount);
+      }
+      for (const [dayNumber, secs] of [...dayDurations.entries()].sort((a, b) => a[0] - b[0])) {
+        const dayStart = new Date(startMs + (dayNumber - 1) * 86_400_000);
+        const ymd = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
+        const daylight = evaluateDaylightRisk(
+          new Date(`${ymd}T07:00:00`).toISOString(), secs, new Date(`${ymd}T18:00:00`).toISOString(), terrain,
+        );
+        if (daylight.advisory) {
+          base.unshift(dayDurations.size > 1
+            ? { ...daylight.advisory, title: `Day ${dayNumber}: ${daylight.advisory.title}` }
+            : daylight.advisory);
+          break;
+        }
+      }
+    }
+    if (packFuelPlan.limitingRider && packFuelPlan.recommendedFuelStops !== null) {
+      const missingCount = packFuelPlan.ridersMissingSpecs.length;
+      const missingNames = packFuelPlan.ridersMissingSpecs
+        .slice(0, 3)
+        .map(r => r.displayName)
+        .join(', ');
+      base.unshift({
+        type: 'fuel',
+        level: missingCount > 0 ? 'caution' : 'info',
+        title: missingCount > 0
+          ? `Partial Pack Fuel Cadence: Every ${packFuelPlan.fuelIntervalKm} km`
+          : `Pack Fuel Cadence: Every ${packFuelPlan.fuelIntervalKm} km`,
+        description: missingCount > 0
+          ? `Based on ${packFuelPlan.ridersWithSpecs}/${packFuelPlan.ridersWithSpecs + missingCount} rider(s) (${packFuelPlan.limitingRider.displayName}: ${packFuelPlan.limitingRider.safeRangeKm} km). Missing bike specs for: ${missingNames}${missingCount > 3 ? ` +${missingCount - 3} more` : ''}.`
+          : `Limited by ${packFuelPlan.limitingRider.displayName} (${packFuelPlan.limitingRider.safeRangeKm} km safe range) · ${packFuelPlan.recommendedFuelStops} stop(s) needed.`,
+      });
+    }
+    return base;
+  }, [trip?.estimated_distance_meters, trip?.start_date, trip?.end_date, trip?.estimated_duration_seconds, trip?.trip_type, stages, days, fuelPlan, weatherPoints, packFuelPlan]);
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -333,6 +449,12 @@ export default function TripWorkspaceScreen() {
       setStays((stayResult.data || []) as Stay[]);
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
+      // Fuel specs of every active rider, so the pack plan reflects the bike
+      // with the shortest range, not just this phone's owner. Best effort.
+      void supabase.rpc('get_ride_fuel_specs', { p_ride_id: id }).then(({ data }) => {
+        if (!Array.isArray(data)) return;
+        setFuelSpecs(Object.fromEntries((data as RiderFuelSpec[]).map(spec => [spec.user_id, spec])));
+      });
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       const list = expensesResult.error ? null : expensesResult.data as TripExpense[] | null;
       const summary = expenseSummaryResult.error ? null : expenseSummaryResult.data as TripExpenseSummary | null;
@@ -761,9 +883,8 @@ export default function TripWorkspaceScreen() {
     if (!trip || isAdmin) return;
     setSaving(true); setError('');
     try {
-      const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
-      if (leaveError) throw leaveError;
-      await stopBackgroundLocationUpdates(id).catch(() => {});
+      if (!user?.id) throw new Error('Sign in again to leave this ride.');
+      await leaveRideSafely(id, user.id);
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not leave this ride.');
@@ -1094,7 +1215,7 @@ export default function TripWorkspaceScreen() {
       const { error: closeError } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
       if (closeError) throw closeError;
       await load();
-      Alert.alert('Regroup Point Closed', 'The regroup point has been closed and the pack notified.');
+      Alert.alert('Regroup point closed', 'The regroup point has been closed and the pack notified.');
     } catch (e: any) { setError(e?.message || 'Could not close regroup point.'); }
     finally { setSaving(false); }
   }
@@ -1254,13 +1375,37 @@ export default function TripWorkspaceScreen() {
         {!!stage.notes && (
           <Text style={styles.stageNotes}>{stage.notes}</Text>
         )}
-        {isAdmin && (
-          <View style={styles.stageActions}>
+        <View style={styles.stageActions}>
+          <TouchableOpacity
+            style={styles.linkRow}
+            onPress={() =>
+              void navigateLeg([
+                {
+                  sequence: 0,
+                  waypoint_type: 'origin',
+                  name: stage.start_name,
+                  latitude: stage.start_coords[1],
+                  longitude: stage.start_coords[0],
+                },
+                {
+                  sequence: 1,
+                  waypoint_type: 'destination',
+                  name: stage.destination_name,
+                  latitude: stage.destination_coords[1],
+                  longitude: stage.destination_coords[0],
+                },
+              ])
+            }
+          >
+            <Icon name="navigate-outline" size="xs" color={theme.accent} />
+            <Text style={styles.linkText}>Navigate Leg ({formatNavProviderLabel(navProvider)})</Text>
+          </TouchableOpacity>
+          {isAdmin && (
             <TouchableOpacity onPress={() => confirmDeleteStage(stage.id, stage.name)}>
               <Text style={styles.remove}>Remove stage</Text>
             </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </View>
       </View>
     );
   }
@@ -1673,13 +1818,45 @@ export default function TripWorkspaceScreen() {
                 const nextStop = waypoints.find(point => point.waypoint_type !== 'origin');
                 if (!nextStop) return null;
                 return (
-                  <TouchableOpacity
-                    style={styles.navigateNextBtn}
-                    onPress={() => void openDirections(nextStop)}
-                  >
-                    <Icon name="navigate-outline" size="sm" color={theme.accent} />
-                    <Text style={styles.navigateNextBtnText} numberOfLines={1}>Navigate to next stop: {nextStop.name}</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.sm, flexWrap: 'wrap' }}>
+                    <TouchableOpacity
+                      style={[styles.navigateNextBtn, { flex: 1, marginVertical: 0 }]}
+                      onPress={() => {
+                        if (waypoints.length >= 2) {
+                          void navigateLeg(waypoints as unknown as RoutePoint[], navLegIndex, true);
+                        } else {
+                          void openDirections(nextStop);
+                        }
+                      }}
+                    >
+                      <Icon name="navigate-outline" size="sm" color={theme.accent} />
+                      <Text style={styles.navigateNextBtnText} numberOfLines={1}>
+                        Navigate to next stop: {nextStop.name}
+                      </Text>
+                    </TouchableOpacity>
+                    {navLegCount > 1 && (
+                      <TouchableOpacity
+                        style={[styles.navigateNextBtn, { marginVertical: 0, paddingHorizontal: spacing.md }]}
+                        onPress={() => {
+                          const nextIdx = (navLegIndex + 1) % navLegCount;
+                          setNavLegIndex(nextIdx);
+                          void navigateLeg(waypoints as unknown as RoutePoint[], nextIdx, true);
+                        }}
+                        accessibilityLabel="Next navigation leg"
+                      >
+                        <Text style={styles.navigateNextBtnText}>
+                          Leg {navLegIndex + 1}/{navLegCount} ▸
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.navigateNextBtn, { marginVertical: 0, paddingHorizontal: spacing.md }]}
+                      onPress={() => void toggleNavProvider()}
+                      accessibilityLabel="Switch external maps app"
+                    >
+                      <Text style={styles.navigateNextBtnText}>{formatNavProviderLabel(navProvider)}</Text>
+                    </TouchableOpacity>
+                  </View>
                 );
               })()}
 
@@ -1730,7 +1907,18 @@ export default function TripWorkspaceScreen() {
                         {/* Stops in this day */}
                         {dayWaypoints.length > 0 && (
                           <View style={{ marginTop: 8 }}>
-                            <Text style={styles.stageSectionHeader}>PLANNED STOPS ({dayWaypoints.length})</Text>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={styles.stageSectionHeader}>PLANNED STOPS ({dayWaypoints.length})</Text>
+                              {dayWaypoints.length >= 2 && (
+                                <TouchableOpacity
+                                  style={styles.linkRow}
+                                  onPress={() => void navigateLeg(dayWaypoints as unknown as RoutePoint[])}
+                                >
+                                  <Icon name="navigate-outline" size="xs" color={theme.accent} />
+                                  <Text style={styles.linkText}>Navigate Leg</Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
                             {dayWaypoints.map(wp => (
                               <View key={wp.id} style={styles.dayStopRow}>
                                 <Text style={styles.dayStopText}>
@@ -1834,7 +2022,7 @@ export default function TripWorkspaceScreen() {
 
             {/* Camp & Safety Manifest / Accommodation */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Camp & Safety Manifest</Text>
+              <Text style={styles.sectionTitle}>Stays</Text>
               {stays.length === 0 ? (
                 <Text style={styles.muted}>No accommodation added yet.</Text>
               ) : (
@@ -1874,7 +2062,7 @@ export default function TripWorkspaceScreen() {
 
             {/* Touring Intelligence & Motorcycle Fuel */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Touring Intelligence & Motorcycle Fuel</Text>
+              <Text style={styles.sectionTitle}>Fuel and touring notes</Text>
 
               <View style={styles.intelBlock}>
                 <Text style={styles.intelTitle}>
@@ -1905,7 +2093,7 @@ export default function TripWorkspaceScreen() {
               </View>
 
               <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                <Text style={styles.intelTitle}>Route Weather Forecast</Text>
+                <Text style={styles.intelTitle}>Weather on the route</Text>
                 {weatherLoading && weatherPoints.length === 0 ? (
                   <ActivityIndicator size="small" color={theme.accent} style={{ marginVertical: 8 }} />
                 ) : weatherPoints.length === 0 ? (
@@ -1932,7 +2120,7 @@ export default function TripWorkspaceScreen() {
 
               {advisories.length > 0 && (
                 <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                  <Text style={styles.intelTitle}>Touring Advisories & Safety</Text>
+                  <Text style={styles.intelTitle}>Before you ride</Text>
                   {advisories.map((adv, idx) => (
                     <View
                       key={idx}
@@ -1981,9 +2169,32 @@ export default function TripWorkspaceScreen() {
                           <Text style={[styles.checklistTitle, item.my_completed && styles.checklistTitleDone]}>{item.title}</Text>
                         </View>
                         {!!item.description && <Text style={styles.mutedSmall}>{item.description}</Text>}
-                        <Text style={[styles.mutedSmall, { fontSize: 10, marginTop: 2, color: theme.accent }]}>
-                          {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs }}>
+                          <Text style={[styles.mutedSmall, { fontSize: typography.labelCaps.fontSize, color: theme.accent }]}>
+                            {item.completed_count} rider{item.completed_count === 1 ? '' : 's'} verified
+                            {item.assigned_to_user_id ? ` · Claimed by ${roster.find(r => r.user_id === item.assigned_to_user_id)?.display_name || 'rider'}` : ''}
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.smallButton}
+                            onPress={() => {
+                              const assignSelf = item.assigned_to_user_id !== user?.id;
+                              void supabase.rpc('claim_trip_checklist_item', {
+                                p_checklist_id: item.id,
+                                p_assign_to_self: assignSelf,
+                              }).then(({ error: rpcErr }) => {
+                                if (rpcErr) {
+                                  Alert.alert('Could not update gear claim', rpcErr.message || 'Please try again.');
+                                  return;
+                                }
+                                setChecklists(prev => prev.map(c => c.id === item.id ? { ...c, assigned_to_user_id: assignSelf ? user?.id ?? null : null } : c));
+                              });
+                            }}
+                          >
+                            <Text style={styles.smallButtonText}>
+                              {item.assigned_to_user_id === user?.id ? 'Unclaim' : 'Claim'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </TouchableOpacity>
                   );
@@ -2047,7 +2258,7 @@ export default function TripWorkspaceScreen() {
             {/* Trip Expenses & Bill Splitting */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>Trip Expenses & Splitting</Text>
+                <Text style={styles.sectionTitle}>Expenses</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={() => {
                   const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
                   setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
@@ -2151,7 +2362,7 @@ export default function TripWorkspaceScreen() {
             {/* Ride Journal & Travel Memories */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>Ride Journal & Memories</Text>
+                <Text style={styles.sectionTitle}>Ride journal</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={openJournalEditor}>
                   <Text style={styles.smallButtonText}>{journalEntry ? 'Edit journal' : 'Add entry'}</Text>
                 </TouchableOpacity>
@@ -2195,13 +2406,13 @@ export default function TripWorkspaceScreen() {
               )}
 
               <TouchableOpacity style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]} onPress={() => void shareRideCard()}>
-                <Text style={styles.secondaryText}>Share Ride Card (WhatsApp / Instagram)</Text>
+                <Text style={styles.secondaryText}>Share ride card</Text>
               </TouchableOpacity>
             </Card>
 
             {/* Share Group Ride & Ride Code */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Share Group Ride & Access</Text>
+              <Text style={styles.sectionTitle}>Invite riders</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.surfaceRaised, padding: 12, borderRadius: 10 }}>
                 <View>
                   <Text style={styles.mutedSmall}>RIDE CODE</Text>
@@ -2268,7 +2479,7 @@ export default function TripWorkspaceScreen() {
             style={styles.tacticalSosBtn}
             onPress={() => {
               Alert.alert(
-                'Open Emergency Controls?',
+                'Open emergency options?',
                 `Access live emergency SOS and distress beacon controls for "${trip.name}"?`,
                 [
                   { text: 'Cancel', style: 'cancel' },
@@ -2287,12 +2498,12 @@ export default function TripWorkspaceScreen() {
             style={styles.primaryRouteLauncherBtn}
             onPress={() => router.push('/ride/' + trip.id)}
             accessibilityRole="button"
-            accessibilityLabel={isTripOngoing ? 'Open Live Tracker' : 'Start Tracking'}
+            accessibilityLabel={isTripOngoing ? 'Open live map' : 'Start Tracking'}
           >
             <View style={styles.routeLauncherLeft}>
               <LiveDot pulse={isTripOngoing} size={10} />
               <Text style={styles.primaryRouteLauncherText}>
-                {isTripOngoing ? 'Open Live Tracker' : 'Start Tracking'}
+                {isTripOngoing ? 'Open live map' : 'Start Tracking'}
               </Text>
             </View>
             <Icon name="arrow-forward" size="lg" color={theme.onAccent} />
@@ -2301,10 +2512,9 @@ export default function TripWorkspaceScreen() {
       </View>
 
       {/* Modals: Stage, Edit Trip, Journal, Role, Expense */}
-      <Modal visible={stageModalVisible} transparent animationType="slide" onRequestClose={() => setStageModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={stageModalVisible} onRequestClose={() => setStageModalVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Add Riding Stage</Text>
+            <Text style={styles.sectionTitle}>Add stage</Text>
             <Text style={styles.mutedSmall}>Divide this day's ride into a focused stage with start and finish milestones.</Text>
             
             <Text style={styles.label}>Stage Name *</Text>
@@ -2334,17 +2544,15 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={stageNotes} onChangeText={setStageNotes} placeholder="e.g. Steep descent, hairpins, beware of oncoming buses" placeholderTextColor={theme.subtle} multiline />
 
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveStage()}>
-              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save Riding Stage'}</Text>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save stage'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setStageModalVisible(false)}>
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={editTripVisible} transparent animationType="slide" onRequestClose={() => setEditTripVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={editTripVisible} onRequestClose={() => setEditTripVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>Edit trip details</Text>
             <Text style={styles.mutedSmall}>You can update the plan even after the ride has started. Changes are saved to the shared trip.</Text>
@@ -2353,7 +2561,7 @@ export default function TripWorkspaceScreen() {
             <Text style={styles.label}>Description</Text>
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
 
-            <Text style={styles.label}>Access & Visibility</Text>
+            <Text style={styles.label}>Who can join</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
               {[
                 { key: 'private', label: 'Private' },
@@ -2370,7 +2578,7 @@ export default function TripWorkspaceScreen() {
               ))}
             </View>
 
-            <Text style={styles.label}>Maximum Pack Capacity (riders)</Text>
+            <Text style={styles.label}>Maximum riders</Text>
             <TextInput
               style={styles.input}
               value={editMaxParticipants}
@@ -2380,7 +2588,7 @@ export default function TripWorkspaceScreen() {
               placeholderTextColor={theme.subtle}
             />
 
-            <Text style={styles.label}>Group Ride Rules & Safety Guidelines</Text>
+            <Text style={styles.label}>Group ride rules</Text>
             <TextInput
               style={[styles.input, { height: 80 }]}
               value={editRideRules}
@@ -2392,13 +2600,11 @@ export default function TripWorkspaceScreen() {
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={journalModalVisible} transparent animationType="slide" onRequestClose={() => setJournalModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={journalModalVisible} onRequestClose={() => setJournalModalVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Trip Journal & Photos</Text>
+            <Text style={styles.sectionTitle}>Journal and photos</Text>
             <Text style={styles.mutedSmall}>Preserve your personal memories, road observations, and photo links for this tour.</Text>
             <Text style={styles.label}>Journal title</Text>
             <TextInput style={styles.input} value={journalTitle} onChangeText={setJournalTitle} placeholder="e.g. Monsoon Ghats Ride" placeholderTextColor={theme.subtle} />
@@ -2439,14 +2645,12 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Role Management Modal */}
-      <Modal visible={riderRoleModalVisible} transparent animationType="slide" onRequestClose={() => setRiderRoleModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={riderRoleModalVisible} onRequestClose={() => setRiderRoleModalVisible(false)}>
           <View style={styles.editModal}>
-            <Text style={styles.sectionTitle}>Manage Rider Role</Text>
+            <Text style={styles.sectionTitle}>Rider role</Text>
             {selectedRider && (
               <>
                 <Text style={styles.pointName}>{selectedRider.display_name}</Text>
@@ -2477,7 +2681,7 @@ export default function TripWorkspaceScreen() {
                   ))}
                 </View>
 
-                <Text style={[styles.label, { marginTop: 10 }]}>Update Attendance Status</Text>
+                <Text style={[styles.label, { marginTop: 10 }]}>Update attendance</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
                   {(['confirmed', 'tentative', 'declined', 'attended'] as const).map(att => {
                     const isSel = (selectedRider.attendance_status || 'confirmed') === att;
@@ -2506,7 +2710,7 @@ export default function TripWorkspaceScreen() {
                   disabled={saving}
                   onPress={() => void transferLeadership(selectedRider)}
                 >
-                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>Transfer Captain Role</Text>
+                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>Make captain</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -2523,14 +2727,12 @@ export default function TripWorkspaceScreen() {
               </>
             )}
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Add Expense Modal */}
-      <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={expenseModal} onRequestClose={() => setExpenseModal(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Add Trip Expense</Text>
+            <Text style={styles.sectionTitle}>Add expense</Text>
             <Text style={styles.mutedSmall}>Log group spending and split equally among selected riders.</Text>
 
             <Text style={styles.label}>Expense Title *</Text>
@@ -2603,8 +2805,7 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {!!error && <Text style={styles.error}>{error}</Text>}
     </View>
@@ -2877,7 +3078,6 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   input: { backgroundColor: c.background, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 11, color: c.text, marginTop: 6, fontSize: 13 },
   row: { flexDirection: 'row', gap: 10 },
   half: { flex: 1 },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' },
   editModal: { maxHeight: '90%', backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
   smallButton: { borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6 },
   smallButtonText: { color: c.accent, fontSize: 10, fontWeight: '700' },

@@ -75,3 +75,12 @@ export async function getQueueCounts(userId: string) {
   const rows = await (await getDatabase()).getAllAsync<{ kind: string; count: number }>('SELECT kind, count(*) AS count FROM queue WHERE user_id = ? GROUP BY kind', userId);
   return { locations: rows.find(r => r.kind === 'location')?.count || 0, alerts: rows.find(r => r.kind === 'alert')?.count || 0 };
 }
+export async function getQueuedCountForRide(userId: string, rideId: string) {
+  const row = await (await getDatabase()).getFirstAsync<{ count: number }>('SELECT count(*) AS count FROM queue WHERE user_id = ? AND ride_id = ?', userId, rideId);
+  return row?.count || 0;
+}
+/** Drop queued items older than maxAgeMs so a phone offline for weeks cannot grow the queue forever. */
+export async function pruneQueue(maxAgeMs: number) {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  await (await getDatabase()).runAsync('DELETE FROM queue WHERE created_at < ?', cutoff);
+}

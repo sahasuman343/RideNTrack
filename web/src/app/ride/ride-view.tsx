@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { type Ride, type LocationUpdate, type Alert, ALERT_LABELS, mergeAlerts, isStale, watchRide, type Connection } from '@ridentrack/shared';
+import { type Ride, type LocationUpdate, type Alert, type RideMessage, QUICK_REPLY_PRESETS, ALERT_LABELS, mergeAlerts, isStale, watchRide, fetchRideMessages, sendRideMessage, type Connection } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import './ride.css';
 const RideMap = dynamic(() => import('@/components/ride-map'), { ssr: false, loading: () => <div className="ride-loading">Loading map…</div> });
@@ -18,6 +18,9 @@ function RideSession({ rideId }: { rideId: string | null }) {
   const [ride, setRide] = useState<Ride | null>(null);
   const [riders, setRiders] = useState<LocationUpdate[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [messages, setMessages] = useState<RideMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [connection, setConnection] = useState<Connection>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
@@ -39,8 +42,31 @@ function RideSession({ rideId }: { rideId: string | null }) {
       if (cancelled) return;
       if (error) throw error;
       if (!session) { router.replace('/login'); return; }
-      feed = watchRide(supabase, rideId, session.user.id, { ride: setRide, locations: setRiders,
-        alerts: incoming => setAlerts(previous => mergeAlerts(previous,incoming)), connection: setConnection, error: setError });
+      setCurrentUserId(session.user.id);
+      const mergeMsgs = (prev: RideMessage[], incoming: RideMessage[]) => {
+        const byId = new Map<string, RideMessage>();
+        for (const m of prev) byId.set(m.id, m);
+        for (const m of incoming) {
+          const existing = byId.get(m.id);
+          byId.set(m.id, existing ? { ...existing, ...m } : m);
+        }
+        return [...byId.values()].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+      };
+      void fetchRideMessages(supabase, rideId, 50)
+        .then(history => {
+          if (!cancelled) setMessages(previous => mergeMsgs(previous, history));
+        })
+        .catch(() => {});
+      feed = watchRide(supabase, rideId, session.user.id, {
+        ride: setRide,
+        locations: setRiders,
+        alerts: incoming => setAlerts(previous => mergeAlerts(previous,incoming)),
+        onMessage: msg => {
+          if (!cancelled) setMessages(previous => mergeMsgs(previous, [msg]));
+        },
+        connection: setConnection,
+        error: setError,
+      });
     };
     void start().catch(e => { if (!cancelled) setError(e.message); });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -82,6 +108,39 @@ function RideSession({ rideId }: { rideId: string | null }) {
         <button className="mobile-panel-toggle" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}><span className="panel-handle" /><span>{liveCount} live · {riders.length} on map <b>{expanded ? '⌄' : '⌃'}</b></span></button>
         <div className="panel-intro"><div className="section-heading"><span className="eyebrow">RIDE OVERVIEW</span><span className={'ride-status ' + ride.status}>{ride.status}</span></div><h2>Every rider.<br />One adventure.</h2><div className="route-stops"><div><span className="stop-dot origin" /><span><small>STARTING POINT</small><strong>{ride.origin}</strong></span></div><div><span className="stop-dot destination" /><span><small>DESTINATION</small><strong>{ride.destination}</strong></span></div></div><button className="invite-code" onClick={() => void copyCode()} aria-label="Copy ride invitation code"><span>RIDE CODE</span><strong>{ride.ride_code}</strong><span>{copied ? 'Copied ✓' : 'Copy ↗'}</span></button></div>
         <div className="rider-section"><div className="section-heading"><h3>Your group <span>{riders.length}</span></h3><span className="live-label">{liveCount} live</span></div><label className="rider-search"><span>⌕</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a rider" aria-label="Find a rider" /></label><div className="rider-list">{shown.map(p => { const stale = isStale(p.timestamp,now); return <button key={p.user_id} className={'rider-row ' + (selected === p.user_id ? 'selected' : '')} onClick={() => setSelected(p.user_id)} aria-pressed={selected === p.user_id}><span className={'rider-avatar ' + (stale ? 'is-stale' : '')}>{p.display_name.slice(0,2).toUpperCase()}<i /></span><span className="rider-detail"><strong>{p.display_name}</strong><small>{stale ? 'Last seen ' + Math.max(1,Math.floor((now-Date.parse(p.timestamp))/60000)) + 'm ago' : 'Sharing location'}</small></span><span className="rider-speed">{stale ? '—' : Math.round(p.speed*3.6)}<small>km/h</small></span></button>; })}{!shown.length && <div className="rider-empty">{query ? 'No riders match your search.' : 'Waiting for rider locations. Open the mobile app and start the ride to appear here.'}</div>}</div></div>
+        <div className="chat-section">
+          <div className="section-heading"><h3>Trip chat <span>{messages.length}</span></h3></div>
+          <div className="chat-list">
+            {messages.slice(-20).map(m => (
+              <div key={m.id} className={'chat-msg ' + (m.sender_id === currentUserId ? 'is-mine' : '')}>
+                <small>{m.sender_id === currentUserId ? 'You' : m.sender_name || 'Rider'}</small>
+                <p>{m.body}</p>
+              </div>
+            ))}
+            {!messages.length && <div className="rider-empty">No messages yet.</div>}
+          </div>
+          <div className="chat-quick">
+            {QUICK_REPLY_PRESETS.slice(0, 3).map(preset => (
+              <button key={preset} type="button" disabled={!online || !currentUserId} onClick={() => {
+                if (!rideId || !currentUserId) return;
+                void sendRideMessage(supabase, { rideId, senderId: currentUserId, body: preset, messageType: 'quick_reply' }).catch(err => setError(err.message));
+              }}>{preset}</button>
+            ))}
+          </div>
+          <form className="chat-form" onSubmit={e => {
+            e.preventDefault();
+            if (!rideId || !currentUserId || !chatDraft.trim() || !online) return;
+            const body = chatDraft.trim();
+            void sendRideMessage(supabase, { rideId, senderId: currentUserId, body, messageType: 'text' })
+              .then(() => {
+                setChatDraft(prev => (prev.trim() === body ? '' : prev));
+              })
+              .catch(err => setError(err.message));
+          }}>
+            <input value={chatDraft} onChange={e => setChatDraft(e.target.value)} maxLength={1000} placeholder={online ? 'Message pack…' : 'Offline…'} disabled={!online} />
+            <button type="submit" disabled={!online || !chatDraft.trim()}>Send</button>
+          </form>
+        </div>
         <div className="panel-footer"><span>◎</span><p>Tap a rider to follow.<br /><strong>Pan the map to explore freely.</strong></p></div>
       </aside>
       <section className="ride-map-area" aria-label="Ride map and controls"><RideMap key={ride.id} ride={ride} riders={riders} selected={selected} fitRequest={fitRequest} onSelect={onSelect} bottomInset={bottomInset} now={now} />

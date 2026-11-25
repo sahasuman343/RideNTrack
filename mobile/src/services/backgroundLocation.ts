@@ -8,21 +8,54 @@ import { supabase } from '../lib/supabase';
 import { syncQueue } from './syncQueue';
 export const BACKGROUND_LOCATION_TASK = 'RIDENTRACK_BACKGROUND_LOCATION_TASK';
 const CONTEXT_KEY = '@ridentrack/active-ride';
-interface Context { rideId: string; userId: string; displayName: string }
+interface Context {
+  rideId: string;
+  userId: string;
+  displayName: string;
+  startedAtMs?: number;
+  destination?: { latitude: number; longitude: number } | null;
+}
 interface Params extends Context {
   onLocationUpdate?: (point: LocationUpdate) => void;
   publish?: (point: LocationUpdate) => Promise<void> | void;
   onError?: (message: string) => void;
   onGpsRecovered?: () => void;
+  onAutoStop?: (reason: 'arrived' | 'timeout') => void;
   batterySaver?: boolean;
+  activeRidersCount?: number;
+  maxRideDurationMs?: number;
 }
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
 let generation = 0, lastSync = 0, lastFixTimestamp = 0;
 let nativeOptionsKey: string | null = null;
+let trackingStartedAtMs = 0;
+let stationarySinceMs: number | null = null;
+let lastMovedCoords: { lat: number; lng: number } | null = null;
+let adaptiveLowPower = false;
+let lastAdaptivePublishMs = 0;
+let arrivedAtDestSinceMs: number | null = null;
 const GPS_INTERVAL_MS = 5000;
 const GPS_DISTANCE_METERS = 15;
 const QUEUE_SYNC_INTERVAL_MS = 30000;
+const STATIONARY_THRESHOLD_MS = 2 * 60 * 1000;
+const STATIONARY_SPEED_MPS = 2 / 3.6; // 2 km/h
+const STATIONARY_DISPLACEMENT_M = 25;
+const ADAPTIVE_PUBLISH_INTERVAL_MS = 30_000;
+const ARRIVAL_RADIUS_METERS = 200;
+const ARRIVAL_DWELL_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_RIDE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+function approxDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 let operations: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {
   const result = operations.then(fn, fn); operations = result.catch(() => {}); return result;
@@ -39,6 +72,22 @@ function setContext(next: Params | null) {
   for (const listener of trackingListeners) {
     try { listener(tracking); } catch { /* Listener errors must not affect GPS */ }
   }
+}
+
+/**
+ * The persisted context is what a headless (app-killed) background task sees,
+ * so it must carry everything record() needs: start time for the ride
+ * timeout and the destination for arrival auto-stop.
+ */
+function persistContext(params: Context) {
+  const saved: Context = {
+    rideId: params.rideId,
+    userId: params.userId,
+    displayName: params.displayName,
+    startedAtMs: params.startedAtMs,
+    destination: params.destination ?? null,
+  };
+  return AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify(saved));
 }
 
 /** Ride whose location is currently being shared, or null. */
@@ -58,7 +107,10 @@ export function subscribeActiveTracking(listener: (tracking: ActiveTracking | nu
  */
 export function detachBackgroundLocationCallbacks(rideId: string) {
   if (!context || context.rideId !== rideId) return;
-  setContext({ rideId: context.rideId, userId: context.userId, displayName: context.displayName });
+  setContext({
+    rideId: context.rideId, userId: context.userId, displayName: context.displayName,
+    startedAtMs: context.startedAtMs, destination: context.destination, maxRideDurationMs: context.maxRideDurationMs,
+  });
 }
 
 function trackingOptions(params: Pick<Params, 'batterySaver'>) {
@@ -79,7 +131,9 @@ async function startNativeUpdates(params: Params, restart = false) {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'RideNTrack · Sharing location',
-      notificationBody: 'Your group can see your position.',
+      notificationBody: params.activeRidersCount && params.activeRidersCount > 0
+        ? `Live pack: ${params.activeRidersCount} rider${params.activeRidersCount === 1 ? '' : 's'} active`
+        : 'Your group can see your position.',
       notificationColor: '#FF6B00',
     },
   });
@@ -98,6 +152,9 @@ async function record(locations: Location.LocationObject[]) {
   const version = generation;
   const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
   if (!saved) return;
+  if (!trackingStartedAtMs && saved.startedAtMs) {
+    trackingStartedAtMs = saved.startedAtMs;
+  }
   const sessionRes = await supabase.auth.getSession().catch(() => null);
   const session = sessionRes?.data?.session;
   // If a session exists, ensure it matches the active rider. Do not drop offline
@@ -140,13 +197,49 @@ async function record(locations: Location.LocationObject[]) {
     } catch {
       /* Ignore UI update error */
     }
-    // Presence delivery is best-effort; it must not block saving the next breadcrumb.
-    void Promise.resolve(context?.publish?.(point)).catch(() => {});
+    // Presence delivery is best-effort; throttle when adaptive low-power is active.
     const nowMs = Date.now();
+    if (!lastMovedCoords || approxDistanceMeters(lastMovedCoords.lat, lastMovedCoords.lng, lat, lng) >= STATIONARY_DISPLACEMENT_M || point.speed >= STATIONARY_SPEED_MPS) {
+      lastMovedCoords = { lat, lng };
+      stationarySinceMs = null;
+      adaptiveLowPower = false;
+    } else {
+      stationarySinceMs ??= nowMs;
+      if (nowMs - stationarySinceMs >= STATIONARY_THRESHOLD_MS) {
+        adaptiveLowPower = true;
+      }
+    }
+
+    if (!adaptiveLowPower || nowMs - lastAdaptivePublishMs >= ADAPTIVE_PUBLISH_INTERVAL_MS) {
+      lastAdaptivePublishMs = nowMs;
+      void Promise.resolve(context?.publish?.(point)).catch(() => {});
+    }
+
     if (lastFixTimestamp > 0 && location.timestamp - lastFixTimestamp > 30000 && nowMs - location.timestamp <= 30000) {
       context?.onGpsRecovered?.();
     }
     lastFixTimestamp = Math.max(lastFixTimestamp, location.timestamp);
+
+    // Auto-stop on arrival within 200m of destination for 10 minutes, or max ride timeout.
+    const dest = context?.destination ?? saved.destination;
+    if (dest && validCoordinates(dest.latitude, dest.longitude)) {
+      if (approxDistanceMeters(lat, lng, dest.latitude, dest.longitude) <= ARRIVAL_RADIUS_METERS) {
+        arrivedAtDestSinceMs ??= nowMs;
+        if (nowMs - arrivedAtDestSinceMs >= ARRIVAL_DWELL_MS) {
+          context?.onAutoStop?.('arrived');
+          void stopBackgroundLocationUpdates(saved.rideId);
+          return;
+        }
+      } else {
+        arrivedAtDestSinceMs = null;
+      }
+    }
+    const maxDuration = context?.maxRideDurationMs ?? DEFAULT_MAX_RIDE_DURATION_MS;
+    if (trackingStartedAtMs > 0 && nowMs - trackingStartedAtMs >= maxDuration) {
+      context?.onAutoStop?.('timeout');
+      void stopBackgroundLocationUpdates(saved.rideId);
+      return;
+    }
   }
   if (Date.now() - lastSync > QUEUE_SYNC_INTERVAL_MS) {
     lastSync = Date.now();
@@ -195,10 +288,11 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
         if (version !== generation) return { mode: 'stopped' };
         fallback?.remove();
         fallback = null;
-        setContext(params);
-        await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-          rideId: params.rideId, userId: params.userId, displayName: params.displayName,
-        }));
+        const restoredStartedAtMs = saved.startedAtMs ?? (trackingStartedAtMs || Date.now());
+        trackingStartedAtMs = restoredStartedAtMs;
+        const next = { ...params, startedAtMs: restoredStartedAtMs, destination: params.destination ?? saved.destination };
+        setContext(next);
+        await persistContext(next);
         return { mode: 'background', permissionGranted: true };
       }
       await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
@@ -206,13 +300,18 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
       if (version !== generation) return { mode: 'stopped' };
     }
 
-    setContext(params);
-    await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-      rideId: params.rideId, userId: params.userId, displayName: params.displayName,
-    }));
+    const startedAtMs = Date.now();
+    trackingStartedAtMs = startedAtMs;
+    const next = { ...params, startedAtMs };
+    setContext(next);
+    await persistContext(next);
     fallback?.remove();
     fallback = null;
     lastFixTimestamp = 0;
+    stationarySinceMs = null;
+    lastMovedCoords = null;
+    adaptiveLowPower = false;
+    arrivedAtDestSinceMs = null;
 
     // Keep ride tracking useful while background permission is optional.
     // Background permission is requested only from an explicit user action.
@@ -270,10 +369,15 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       if (version !== generation) return { mode: 'stopped' };
       fallback?.remove();
       fallback = null;
-      setContext(params);
-      await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-        rideId: params.rideId, userId: params.userId, displayName: params.displayName,
-      }));
+      // Upgrading to background GPS continues the same ride session, so keep
+      // the original start time; otherwise the 12-hour limit would restart.
+      const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+      const sameRide = saved?.rideId === params.rideId && saved.userId === params.userId;
+      const startedAtMs = (sameRide && saved?.startedAtMs) || trackingStartedAtMs || Date.now();
+      trackingStartedAtMs = startedAtMs;
+      const next = { ...params, startedAtMs, destination: params.destination ?? (sameRide ? saved?.destination : null) };
+      setContext(next);
+      await persistContext(next);
       return { mode: 'background', permissionGranted: true };
     } catch (e) {
       if (version !== generation) return { mode: 'stopped' };

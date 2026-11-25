@@ -19,7 +19,7 @@ import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
-import { Icon } from '../../src/components/ui';
+import { Icon, SheetModal } from '../../src/components/ui';
 import { SAVED_PLACE_ICONS } from '../../src/icons';
 
 export default function ProfileScreen() {
@@ -524,7 +524,7 @@ export default function ProfileScreen() {
                 <Icon name="download-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
-                <Text style={styles.systemItemTitle}>Offline Topo Storage</Text>
+                <Text style={styles.systemItemTitle}>Offline topo maps</Text>
                 <Text style={styles.systemItemSub}>Offline map availability is not verified here.</Text>
               </View>
             </View>
@@ -548,7 +548,7 @@ export default function ProfileScreen() {
                 <Icon name="speedometer-outline" size="md" color={theme.text} />
               </View>
               <View style={styles.systemItemTextCol}>
-                <Text style={styles.systemItemTitle}>Units & Telemetry</Text>
+                <Text style={styles.systemItemTitle}>Units</Text>
                 <Text style={styles.systemItemSub}>Metric (km/h, km, L)</Text>
               </View>
             </View>
@@ -630,14 +630,13 @@ export default function ProfileScreen() {
 
           <View style={styles.versionFooterBox}>
             <Text style={styles.versionFooterText}>Apex Horizon v2.4.0 (Build 892)</Text>
-            <Text style={styles.versionSubText}>Tactile Telemetry Engine • Iridium Ready</Text>
+            <Text style={styles.versionSubText}>Made for riders, by riders</Text>
           </View>
         </View>
       </ScrollView>
 
       {/* Profile & Motorcycle Editor Modal */}
-      <Modal visible={editing} transparent animationType="slide" onRequestClose={() => !saving && setEditing(false)}>
-        <View style={styles.overlay}>
+      <SheetModal visible={editing} onRequestClose={() => !saving && setEditing(false)}>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
             <Text style={styles.modalTitle}>{section === 'rider' ? 'Edit rider profile' : section === 'emergency' ? 'Edit emergency details' : 'Edit motorcycle'}</Text>
             {section === 'rider' && <>
@@ -703,14 +702,12 @@ export default function ProfileScreen() {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Bookmark Saved Place Modal */}
-      <Modal visible={placeModalVisible} transparent animationType="slide" onRequestClose={() => setPlaceModalVisible(false)}>
-        <View style={styles.overlay}>
+      <SheetModal visible={placeModalVisible} onRequestClose={() => setPlaceModalVisible(false)}>
           <ScrollView style={{ maxHeight: '90%' }} contentContainerStyle={styles.modal}>
-            <Text style={styles.modalTitle}>Bookmark Saved Place</Text>
+            <Text style={styles.modalTitle}>Save a place</Text>
             <Text style={styles.fieldLabel}>Place Name</Text>
             <TextInput style={styles.input} value={placeName} onChangeText={setPlaceName} placeholder="e.g. Rohtang Pass, Highway Dhaba, Petrol Bunk" placeholderTextColor={theme.subtle} />
 
@@ -756,8 +753,7 @@ export default function ProfileScreen() {
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }
@@ -1327,11 +1323,6 @@ const makeStyles = (c: RidePalette) =>
       opacity: 0.7,
       letterSpacing: 0.5,
       textTransform: 'uppercase',
-    },
-    overlay: {
-      flex: 1,
-      justifyContent: 'flex-end',
-      backgroundColor: c.scrim,
     },
     modal: {
       backgroundColor: c.surface,

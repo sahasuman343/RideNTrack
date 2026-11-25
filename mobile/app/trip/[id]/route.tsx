@@ -924,9 +924,9 @@ export default function RouteEditorScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>
                   {searchModal.mode === 'add'
-                    ? 'Add Route Stop'
+                    ? 'Add stop'
                     : searchModal.targetIndex === 0
-                    ? 'Change Start Location'
+                    ? 'Change start'
                     : searchModal.targetIndex === points.length - 1
                     ? 'Change Destination'
                     : `Change Stop #${searchModal.targetIndex}`}
@@ -1088,7 +1088,7 @@ export default function RouteEditorScreen() {
       >
         <View style={styles.modalOverlayCenter}>
           <View style={styles.dayPickerContent}>
-            <Text style={styles.modalTitle}>Assign to Itinerary Day</Text>
+            <Text style={styles.modalTitle}>Assign to day</Text>
             <Text style={styles.modalSubtitle}>
               Select which day of the trip this stop belongs to:
             </Text>

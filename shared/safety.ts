@@ -1,3 +1,5 @@
+import { distanceToRouteMeters } from './route';
+
 /**
  * Safety & Emergency Coordination Telemetry
  * Pure functions supporting emergency escalation, mechanical breakdown classification,
@@ -119,3 +121,80 @@ export const SEEDED_BREAKDOWN_DIRECTORY: VerifiedBreakdownService[] = [
     description: 'Official NHAI emergency assistance for incidents on national highways.',
   },
 ];
+
+const PLANNED_STOP_TYPES = new Set([
+  'fuel',
+  'food',
+  'rest',
+  'accommodation',
+  'meetup',
+  'destination',
+  'stop',
+  'repair',
+  'sightseeing',
+]);
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function evaluateStationaryOffRouteCheckIn(params: {
+  stationaryDurationMs: number;
+  currentLat: number;
+  currentLng: number;
+  waypoints: Array<{ latitude: number; longitude: number; waypoint_type?: string | null }>;
+  minStationaryMs?: number;
+  minWaypointDistanceMeters?: number;
+  /** Planned route as [lng, lat] pairs. A stop on the route itself is not off-route. */
+  routeCoordinates?: number[][] | null;
+  minRouteDistanceMeters?: number;
+}): { shouldPrompt: boolean; nearestWaypointMeters: number | null; routeDistanceMeters?: number | null } {
+  const minStationaryMs = params.minStationaryMs ?? 5 * 60 * 1000;
+  const minWaypointDistanceMeters = params.minWaypointDistanceMeters ?? 300;
+
+  if (
+    !Number.isFinite(params.currentLat) ||
+    !Number.isFinite(params.currentLng) ||
+    !Number.isFinite(params.stationaryDurationMs)
+  ) {
+    return { shouldPrompt: false, nearestWaypointMeters: null };
+  }
+
+  let nearest: number | null = null;
+  for (const wp of params.waypoints) {
+    if (wp.waypoint_type && !PLANNED_STOP_TYPES.has(wp.waypoint_type)) continue;
+    if (!Number.isFinite(wp.latitude) || !Number.isFinite(wp.longitude)) continue;
+    const dist = haversineMeters(params.currentLat, params.currentLng, wp.latitude, wp.longitude);
+    if (nearest === null || dist < nearest) {
+      nearest = dist;
+    }
+  }
+
+  const isStationaryLongEnough = params.stationaryDurationMs >= minStationaryMs;
+  const isAwayFromPlannedStop = nearest === null || nearest > minWaypointDistanceMeters;
+
+  // Sparse waypoints are not the route: a rider pulled over on the planned
+  // road between two stops is on route. Only prompt when the route geometry
+  // (if we have one) also says the rider is away from it.
+  let routeDistance: number | null = null;
+  const route = params.routeCoordinates;
+  if (Array.isArray(route) && route.length >= 2) {
+    const d = distanceToRouteMeters({ lat: params.currentLat, lng: params.currentLng }, route);
+    if (Number.isFinite(d)) routeDistance = d;
+  }
+  const minRouteDistanceMeters = params.minRouteDistanceMeters ?? 150;
+  const isAwayFromRoute = routeDistance === null || routeDistance > minRouteDistanceMeters;
+
+  return {
+    shouldPrompt: isStationaryLongEnough && isAwayFromPlannedStop && isAwayFromRoute,
+    nearestWaypointMeters: nearest !== null ? Math.round(nearest) : null,
+    routeDistanceMeters: routeDistance !== null ? Math.round(routeDistance) : null,
+  };
+}

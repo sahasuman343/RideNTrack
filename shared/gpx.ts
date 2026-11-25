@@ -1,6 +1,8 @@
+import { MAX_TRIP_ROUTE_POINTS, type RoutePoint, type RouteWaypointType } from './route';
+
 /**
- * GPX (GPS Exchange Format 1.1) Exporter for Motorcycle Touring
- * Generates standard GPX 1.1 XML for routes, waypoints, and recorded GPS trails.
+ * GPX (GPS Exchange Format 1.1) Exporter & Importer for Motorcycle Touring
+ * Generates and parses standard GPX 1.1 XML for routes, waypoints, and recorded GPS trails.
  */
 
 export interface GpxWaypoint {
@@ -113,4 +115,122 @@ export function exportTripToGpx(options: GpxExportOptions): string {
 
   lines.push('</gpx>');
   return lines.join('\n');
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function extractTagText(block: string, tag: string): string | undefined {
+  const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match ? unescapeXml(match[1].trim()) : undefined;
+}
+
+function downsamplePoints(points: RoutePoint[], maxPoints: number): RoutePoint[] {
+  if (points.length <= maxPoints) return points;
+  const result: RoutePoint[] = [];
+  const step = (points.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = i === maxPoints - 1 ? points.length - 1 : Math.round(i * step);
+    result.push({ ...points[idx], sequence: i });
+  }
+  return result;
+}
+
+const VALID_WAYPOINT_TYPES = new Set<RouteWaypointType>([
+  'origin',
+  'meetup',
+  'stop',
+  'fuel',
+  'food',
+  'rest',
+  'sightseeing',
+  'destination',
+  'repair',
+  'accommodation',
+]);
+
+const STRICT_DECIMAL_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+
+function parsePointTags(
+  xml: string,
+  tagName: 'wpt' | 'rtept' | 'trkpt',
+  warnings: string[],
+): RoutePoint[] {
+  const regex = new RegExp(`<${tagName}\\s+([^>]*?)(?:\\/>|>([\\s\\S]*?)<\\/${tagName}>)`, 'gi');
+  const points: RoutePoint[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(xml)) !== null) {
+    const attrs = match[1] || '';
+    const inner = match[2] || '';
+    const latMatch = attrs.match(/\blat\s*=\s*["']([^"']+)["']/i);
+    const lonMatch = attrs.match(/\blon\s*=\s*["']([^"']+)["']/i);
+    const latStr = latMatch?.[1]?.trim() ?? '';
+    const lonStr = lonMatch?.[1]?.trim() ?? '';
+    const lat = STRICT_DECIMAL_RE.test(latStr) ? Number(latStr) : Number.NaN;
+    const lon = STRICT_DECIMAL_RE.test(lonStr) ? Number(lonStr) : Number.NaN;
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+      warnings.push(`Skipped malformed <${tagName}> with invalid coordinates.`);
+      continue;
+    }
+
+    const rawName = extractTagText(inner, 'name');
+    const rawDesc = extractTagText(inner, 'desc');
+    const rawType = extractTagText(inner, 'type')?.toLowerCase() as RouteWaypointType | undefined;
+    const waypointType: RouteWaypointType = rawType && VALID_WAYPOINT_TYPES.has(rawType) ? rawType : 'stop';
+
+    points.push({
+      sequence: points.length,
+      waypoint_type: waypointType,
+      name: rawName || `${tagName.toUpperCase()} ${points.length + 1}`,
+      notes: rawDesc || null,
+      latitude: lat,
+      longitude: lon,
+    });
+  }
+
+  return points;
+}
+
+export function parseGpx(xml: string): {
+  name?: string;
+  waypoints: RoutePoint[];
+  routePoints: RoutePoint[];
+  trackPoints: RoutePoint[];
+  warnings: string[];
+} {
+  if (typeof xml !== 'string' || !xml.trim()) {
+    return { waypoints: [], routePoints: [], trackPoints: [], warnings: ['Empty GPX input.'] };
+  }
+
+  const warnings: string[] = [];
+  const cleanXml = xml.replace(/<!--[\s\S]*?-->/g, '');
+  const metadataBlock = cleanXml.match(/<metadata[^>]*>([\s\S]*?)<\/metadata>/i)?.[1] || '';
+  const name = extractTagText(metadataBlock, 'name') || extractTagText(cleanXml, 'name');
+
+  let waypoints = parsePointTags(cleanXml, 'wpt', warnings);
+  let routePoints = parsePointTags(cleanXml, 'rtept', warnings);
+  let trackPoints = parsePointTags(cleanXml, 'trkpt', warnings);
+
+  if (waypoints.length > MAX_TRIP_ROUTE_POINTS) {
+    warnings.push(`Downsampled ${waypoints.length} waypoints to ${MAX_TRIP_ROUTE_POINTS}.`);
+    waypoints = downsamplePoints(waypoints, MAX_TRIP_ROUTE_POINTS);
+  }
+  if (routePoints.length > MAX_TRIP_ROUTE_POINTS) {
+    warnings.push(`Downsampled ${routePoints.length} route points to ${MAX_TRIP_ROUTE_POINTS}.`);
+    routePoints = downsamplePoints(routePoints, MAX_TRIP_ROUTE_POINTS);
+  }
+  if (trackPoints.length > MAX_TRIP_ROUTE_POINTS) {
+    warnings.push(`Downsampled ${trackPoints.length} track points to ${MAX_TRIP_ROUTE_POINTS}.`);
+    trackPoints = downsamplePoints(trackPoints, MAX_TRIP_ROUTE_POINTS);
+  }
+
+  return { name, waypoints, routePoints, trackPoints, warnings };
 }

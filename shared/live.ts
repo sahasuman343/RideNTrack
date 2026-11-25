@@ -1,10 +1,100 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { type Ride, type LocationUpdate, type Alert, mergeLocations, validCoordinates } from './types';
+import { type Ride, type LocationUpdate, type Alert, type RideMessage, type RideMessageType, mergeLocations, validCoordinates } from './types';
 export type Connection = 'connecting' | 'live' | 'reconnecting';
+export type RiderFreshness = 'live' | 'stale' | 'offline';
+
+export function classifyRiderFreshness(lastUpdatedIso: string, nowMs: number = Date.now()): RiderFreshness {
+  const updatedMs = Date.parse(lastUpdatedIso);
+  if (!Number.isFinite(updatedMs)) return 'offline';
+  const ageMs = Math.max(0, nowMs - updatedMs);
+  if (ageMs < 2 * 60 * 1000) return 'live';
+  if (ageMs <= 10 * 60 * 1000) return 'stale';
+  return 'offline';
+}
+
+export function formatLastSeenAgo(lastUpdatedIso: string, nowMs: number = Date.now()): string {
+  const updatedMs = Date.parse(lastUpdatedIso);
+  if (!Number.isFinite(updatedMs)) return 'Last seen unknown';
+  const ageMs = Math.max(0, nowMs - updatedMs);
+  if (ageMs < 2 * 60 * 1000) return 'Live';
+  const mins = Math.floor(ageMs / 60_000);
+  if (mins < 60) return `Last seen ${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  return `Last seen ${hours} hr ago`;
+}
+
 export interface RideObserver {
   ride: (ride: Ride) => void; locations: (points: LocationUpdate[]) => void;
   alerts: (alerts: Alert[]) => void; connection: (status: Connection) => void;
   error: (message: string | null) => void;
+  onMessage?: (message: RideMessage) => void;
+}
+
+export async function fetchRideMessages(
+  client: SupabaseClient,
+  rideId: string,
+  limit = 50,
+  beforeIso?: string,
+): Promise<RideMessage[]> {
+  let query = client
+    .from('ride_messages')
+    .select('*')
+    .eq('ride_id', rideId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (beforeIso) {
+    query = query.lt('created_at', beforeIso);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  let memberNames = new Map<string, string>();
+  try {
+    const membersRes = await client.rpc('get_ride_members', { p_ride_id: rideId });
+    if (!membersRes.error && Array.isArray(membersRes.data)) {
+      memberNames = new Map(
+        (membersRes.data as Array<{ user_id: string; display_name: string }>).map(m => [m.user_id, m.display_name]),
+      );
+    }
+  } catch {
+    // Keep fallback sender names if member lookup fails.
+  }
+
+  return (Array.isArray(data) ? (data as RideMessage[]) : []).slice().reverse().map(msg => ({
+    ...msg,
+    sender_name: msg.sender_name || memberNames.get(msg.sender_id) || 'Rider',
+  }));
+}
+
+export async function sendRideMessage(
+  client: SupabaseClient,
+  params: {
+    rideId: string;
+    senderId: string;
+    body: string;
+    messageType?: RideMessageType;
+    isPinned?: boolean;
+  },
+): Promise<RideMessage> {
+  const trimmed = params.body.trim();
+  if (!trimmed) {
+    throw new Error('Message cannot be empty.');
+  }
+  const { data, error } = await client
+    .from('ride_messages')
+    .insert({
+      ride_id: params.rideId,
+      sender_id: params.senderId,
+      body: trimmed.slice(0, 1000),
+      message_type: params.messageType ?? 'text',
+      is_pinned: params.isPinned ?? false,
+    })
+    .select('*')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as RideMessage;
 }
 
 const RECONCILE_INTERVAL_MS = 60_000;
@@ -17,9 +107,11 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   let pendingAlerts = false;
   let pendingRefresh = false;
   let connected = false;
+  let online = true;
   let points: LocationUpdate[] = [];
   let members = new Map<string, string>();
   let lastPublished: LocationUpdate | null = null;
+  let lastMemberRefreshMs = 0;
 
   const emit = (incoming: LocationUpdate[]) => {
     if (disposed) return;
@@ -109,14 +201,29 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   const presence = client.channel('ride:' + rideId, { config: { private: true, presence: { key: userId } } });
   presence.on('presence', { event: 'sync' }, () => {
     const incoming: LocationUpdate[] = [];
+    let unknownPresence = false;
     for (const [id, entries] of Object.entries(presence.presenceState<LocationUpdate>())) {
-      if (!members.has(id)) continue;
+      if (!members.has(id)) {
+        // A rider who just joined is in Presence before our member list knows
+        // them; refresh members now instead of hiding them for up to a minute.
+        unknownPresence = true;
+        continue;
+      }
       for (const entry of entries) if (validCoordinates(entry.lat, entry.lng))
         incoming.push({ ...entry, user_id: id, display_name: members.get(id)! });
     }
     emit(incoming);
+    if (unknownPresence && Date.now() - lastMemberRefreshMs > 10_000) {
+      lastMemberRefreshMs = Date.now();
+      void refreshLocations();
+    }
   })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refreshAlerts())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ride_messages', filter: 'ride_id=eq.' + rideId }, payload => {
+      if (disposed || !observer.onMessage) return;
+      const msg = payload.new as RideMessage;
+      observer.onMessage({ ...msg, sender_name: members.get(msg.sender_id) || 'Rider' });
+    })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides', filter: 'id=eq.' + rideId }, payload => {
       if (!disposed) observer.ride(payload.new as Ride);
     }).subscribe(status => {
@@ -127,15 +234,32 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
       // only fetches locations, rather than reloading all ride metadata.
       if (connected) {
         void refresh();
+        if (observer.onMessage) {
+          void fetchRideMessages(client, rideId, 50)
+            .then(msgs => {
+              if (disposed) return;
+              msgs.forEach(msg => observer.onMessage?.(msg));
+            })
+            .catch(() => {});
+        }
         if (lastPublished) void presence.track(lastPublished);
       }
     });
 
   void refresh();
-  const timer = setInterval(() => void refreshLocations(), RECONCILE_INTERVAL_MS);
+  const timer = setInterval(() => {
+    if (online) void refreshLocations();
+  }, RECONCILE_INTERVAL_MS);
 
   return {
     refresh,
+    setOnline(nextOnline: boolean) {
+      const wasOffline = !online;
+      online = nextOnline;
+      if (wasOffline && nextOnline && !disposed) {
+        void refreshLocations();
+      }
+    },
     async publish(point: LocationUpdate) {
       lastPublished = point;
       if (disposed || !connected) return;

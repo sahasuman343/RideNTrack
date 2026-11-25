@@ -12,7 +12,7 @@ Deno.serve(async request => {
   if (!secret || !timingSafeEqual(request.headers.get('x-schedule-secret') ?? '', secret)) {
     return new Response('Unauthorized', { status: 401 });
   }
-  const days = Number(Deno.env.get('LOCATION_RETENTION_DAYS') ?? '90');
+  const days = Number(Deno.env.get('LOCATION_RETENTION_DAYS') ?? '7');
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false },
   });
