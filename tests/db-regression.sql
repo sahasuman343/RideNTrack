@@ -116,7 +116,7 @@ BEGIN
     RAISE EXCEPTION 'free plan accepted a sixth waypoint' USING ERRCODE = '23514';
   EXCEPTION WHEN raise_exception THEN NULL;
   END;
-  UPDATE public.rides SET status = 'completed' WHERE id = v_ride;
+  PERFORM public.end_ride(v_ride);
 
   FOR i IN 1..5 LOOP
     INSERT INTO public.rides (name,ride_code,admin_id,origin,destination,origin_coords,destination_coords,status)
@@ -128,7 +128,7 @@ BEGIN
     RAISE EXCEPTION 'free plan accepted a sixth active trip' USING ERRCODE = '23514';
   EXCEPTION WHEN raise_exception THEN NULL;
   END;
-  UPDATE public.rides SET status = 'completed' WHERE admin_id = auth.uid() AND name LIKE 'Limit %';
+  PERFORM public.end_ride(id) FROM public.rides WHERE admin_id = auth.uid() AND name LIKE 'Limit %';
 END $$;
 RESET ROLE;
 SET ROLE authenticated;
@@ -159,7 +159,7 @@ END $$;
 SET request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
 UPDATE public.profiles SET emergency_contact = '+91 90000 00000', blood_group = 'O+', share_ice_with_ride = true
  WHERE id = auth.uid();
-UPDATE public.rides SET status = 'active' WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+SELECT public.start_ride('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'regression fixture');
 SET request.jwt.claim.sub = '22222222-2222-4222-8222-222222222222';
 DO $$ BEGIN
   IF NOT EXISTS (
@@ -668,7 +668,7 @@ BEGIN
   IF public.get_rider_analytics(owner_id) IS DISTINCT FROM analytics THEN
     RAISE EXCEPTION 'Planned distance changed completed ride statistics';
   END IF;
-  UPDATE public.rides SET status = 'completed' WHERE id = journal_trip_id;
+  PERFORM public.end_ride(journal_trip_id);
   IF (public.get_rider_analytics(owner_id)->>'total_distance_km')::numeric <> (analytics->>'total_distance_km')::numeric + 200 THEN
     RAISE EXCEPTION 'Completed route estimate missing';
   END IF;

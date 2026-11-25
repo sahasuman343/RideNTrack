@@ -947,7 +947,7 @@ test('regroup alert migration, ALERT_LABELS, and proximity regroup confirmation'
   const rideSource = readRideScreenSource();
   assert.match(rideSource, /get_regroup_points/);
   assert.match(rideSource, /confirm_regroup_arrival/);
-  assert.match(rideSource, /regroupArrivalAttention\(arrivingRegroupPoint, nowIso\)/);
+  assert.match(rideSource, /regroupArrivalAttention\(arrivingRegroupPoint, nowIso[,)]/);
   assert.match(rideSource, /Near regroup: /);
   assert.match(rideSource, /case 'confirm':\s*if \(arrivingRegroupPoint\) void confirmArrival/);
 });

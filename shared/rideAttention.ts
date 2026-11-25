@@ -56,7 +56,8 @@ export function attentionFromAlerts(
     const created = Date.parse(alert.created_at);
     if (!Number.isFinite(created) || now - created >= RECENT_ALERT_WINDOW_MS) continue;
     const name = alert.display_name || 'Rider';
-    const kind = ALERT_KIND[alert.type] ?? 'info';
+    const sweepReport = alert.type === 'regroup' && /^(Sweep passed|All through)/.test(alert.message ?? '');
+    const kind: AttentionKind = sweepReport ? 'all_through' : ALERT_KIND[alert.type] ?? 'info';
     const hasLocation = alert.lat != null && alert.lng != null;
     const actions: AttentionItem['actions'] = [];
     let body: string | null = alert.message ? alert.message : null;
@@ -74,8 +75,8 @@ export function attentionFromAlerts(
     items.push({
       id: `alert:${alert.id}`,
       kind,
-      title: alert.type === 'announcement' && alert.message ? alert.message : ALERT_TITLE[alert.type]?.(name) ?? `${name} sent an alert`,
-      body: alert.type === 'announcement' ? `From ${name}` : body,
+      title: (alert.type === 'announcement' || sweepReport) && alert.message ? alert.message : ALERT_TITLE[alert.type]?.(name) ?? `${name} sent an alert`,
+      body: alert.type === 'announcement' ? `From ${name}` : sweepReport ? `From ${name} (sweep)` : body,
       createdAt: alert.created_at,
       expiresAt: new Date(created + RECENT_ALERT_WINDOW_MS).toISOString(),
       actions,
@@ -100,14 +101,19 @@ export function checkInAttention(secondsLeft: number, canTextContact: boolean, n
   };
 }
 
-export function regroupArrivalAttention(point: { id: string; name: string }, nowIso: string): AttentionItem {
+export function regroupArrivalAttention(point: { id: string; name: string }, nowIso: string, options: { canMarkAllThrough?: boolean } = {}): AttentionItem {
   return {
     id: `regroup:${point.id}`,
     kind: 'regroup',
     title: `Near regroup: ${point.name}`,
-    body: 'Confirm so the captain knows you are here.',
+    body: options.canMarkAllThrough
+      ? 'Confirm your arrival. As sweep, tap All through once the pack has passed.'
+      : 'Confirm so the captain knows you are here.',
     createdAt: nowIso,
-    actions: [{ id: 'confirm', label: 'Confirm arrival', emphasis: 'primary' }],
+    actions: [
+      { id: 'confirm', label: 'Confirm arrival', emphasis: 'primary' },
+      ...(options.canMarkAllThrough ? [{ id: 'all_through', label: 'All through', emphasis: 'secondary' as const }] : []),
+    ],
   };
 }
 

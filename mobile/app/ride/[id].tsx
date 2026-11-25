@@ -87,6 +87,11 @@ import { RideMap, type RiderFeatureCollection } from '../../src/components/ride/
 import { RideHud } from '../../src/components/ride/RideHud';
 import { RideAttentionBar } from '../../src/components/ride/RideAttentionBar';
 import { CaptainDashboard } from '../../src/components/ride/CaptainDashboard';
+import { BriefingSheet } from '../../src/components/ride/BriefingSheet';
+import { RollCallSheet } from '../../src/components/ride/RollCallSheet';
+import { DebriefSheet } from '../../src/components/ride/DebriefSheet';
+import { useCaptainFlow } from '../../src/hooks/ride/useCaptainFlow';
+import { CaptainStepCard } from '../../src/components/ride/CaptainStepCard';
 import { SosSheet } from '../../src/components/ride/SosSheet';
 import {
   AlertPickerSheet,
@@ -256,6 +261,19 @@ export default function LiveRideScreen() {
   });
   const { busy, setBusy, sendAlert, acknowledgedAlertIds, acknowledgeAnnouncement, acknowledgementMap, fetchAcknowledgements } = rideAlerts;
   const { regroupPoints, arrivingRegroupPoint, refreshRegroupPoints, confirmArrival: confirmRegroupArrival, closeRegroupPoint } = useRegroupPoints(id, position);
+  const captainFlow = useCaptainFlow({
+    rideId: id,
+    rideName: ride?.name ?? 'Ride',
+    rideStatus: ride?.status,
+    userId,
+    isAdmin: admin,
+    position,
+    distanceKm: ride?.estimated_distance_meters ? ride.estimated_distance_meters / 1000 : null,
+  });
+  const leader = captainFlow.isLeader;
+  const [briefingVisible, setBriefingVisible] = useState(false);
+  const [rollCallVisible, setRollCallVisible] = useState(false);
+  const [debriefVisible, setDebriefVisible] = useState(false);
   const sos = useSosWorkflow({
     ride,
     profile,
@@ -807,22 +825,40 @@ export default function LiveRideScreen() {
     }
   }
 
-  async function changeStatus(status: 'active' | 'completed') {
+  // Ride status changes only through start_ride / end_ride (F1). Starting goes
+  // through the roll call sheet; it throws StartNeedsReasonError when riders
+  // are still waiting so the sheet can ask for a one-tap reason.
+  async function startRideFromRollCall(reason?: string) {
+    const data = await captainFlow.startRide(reason);
+    if (data) setRide(data as Ride);
+    track('ride_started');
+  }
+
+  async function endRideForEveryone() {
     setBusy(true);
     setMessage(null);
     try {
-      const { data, error } = await supabase.from('rides').update({ status }).eq('id', id).select().single();
-      if (error) throw error;
-      setRide(data as Ride);
-      if (status === 'completed') {
-        track('ride_ended');
-        await stopBackgroundLocationUpdates(id);
-        await sync.flushQueue();
-      } else {
-        track('ride_started');
-      }
+      const data = await captainFlow.endRide();
+      if (data) setRide(data as Ride);
+      track('ride_ended');
+      await stopBackgroundLocationUpdates(id);
+      await sync.flushQueue();
+      setDebriefVisible(true);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not update ride.');
+      setMessage(e instanceof Error ? e.message : 'Could not end the ride.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markAllThrough(pointId: string) {
+    setBusy(true);
+    try {
+      const missing = await captainFlow.markAllThrough(pointId);
+      setMessage(missing.length ? `All through. Not seen: ${missing.map(m => m.display_name).join(', ')}.` : 'All through. Everyone accounted for.');
+      await refreshRegroupPoints();
+    } catch (e: unknown) {
+      setMessage(e instanceof Error ? e.message : 'Could not mark all through.');
     } finally {
       setBusy(false);
     }
@@ -962,6 +998,19 @@ export default function LiveRideScreen() {
   // Ride attention queue: every banner on this screen is an item here, and the
   // RideAttentionBar shows exactly one of them at a time (shared/attention.ts).
   // ---------------------------------------------------------------------------
+  const briefingTrip = useMemo(() => {
+    const byRole = (roles: string[]) => captainFlow.riders.find(r => r.role && roles.includes(r.role))?.name ?? null;
+    return {
+      rideName: ride?.name ?? 'Ride',
+      meetupName: ride?.origin ?? null,
+      startTime: ride?.start_date && ride.start_date.includes('T') ? new Date(ride.start_date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null,
+      lead: byRole(['captain', 'leader']),
+      sweep: byRole(['sweeper', 'sweep']),
+      regroupPoints: regroupPoints.map(p => ({ name: p.name })),
+      distanceKm: ride?.estimated_distance_meters ? ride.estimated_distance_meters / 1000 : null,
+    };
+  }, [ride?.name, ride?.origin, ride?.start_date, ride?.estimated_distance_meters, captainFlow.riders, regroupPoints]);
+
   const nowIso = new Date(now).toISOString();
   const deviationLimit = ride?.route_deviation_threshold_meters || 500;
   const attentionItems = useMemo<AttentionItem[]>(() => {
@@ -969,7 +1018,7 @@ export default function LiveRideScreen() {
     if (stationaryCountdown !== null) {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
-    if (arrivingRegroupPoint) items.push(regroupArrivalAttention(arrivingRegroupPoint, nowIso));
+    if (arrivingRegroupPoint) items.push(regroupArrivalAttention(arrivingRegroupPoint, nowIso, { canMarkAllThrough: captainFlow.canMarkAllThrough }));
     if (gps.state === 'fresh' && routeDeviation != null && routeDeviation > deviationLimit) {
       items.push(routeDeviationAttention(routeDeviation, nowIso));
     }
@@ -982,7 +1031,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1008,6 +1057,9 @@ export default function LiveRideScreen() {
         return;
       case 'confirm':
         if (arrivingRegroupPoint) void confirmArrival(arrivingRegroupPoint.id);
+        return;
+      case 'all_through':
+        if (arrivingRegroupPoint) void markAllThrough(arrivingRegroupPoint.id);
         return;
       case 'ack':
         if (alertId) void acknowledgeAnnouncement(alertId);
@@ -1379,7 +1431,7 @@ export default function LiveRideScreen() {
                         onPress={() =>
                           Dialog.alert('End this ride?', 'Sharing stops when each device receives the update.', [
                             { text: 'Keep riding', style: 'cancel' },
-                            { text: 'End ride', style: 'destructive', onPress: () => void changeStatus('completed') },
+                            { text: 'End ride', style: 'destructive', onPress: () => void endRideForEveryone() },
                           ])
                         }
                       >
@@ -1389,18 +1441,21 @@ export default function LiveRideScreen() {
                   </View>
                 )}
               </View>
-            ) : admin && ride.status === 'planned' ? (
-              <View style={s.actions}>
-                <TouchableOpacity style={s.primary} disabled={busy} onPress={() => void changeStatus('active')}>
-                  <Text style={s.buttonText}>{busy ? 'Starting…' : 'Start the ride'}</Text>
-                </TouchableOpacity>
-              </View>
             ) : (
-              <View style={s.actions}>
-                <Text style={s.muted}>
-                  {ride.status === 'completed' ? 'Ride ended. Location sharing is off.' : 'Waiting for the organizer to start.'}
-                </Text>
-              </View>
+              <CaptainStepCard
+                leader={leader}
+                rideStatus={ride.status}
+                phase={captainFlow.phase}
+                rollCallHeadline={captainFlow.rollCall.headline}
+                briefingShared={Boolean(captainFlow.briefing)}
+                briefingRead={captainFlow.briefingRead}
+                myCheckIn={captainFlow.myCheckIn}
+                debriefSaved={Boolean(captainFlow.savedDebrief)}
+                onBriefing={() => setBriefingVisible(true)}
+                onRollCall={() => { void captainFlow.refreshRollCall(); setRollCallVisible(true); }}
+                onCheckInSelf={() => { if (userId) void captainFlow.setRiderStatus(userId, 'checked_in').catch(() => {}); }}
+                onDebrief={() => setDebriefVisible(true)}
+              />
             )}
 
             <RiderRoster
@@ -1475,6 +1530,37 @@ export default function LiveRideScreen() {
         batterySaver={batterySaver}
         onToggleBatterySaver={() => setBatterySaver(v => !v)}
       />
+
+      <BriefingSheet
+        visible={briefingVisible}
+        onClose={() => setBriefingVisible(false)}
+        bottomInset={insets.bottom}
+        isLeader={leader}
+        briefing={captainFlow.briefing}
+        trip={briefingTrip}
+        onPublish={captainFlow.publishBriefing}
+        onOpened={captainFlow.markBriefingRead}
+      />
+      {leader && (
+        <RollCallSheet
+          visible={rollCallVisible}
+          onClose={() => setRollCallVisible(false)}
+          bottomInset={insets.bottom}
+          summary={captainFlow.rollCall}
+          onSetStatus={captainFlow.setRiderStatus}
+          onStart={startRideFromRollCall}
+        />
+      )}
+      {leader && (
+        <DebriefSheet
+          visible={debriefVisible}
+          onClose={() => setDebriefVisible(false)}
+          bottomInset={insets.bottom}
+          generated={captainFlow.generatedDebrief}
+          saved={captainFlow.savedDebrief}
+          onSave={captainFlow.saveDebrief}
+        />
+      )}
 
       {admin && (
         <CaptainDashboard
