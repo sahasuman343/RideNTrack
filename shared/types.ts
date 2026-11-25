@@ -18,6 +18,8 @@ export interface User {
   share_ice_with_ride?: boolean;
   /** Opt-in: riders on the same live ride may receive this number for SOS texts. */
   share_phone_with_ride?: boolean;
+  /** F7: consent for the sensor recorder to keep motion samples. */
+  crash_research_consent_at?: string | null;
   ice_consent_at?: string | null;
   subscription_tier?: 'free' | 'pro_tourer';
 }
@@ -232,7 +234,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement' | 'check_in_missed';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement' | 'check_in_missed' | 'possible_crash' | 'crash_cancelled' | 'crash_detected';
   message?: string;
   /** Null when an SOS was sent before the phone ever got a GPS fix. */
   lat: number | null;
@@ -303,6 +305,9 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   regroup: '📢 Regroup Now',
   announcement: '📢 Captain Announcement',
   check_in_missed: '⏱️ Missed Check-in',
+  possible_crash: '⚠️ Possible Crash',
+  crash_cancelled: '✅ Rider Is OK',
+  crash_detected: '🚨 Crash Detected',
 };
 
 export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
@@ -436,3 +441,4 @@ export * from './spectator';
 export * from './battery';
 export * from './corridor';
 export * from './sos';
+export * from './crash';

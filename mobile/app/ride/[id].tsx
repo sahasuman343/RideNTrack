@@ -44,6 +44,7 @@ import {
   type RideMessageType,
   resolveRideEntitlements,
   attentionFromAlerts,
+  crashCountdownAttention,
   checkInAttention,
   regroupArrivalAttention,
   routeDeviationAttention,
@@ -64,6 +65,8 @@ import { useStationaryCheckIn } from '../../src/hooks/ride/useStationaryCheckIn'
 import { useRegroupPoints } from '../../src/hooks/ride/useRegroupPoints';
 import { useRideAlerts } from '../../src/hooks/ride/useRideAlerts';
 import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
+import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
+import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import {
@@ -98,7 +101,7 @@ import { DebriefSheet } from '../../src/components/ride/DebriefSheet';
 import { useCaptainFlow } from '../../src/hooks/ride/useCaptainFlow';
 import { CaptainStepCard } from '../../src/components/ride/CaptainStepCard';
 import { FamilyUpdatesRow } from '../../src/components/ride/FamilyUpdatesRow';
-import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { useFlag, useFlagPayload } from '../../src/hooks/useFeatureFlags';
 import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
 import { getCachedTrip, saveCachedRoute } from '../../src/lib/tripCache';
 import { SosSheet } from '../../src/components/ride/SosSheet';
@@ -132,8 +135,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   }
 }
 
-const SAFETY_ALERT_COOLDOWN_MS = 5 * 60 * 1000;
-const safetyAlertCooldowns = new Map<string, number>();
 
 export default function LiveRideScreen() {
   useKeepAwake();
@@ -307,6 +308,23 @@ export default function LiveRideScreen() {
       ]),
   });
   const { triggerSosWorkflow, broadcastSosToGroup } = sos;
+  // F7: crash countdown (beta flag) and the hidden sensor recorder.
+  const crashDetectionFlag = useFlag('crash_detection_beta');
+  const sensorRecorderFlag = useFlag('sensor_recorder');
+  const crashThresholds = useFlagPayload('crash_detection_beta');
+  const crash = useCrashDetection({
+    rideId: id,
+    userId,
+    active: active && sharing,
+    position,
+    online: sync.isOnline,
+    detectionEnabled: crashDetectionFlag,
+    recorderEnabled: sensorRecorderFlag,
+    researchConsent: Boolean(profile?.crash_research_consent_at),
+    thresholdsPayload: crashThresholds,
+    sendAlert: (type, message) => sendAlert(type, message),
+    escalate: () => sos.escalateCrash(),
+  });
   const { stationaryCountdown, confirmOk: confirmStationaryOk } = useStationaryCheckIn({
     active,
     position,
@@ -471,77 +489,8 @@ export default function LiveRideScreen() {
     return () => { cancelled = true; };
   }, [id, active, userId]);
 
-  // Reserve the cooldown synchronously and keep it outside the component so
-  // reopening the ride screen cannot re-send the same safety alert.
-  const publishSafetyAlert = async (key: string, type: AlertType, lat: number, lng: number, alertMsg: string) => {
-    if (!userId) return;
-    const cooldownKey = id + ':' + userId + ':' + key;
-    const nowMs = Date.now();
-    if (nowMs - (safetyAlertCooldowns.get(cooldownKey) || 0) < SAFETY_ALERT_COOLDOWN_MS) return;
-    safetyAlertCooldowns.set(cooldownKey, nowMs);
-    try {
-      await enqueueAlert({ id: await newQueueId(), ride_id: id, user_id: userId, type, lat, lng, message: alertMsg, created_at: new Date(nowMs).toISOString() });
-      void sync.flushQueue();
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Could not publish a group safety alert.');
-    }
-  };
-
-  // Route deviation depends only on this rider's own fix; it does not need to
-  // rerun on clock ticks or other riders' presence updates.
-  useEffect(() => {
-    if (!active || !position || !userId || isStale(position.timestamp) || !ride) return;
-    const routeCoordinates = route?.geometry?.coordinates;
-    if (!Array.isArray(routeCoordinates) || routeCoordinates.length < 2) {
-      setRouteDeviation(null);
-      return;
-    }
-    const deviation = distanceToRouteMeters(position, routeCoordinates);
-    const limit = ride.route_deviation_threshold_meters || 500;
-    setRouteDeviation(deviation);
-    if (deviation > limit) {
-      void publishSafetyAlert(
-        'route-deviation',
-        'route_deviation',
-        position.lat,
-        position.lng,
-        'Rider is approximately ' + Math.round(deviation) + ' m from the planned route (threshold ' + limit + ' m).'
-      );
-    }
-  }, [active, position, route, ride?.id, ride?.route_deviation_threshold_meters, userId, id]);
-
-  // Only the leader broadcasts "rider behind" so each gap produces one group
-  // alert. It also covers riders whose app is backgrounded. A lagging rider
-  // gets a local notice instead of a duplicate broadcast.
-  useEffect(() => {
-    if (!active || !position || !userId || isStale(position.timestamp, now) || !ride) return;
-    const limit = ride.rider_behind_threshold_meters || 1000;
-    if (admin) {
-      for (const rider of participants) {
-        if (rider.user_id === ride.admin_id || rider.user_id === userId || isStale(rider.timestamp, now)) continue;
-        if (!Number.isFinite(rider.lat) || !Number.isFinite(rider.lng)) continue;
-        const gap = distanceMeters(position, rider);
-        if (gap > limit) {
-          void publishSafetyAlert(
-            'rider-behind-' + rider.user_id,
-            'rider_behind',
-            rider.lat,
-            rider.lng,
-            rider.display_name + ' is approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).'
-          );
-        }
-      }
-      return;
-    }
-    const leader = participants.find(point => point.user_id === ride.admin_id && !isStale(point.timestamp, now));
-    if (!leader || !Number.isFinite(leader.lat) || !Number.isFinite(leader.lng)) return;
-    const gap = distanceMeters(leader, position);
-    const cooldownKey = id + ':' + userId + ':rider-behind-self';
-    if (gap > limit && now - (safetyAlertCooldowns.get(cooldownKey) || 0) >= SAFETY_ALERT_COOLDOWN_MS) {
-      safetyAlertCooldowns.set(cooldownKey, now);
-      setMessage('You are approximately ' + Math.round(gap) + ' m from the leader (threshold ' + limit + ' m).');
-    }
-  }, [active, position, participants, ride?.id, ride?.admin_id, ride?.rider_behind_threshold_meters, admin, userId, id, now]);
+  // Route deviation and "rider behind" safety alerts (one per gap, with cooldowns).
+  useSafetyWatch({ rideId: id, userId, active, admin, ride, route, position, participants, now, setRouteDeviation, setMessage, flushQueue: sync.flushQueue });
 
   useEffect(() => {
     setPosition(null);
@@ -1068,6 +1017,7 @@ export default function LiveRideScreen() {
   const deviationLimit = ride?.route_deviation_threshold_meters || 500;
   const attentionItems = useMemo<AttentionItem[]>(() => {
     const items: AttentionItem[] = attentionFromAlerts(alerts, { myUserId: userId, now, acknowledgedIds: acknowledgedAlertIds });
+    if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso));
     if (stationaryCountdown !== null) {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
@@ -1087,7 +1037,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1105,6 +1055,12 @@ export default function LiveRideScreen() {
     const alertId = item.id.startsWith('alert:') ? item.id.slice(6) : null;
     const alert = alertId ? alerts.find(a => a.id === alertId) : undefined;
     switch (actionId) {
+      case 'crash_ok':
+        crash.cancelCrash();
+        return;
+      case 'crash_help':
+        crash.requestHelp();
+        return;
       case 'ok':
         confirmStationaryOk();
         return;

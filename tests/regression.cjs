@@ -1773,7 +1773,8 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
 
   assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
   // Routine alerts need a fresh fix; an SOS is never blocked by GPS.
-  assert.match(rideSource, /!hasFreshFix && type !== 'emergency'[^)]*\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /!hasFreshFix && !NO_FIX_ALERT_TYPES\.has\(type\)\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /NO_FIX_ALERT_TYPES = new Set<AlertType>\(\['emergency', 'check_in_missed'/);
   assert.match(rideSource, /location_recorded_at: fix \? fix\.timestamp : null/);
   assert.match(rideSource, /if \(outcome === 'sent'\) \{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
 });

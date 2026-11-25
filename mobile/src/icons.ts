@@ -85,6 +85,9 @@ export const ALERT_ICONS: Record<AlertType, IconName> = {
   regroup: 'people-outline',
   announcement: 'megaphone-outline',
   check_in_missed: 'time-outline',
+  possible_crash: 'warning-outline',
+  crash_cancelled: 'checkmark-circle-outline',
+  crash_detected: 'medkit-outline',
 };
 
 export const MECHANICAL_ICONS: Record<MechanicalIssueType, IconName> = {

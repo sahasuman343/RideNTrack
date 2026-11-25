@@ -38,6 +38,9 @@ const LABELS: Record<string, string> = {
   regroup: '📢 Regroup now',
   announcement: '📢 Captain announcement',
   check_in_missed: '⏱️ Missed check-in',
+  possible_crash: '⚠️ Possible crash, confirming',
+  crash_cancelled: '✅ Rider is OK',
+  crash_detected: '🚨 Crash detected',
 };
 
 interface AlertRow {
@@ -70,7 +73,7 @@ Deno.serve(async req => {
     return new Response('Ignored', { status: 202 });
   }
   // A missed check-in is as urgent as an SOS: the rider may be down.
-  const emergency = alert.type === 'emergency' || alert.type === 'check_in_missed';
+  const emergency = alert.type === 'emergency' || alert.type === 'check_in_missed' || alert.type === 'crash_detected';
   const age = Date.now() - Date.parse(alert.created_at);
   if (!emergency && Number.isFinite(age) && age > MAX_ROUTINE_ALERT_AGE_MS) {
     return new Response('Stale alert', { status: 202 });

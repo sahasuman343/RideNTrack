@@ -37,7 +37,7 @@ export function useSosWorkflow(params: {
   position: LocationUpdate | null;
   online: boolean;
   serverSms: boolean;
-  sendAlert: (type: 'emergency', message?: string, alertId?: string) => Promise<AlertOutcome>;
+  sendAlert: (type: 'emergency' | 'crash_detected', message?: string, alertId?: string) => Promise<AlertOutcome>;
   setMessage: (m: string | null) => void;
   onMissingContact: () => void;
 }) {
@@ -75,7 +75,7 @@ export function useSosWorkflow(params: {
     const t = setInterval(() => {
       void supabase.rpc('get_outbound_status', { p_ride_id: rideId }).then(({ data }) => {
         const rows = (Array.isArray(data) ? data : []) as Array<{ template: string; status: string; created_at: string }>;
-        const mine = rows.filter(r => r.template === 'sos_alert' && Date.now() - Date.parse(r.created_at) < 15 * 60_000);
+        const mine = rows.filter(r => (r.template === 'sos_alert' || r.template === 'crash_alert') && Date.now() - Date.parse(r.created_at) < 15 * 60_000);
         if (mine.some(r => r.status === 'sent')) { setServer('sent'); track('sos_state', { step: 'server', state: 'sent_by_sms' }); }
         else if (mine.length && mine.every(r => r.status === 'failed')) setServer('failed');
       });
@@ -115,12 +115,12 @@ export function useSosWorkflow(params: {
   }, [recipients, smsBody]);
 
   /** The pack alert and server SMS. Safe to call twice; the alert id is reused. */
-  const alertPack = useCallback(async () => {
+  const alertPack = useCallback(async (type: 'emergency' | 'crash_detected' = 'emergency') => {
     const { sendAlert, online, serverSms } = latest.current;
     setStarted(true);
     alertIdRef.current ??= await newQueueId();
     const id = alertIdRef.current;
-    const outcome = await sendAlert('emergency', undefined, id);
+    const outcome = await sendAlert(type, type === 'crash_detected' ? 'No answer to the crash check.' : undefined, id);
     const state: PackState = outcome === 'sent' ? 'sent' : outcome === 'queued' ? 'queued' : 'failed';
     setPack(state);
     track('sos_state', { step: 'group', state: state === 'queued' ? 'waiting_for_signal' : state });
@@ -135,12 +135,22 @@ export function useSosWorkflow(params: {
   /** From the hold-to-confirm button: alert the pack, then show the next step. */
   const broadcastSosToGroup = useCallback(async () => {
     setSosModal(true);
-    await alertPack();
+    await alertPack('emergency');
+  }, [alertPack]);
+
+  /**
+   * The crash countdown ran out: the rider may not be able to tap anything, so
+   * the pack alert and the server SMS go now and the sheet stays open for a
+   * bystander (Call 112, text contacts).
+   */
+  const escalateCrash = useCallback(async () => {
+    setSosModal(true);
+    await alertPack('crash_detected');
   }, [alertPack]);
 
   /** From the sheet: everything at once, including the composer. */
   const sendSos = useCallback(async () => {
-    const packPromise = alertPack();
+    const packPromise = alertPack('emergency');
     await openComposer();
     await packPromise;
   }, [alertPack, openComposer]);
@@ -169,7 +179,7 @@ export function useSosWorkflow(params: {
 
   return {
     sosModal, started, steps, recipients, primaryLabel,
-    triggerSosWorkflow, closeSos, broadcastSosToGroup, sendSos, openComposer,
+    triggerSosWorkflow, closeSos, broadcastSosToGroup, sendSos, openComposer, escalateCrash,
     dialEmergencyContact: () => dial(latest.current.profile?.emergency_contact || '112'),
     dial112: () => dial('112'),
   };

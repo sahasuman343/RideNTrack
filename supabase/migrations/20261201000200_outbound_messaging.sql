@@ -72,7 +72,7 @@ DECLARE
   v_id uuid;
   v_status text := 'queued';
   v_reason text;
-  v_is_sos boolean := p_template IN ('sos_alert', 'crash_alert', 'check_in_missed', 'family_check_in_missed');
+  v_is_sos boolean := p_template IN ('sos_alert', 'crash_alert', 'check_in_missed', 'family_check_in_missed', 'family_crash');
 BEGIN
   SELECT id INTO v_id FROM public.outbound_messages WHERE idempotency_key = p_idempotency_key;
   IF v_id IS NOT NULL THEN RETURN v_id; END IF;

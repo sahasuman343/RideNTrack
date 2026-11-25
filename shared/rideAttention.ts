@@ -19,6 +19,9 @@ const ALERT_KIND: Record<AlertType, AttentionKind> = {
   rider_behind: 'info',
   announcement: 'info',
   check_in_missed: 'check_in',
+  possible_crash: 'incoming_sos',
+  crash_cancelled: 'info',
+  crash_detected: 'incoming_sos',
 };
 
 const ALERT_TITLE: Record<AlertType, (name: string) => string> = {
@@ -31,6 +34,9 @@ const ALERT_TITLE: Record<AlertType, (name: string) => string> = {
   rider_behind: name => `${name}: rider behind`,
   announcement: () => 'Captain announcement',
   check_in_missed: name => `${name} did not answer a check-in`,
+  possible_crash: name => `${name}: possible crash`,
+  crash_cancelled: name => `${name} is OK`,
+  crash_detected: name => `${name} may have crashed`,
 };
 
 function minutesBetween(laterIso: string, earlierIso: string): number {
@@ -53,8 +59,17 @@ export function attentionFromAlerts(
   const now = options.now ?? Date.now();
   const acknowledged = new Set(options.acknowledgedIds ?? []);
   const items: AttentionItem[] = [];
+  // A crash check is settled by a later cancel or detection from the same rider.
+  const settledCrashAfter = new Map<string, number>();
+  for (const alert of alerts) {
+    if (alert && (alert.type === 'crash_cancelled' || alert.type === 'crash_detected')) {
+      const t = Date.parse(alert.created_at);
+      if (Number.isFinite(t)) settledCrashAfter.set(alert.user_id, Math.max(settledCrashAfter.get(alert.user_id) ?? 0, t));
+    }
+  }
   for (const alert of alerts) {
     if (!alert || alert.user_id === options.myUserId) continue;
+    if (alert.type === 'possible_crash' && (settledCrashAfter.get(alert.user_id) ?? 0) >= Date.parse(alert.created_at)) continue;
     const created = Date.parse(alert.created_at);
     if (!Number.isFinite(created) || now - created >= RECENT_ALERT_WINDOW_MS) continue;
     const name = alert.display_name || 'Rider';
@@ -64,8 +79,13 @@ export function attentionFromAlerts(
     const actions: AttentionItem['actions'] = [];
     let body: string | null = alert.message ? alert.message : null;
 
-    if (alert.type === 'emergency') {
-      body = [alert.message, sosLocationSentence(alert)].filter(Boolean).join(' ');
+    if (alert.type === 'possible_crash') {
+      body = 'Checking if they are OK. Wait for the countdown before calling.';
+      if (hasLocation) actions.push({ id: 'directions', label: 'Directions', emphasis: 'primary' });
+    } else if (alert.type === 'crash_cancelled') {
+      body = 'False alarm. They cancelled the crash check.';
+    } else if (alert.type === 'emergency' || alert.type === 'crash_detected') {
+      body = [alert.type === 'crash_detected' ? 'No answer to the crash check.' : alert.message, sosLocationSentence(alert)].filter(Boolean).join(' ');
       actions.push({ id: 'escalate', label: 'Call 112', emphasis: 'danger' });
       if (hasLocation) actions.push({ id: 'directions', label: 'Directions', emphasis: 'primary' });
     } else if (alert.type === 'announcement') {
@@ -80,8 +100,9 @@ export function attentionFromAlerts(
       title: (alert.type === 'announcement' || sweepReport) && alert.message ? alert.message : ALERT_TITLE[alert.type]?.(name) ?? `${name} sent an alert`,
       body: alert.type === 'announcement' ? `From ${name}` : sweepReport ? `From ${name} (sweep)` : body,
       createdAt: alert.created_at,
-      expiresAt: new Date(created + RECENT_ALERT_WINDOW_MS).toISOString(),
+      expiresAt: new Date(created + (alert.type === 'crash_cancelled' ? 60_000 : RECENT_ALERT_WINDOW_MS)).toISOString(),
       actions,
+      ...(alert.type === 'possible_crash' ? { priority: 85 } : {}),
     });
   }
   return items;

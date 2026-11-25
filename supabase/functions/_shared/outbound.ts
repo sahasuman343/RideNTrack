@@ -11,6 +11,7 @@ export type OutboundTemplate =
   | 'family_ride_started'
   | 'family_reached_stay'
   | 'family_check_in_missed'
+  | 'family_crash'
   | 'sos_alert'
   | 'crash_alert'
   | 'check_in_missed';
@@ -40,6 +41,11 @@ export const TEMPLATES: Record<OutboundTemplate, TemplateSpec> = {
     vars: ['rider', 'minutes', 'link'],
     text: '{#rider#} stopped and has not answered a safety check for {#minutes#} min. Their group has been alerted. Last location: {#link#} - RideNTrack',
     dltEnv: 'DLT_TEMPLATE_FAMILY_CHECK_IN_MISSED',
+  },
+  family_crash: {
+    vars: ['rider', 'link'],
+    text: '{#rider#} may have had a fall and did not answer a safety check. Their group has been alerted and is checking. Live location: {#link#} - RideNTrack',
+    dltEnv: 'DLT_TEMPLATE_FAMILY_CRASH',
   },
   sos_alert: {
     vars: ['rider', 'ride', 'maps'],

@@ -67,7 +67,7 @@ DECLARE v_alert record; v_name text; v_ride text; v_maps text; r record; v_n int
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE = '28000'; END IF;
   SELECT * INTO v_alert FROM public.alerts WHERE id = p_alert_id;
-  IF v_alert.id IS NULL OR v_alert.user_id <> auth.uid() OR v_alert.type NOT IN ('emergency', 'check_in_missed') THEN
+  IF v_alert.id IS NULL OR v_alert.user_id <> auth.uid() OR v_alert.type NOT IN ('emergency', 'check_in_missed', 'crash_detected') THEN
     RAISE EXCEPTION 'Not your SOS' USING ERRCODE = '42501';
   END IF;
   SELECT coalesce(display_name, 'A rider') INTO v_name FROM public.profiles WHERE id = auth.uid();
@@ -78,7 +78,7 @@ BEGIN
     v_phone := public.to_e164(r.phone);
     CONTINUE WHEN v_phone IS NULL;
     PERFORM public.enqueue_outbound_message(v_alert.ride_id, auth.uid(), v_phone,
-      CASE WHEN v_alert.type = 'check_in_missed' THEN 'check_in_missed' ELSE 'sos_alert' END,
+      CASE v_alert.type WHEN 'check_in_missed' THEN 'check_in_missed' WHEN 'crash_detected' THEN 'crash_alert' ELSE 'sos_alert' END,
       jsonb_build_object('rider', v_name, 'ride', v_ride, 'maps', v_maps),
       'sos:' || p_alert_id::text || ':' || v_phone, 'sms', r.name);
     v_n := v_n + 1;

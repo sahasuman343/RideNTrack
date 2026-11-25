@@ -4,6 +4,9 @@ import { supabase } from '../../lib/supabase';
 import { enqueueAlert, newQueueId } from '../../lib/offlineQueue';
 import { track } from '../../services/analytics';
 
+/** An SOS-type alert must never wait for GPS; the last fix (or none) goes with it. */
+const NO_FIX_ALERT_TYPES = new Set<AlertType>(['emergency', 'check_in_missed', 'possible_crash', 'crash_cancelled', 'crash_detected']);
+
 export type AlertOutcome = 'sent' | 'queued' | 'failed';
 
 /**
@@ -34,7 +37,7 @@ export function useRideAlerts(params: {
     // An SOS must never be blocked by GPS: in a tunnel, a valley, or right
     // after unlocking a phone that only had foreground permission, the last
     // known position (with its age) is far better than nothing.
-    if (!hasFreshFix && type !== 'emergency' && type !== 'check_in_missed') {
+    if (!hasFreshFix && !NO_FIX_ALERT_TYPES.has(type)) {
       setMessage('Wait for a fresh GPS fix before sending an alert.');
       return 'failed';
     }

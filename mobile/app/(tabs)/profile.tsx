@@ -42,6 +42,16 @@ export default function ProfileScreen() {
   const [shareIceWithRide, setShareIceWithRide] = useState(Boolean(profile?.share_ice_with_ride));
   const [sharePhoneWithRide, setSharePhoneWithRide] = useState(Boolean(profile?.share_phone_with_ride));
   const phoneSharingFlag = useFlag('rider_phone_numbers');
+  const sensorRecorderFlag = useFlag('sensor_recorder');
+  const [researchBusy, setResearchBusy] = useState(false);
+  const researchConsent = Boolean(profile?.crash_research_consent_at);
+  const setResearchConsent = useCallback(async (on: boolean) => {
+    setResearchBusy(true);
+    const { error } = await supabase.rpc('set_crash_research_consent', { p_on: on });
+    setResearchBusy(false);
+    if (error) { Alert.alert('Could not save', error.message); return; }
+    await reloadProfile();
+  }, [reloadProfile]);
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
@@ -684,6 +694,24 @@ export default function ProfileScreen() {
               </View>
               <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor={theme.onAccent} />
             </View>
+            {sensorRecorderFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Help tune crash detection</Text>
+                  <Text style={styles.hint}>
+                    Saves a few seconds of motion data around hard braking and bumps while you ride, never your messages or photos. Turning it off deletes what was saved.
+                  </Text>
+                </View>
+                <Switch
+                  value={researchConsent}
+                  disabled={researchBusy}
+                  onValueChange={on => void setResearchConsent(on)}
+                  accessibilityLabel="Share motion data to help tune crash detection"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
             </>}
             {section === 'bike' && <>
             <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
