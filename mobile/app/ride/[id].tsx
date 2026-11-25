@@ -55,6 +55,8 @@ import {
   LOW_BATTERY_PERCENT,
   riderPresence,
   lockScreenCard,
+  roadReportFeatures,
+  roadReportAheadAttention,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -70,6 +72,8 @@ import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useRideChat } from '../../src/hooks/ride/useRideChat';
 import { useSpectatorLinks } from '../../src/hooks/ride/useSpectatorLinks';
 import { useLastFuelWarning } from '../../src/hooks/ride/useLastFuelWarning';
+import { useRoadReports } from '../../src/hooks/ride/useRoadReports';
+import { RoadReportSheet } from '../../src/components/ride/RoadReportSheet';
 import { postRideStartCard, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
@@ -970,11 +974,24 @@ export default function LiveRideScreen() {
 
   const nowIso = new Date(now).toISOString();
   const lastFuel = useLastFuelWarning({ ride, route, profile, position, online: sync.isOnline, nowIso });
+  // F11: rider road reports (map layer, "ahead of you" warning, report sheet).
+  const roadReportsFlag = useFlag('road_reports');
+  const road = useRoadReports({
+    enabled: roadReportsFlag, rideId: id, userId, routeCoords: route?.geometry?.coordinates, position,
+    online: sync.isOnline, pendingCount: sync.pendingRoadReportsCount, flushQueue: sync.flushQueue,
+  });
+  const [roadSheet, setRoadSheet] = useState<{ open: boolean; selectedId: string | null }>({ open: false, selectedId: null });
+  const roadFeatures = useMemo(() => roadReportFeatures(road.reports, now), [road.reports, Math.floor(now / 60000)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const roadAhead = useMemo(
+    () => (active ? roadReportAheadAttention(position, route?.geometry?.coordinates, road.reports, nowIso) : null),
+    [active, position?.lat, position?.lng, route, road.reports, Math.floor(now / 30000)], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const deviationLimit = ride?.route_deviation_threshold_meters || 500;
   const attentionItems = useMemo<AttentionItem[]>(() => {
     const items: AttentionItem[] = attentionFromAlerts(alerts, { myUserId: userId, now, acknowledgedIds: acknowledgedAlertIds });
     if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso));
     if (lastFuel.item) items.push(lastFuel.item);
+    if (roadAhead) items.push(roadAhead);
     if (stationaryCountdown !== null) {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
@@ -994,7 +1011,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, roadAhead, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1024,6 +1041,11 @@ export default function LiveRideScreen() {
         return;
       }
       case 'dismiss_fuel':
+      case 'dismiss_road':
+        dismissAttention(item);
+        return;
+      case 'road_confirm':
+        void road.confirm(item.id.replace(/^road:/, ''));
         dismissAttention(item);
         return;
       case 'ok':
@@ -1111,6 +1133,8 @@ export default function LiveRideScreen() {
         route={route}
         trail={actualTrailGeoJson}
         riders={riderFeatures}
+        roadReports={roadReportsFlag ? roadFeatures : undefined}
+        onRoadReportPress={reportId => setRoadSheet({ open: true, selectedId: reportId })}
         onReady={() => { setMapReady(true); setMapError(false); }}
         onError={() => setMapError(true)}
         onUserGesture={() => setFollow(false)}
@@ -1476,6 +1500,20 @@ export default function LiveRideScreen() {
         onSos={() => { setModal(false); triggerSosWorkflow(); }}
         onAlert={type => void sendAlert(type).then(outcome => { if (outcome !== 'failed') setModal(false); })}
         onRoadsideHelp={() => { setModal(false); void loadBreakdownDirectory(); }}
+        onRoadReport={roadReportsFlag ? () => { setModal(false); setRoadSheet({ open: true, selectedId: null }); } : undefined}
+      />
+
+      <RoadReportSheet
+        visible={roadSheet.open}
+        onClose={() => setRoadSheet({ open: false, selectedId: null })}
+        bottomInset={insets.bottom}
+        hasFix={Boolean(position)}
+        online={sync.isOnline}
+        selected={road.reports.find(r => r.id === roadSheet.selectedId) ?? null}
+        canHide={leader}
+        onReport={road.report}
+        onConfirm={reportId => void road.confirm(reportId)}
+        onHide={reportId => void road.hide(reportId)}
       />
 
       <AnnouncementSheet

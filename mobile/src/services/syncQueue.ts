@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { getQueueCounts, getQueuedAlerts, getQueuedLocations, getQueuedMessages, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
+import { getQueueCounts, getQueuedAlerts, getQueuedLocations, getQueuedMessages, getQueuedRoadReports, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
 
 // Queued items older than this are not useful to the group and would only
 // grow the device database on a phone that stays offline for weeks.
@@ -35,7 +35,7 @@ async function flush() {
   if (!userId) return;
   await pruneQueue(MAX_QUEUE_AGE_MS).catch(() => {});
   const counts = await getQueueCounts(userId);
-  if (counts.locations === 0 && counts.alerts === 0 && !counts.messages) return;
+  if (counts.locations === 0 && counts.alerts === 0 && !counts.messages && !counts.roadReports) return;
 
   let alertError: string | null = null;
   const alerts = await getQueuedAlerts(userId);
@@ -90,6 +90,17 @@ async function flush() {
         continue;
       }
       messageError ||= error.message;
+    }
+  }
+
+  // F11: road reports. The queue id is the report id, so retries are no-ops;
+  // a rate limit or a ride the rider left will never pass, so drop those.
+  if (counts.roadReports) {
+    for (const r of await getQueuedRoadReports(userId)) {
+      const { error } = await supabase.rpc('create_road_report', {
+        p_id: r.id, p_type: r.type, p_lat: r.lat, p_lng: r.lng, p_note: r.note, p_ride_id: r.ride_id,
+      });
+      if (!error || isPermanentRejection(error) || error.code === 'P0001') await clearQueuedItems(userId, [r.id]);
     }
   }
 

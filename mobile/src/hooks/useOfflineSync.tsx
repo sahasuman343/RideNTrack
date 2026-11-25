@@ -27,9 +27,9 @@ function useOfflineSyncState() {
   const { user } = useAuth();
   const userId = user?.id;
   const [isOnline, setIsOnline] = useState(false);
-  const [counts, setCounts] = useState({ locations: 0, alerts: 0, messages: 0 });
+  const [counts, setCounts] = useState({ locations: 0, alerts: 0, messages: 0, roadReports: 0 });
   type Counts = typeof counts;
-  const same = (a: Counts, b: Counts) => a.locations === b.locations && a.alerts === b.alerts && a.messages === b.messages;
+  const same = (a: Counts, b: Counts) => a.locations === b.locations && a.alerts === b.alerts && a.messages === b.messages && a.roadReports === b.roadReports;
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const updateCounts = useCallback(async () => {
@@ -47,7 +47,7 @@ function useOfflineSyncState() {
       return;
     }
     setCounts(previous => same(previous, pending) ? previous : pending);
-    if (pending.locations === 0 && pending.alerts === 0 && pending.messages === 0) {
+    if (pending.locations === 0 && pending.alerts === 0 && pending.messages === 0 && pending.roadReports === 0) {
       setSyncError(null);
       return;
     }
@@ -65,7 +65,7 @@ function useOfflineSyncState() {
     return () => { unsubscribe(); clearInterval(timer); app.remove(); };
   }, [flushQueue, updateCounts]);
   return useMemo(
-    () => ({ isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, pendingMessagesCount: counts.messages, isSyncing, syncError, updateCounts, flushQueue }),
+    () => ({ isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, pendingMessagesCount: counts.messages, pendingRoadReportsCount: counts.roadReports, isSyncing, syncError, updateCounts, flushQueue }),
     [isOnline, counts, isSyncing, syncError, updateCounts, flushQueue],
   );
 }

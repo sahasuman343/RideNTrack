@@ -22,6 +22,9 @@ interface BaseSheetProps {
   onClose: () => void;
 }
 
+/** Sent by the app itself (check-ins, crash detection), never picked by hand. */
+const NOT_PICKABLE = new Set<AlertType>(['announcement', 'mechanical', 'check_in_missed', 'possible_crash', 'crash_cancelled', 'crash_detected']);
+
 export function AlertPickerSheet(props: BaseSheetProps & {
   busy: boolean;
   isCaptain: boolean;
@@ -30,6 +33,8 @@ export function AlertPickerSheet(props: BaseSheetProps & {
   onSos: () => void;
   onAlert: (type: AlertType) => void;
   onRoadsideHelp: () => void;
+  /** F11: report the road for every rider passing later (absent when the flag is off). */
+  onRoadReport?: () => void;
 }) {
   const { s, theme, busy } = props;
   return (
@@ -56,7 +61,7 @@ export function AlertPickerSheet(props: BaseSheetProps & {
           <Text style={[s.text, { color: theme.warning }]}>Mechanical Breakdown…</Text>
         </TouchableOpacity>
         {(Object.keys(ALERT_LABELS) as AlertType[])
-          .filter(t => t !== 'announcement' && t !== 'mechanical')
+          .filter(t => !NOT_PICKABLE.has(t))
           .map(type => (
             <TouchableOpacity
               key={type}
@@ -68,6 +73,12 @@ export function AlertPickerSheet(props: BaseSheetProps & {
               <Text style={s.text}>{plainLabel(ALERT_LABELS[type])}</Text>
             </TouchableOpacity>
           ))}
+        {props.onRoadReport && (
+          <TouchableOpacity style={[s.alertOption, { borderColor: theme.border, borderWidth: 1 }]} onPress={props.onRoadReport}>
+            <Icon name="flag-outline" size="md" color={theme.textMuted} />
+            <Text style={s.text}>Report the road for everyone…</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={[s.alertOption, { borderColor: theme.border, borderWidth: 1 }]} onPress={props.onRoadsideHelp}>
           <Icon name="call-outline" size="md" color={theme.textMuted} />
           <Text style={s.text}>Roadside help (1033 / RSA)</Text>

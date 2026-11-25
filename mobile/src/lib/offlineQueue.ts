@@ -1,6 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SQLite from 'expo-sqlite';
-import { BufferedLocation, BufferedAlert, type QueuedChatMessage } from '@ridentrack/shared';
+import { BufferedLocation, BufferedAlert, type QueuedChatMessage, type RoadReportType } from '@ridentrack/shared';
+
+/** F11: a road report written with no signal. */
+export interface QueuedRoadReport {
+  id: string;
+  ride_id: string;
+  user_id: string;
+  type: RoadReportType;
+  lat: number;
+  lng: number;
+  note: string | null;
+  created_at: string;
+}
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
 const uuid = (hex: string) => hex.slice(0,8) + '-' + hex.slice(8,12) + '-4' + hex.slice(13,16) + '-8' + hex.slice(17,20) + '-' + hex.slice(20);
@@ -52,7 +64,7 @@ export async function newQueueId() {
   }
   return fallbackUuid();
 }
-async function enqueue(kind: string, item: BufferedLocation | BufferedAlert | QueuedChatMessage) {
+async function enqueue(kind: string, item: BufferedLocation | BufferedAlert | QueuedChatMessage | QueuedRoadReport) {
   const id = item.id || await newQueueId();
   await (await getDatabase()).runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, kind, item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
 }
@@ -60,6 +72,7 @@ export const enqueueLocation = (item: BufferedLocation) => enqueue('location', i
 export const enqueueAlert = (item: BufferedAlert) => enqueue('alert', item);
 /** F8: chat written with no signal. */
 export const enqueueMessage = (item: QueuedChatMessage) => enqueue('message', item);
+export const enqueueRoadReport = (item: QueuedRoadReport) => enqueue('road_report', item);
 async function read<T>(kind: string, userId: string, limit: number): Promise<T[]> {
   const rows = await (await getDatabase()).getAllAsync<{ payload: string }>('SELECT payload FROM queue WHERE kind = ? AND user_id = ? ORDER BY created_at LIMIT ?', kind, userId, limit);
   return rows.map(row => JSON.parse(row.payload) as T);
@@ -67,6 +80,7 @@ async function read<T>(kind: string, userId: string, limit: number): Promise<T[]
 export const getQueuedLocations = (userId: string, limit = 100) => read<BufferedLocation>('location', userId, limit);
 export const getQueuedAlerts = (userId: string) => read<BufferedAlert>('alert', userId, 100);
 export const getQueuedMessages = (userId: string) => read<QueuedChatMessage>('message', userId, 200);
+export const getQueuedRoadReports = (userId: string) => read<QueuedRoadReport>('road_report', userId, 50);
 export async function getQueuedMessagesForRide(userId: string, rideId: string): Promise<QueuedChatMessage[]> {
   const rows = await (await getDatabase()).getAllAsync<{ payload: string }>("SELECT payload FROM queue WHERE kind = 'message' AND user_id = ? AND ride_id = ? ORDER BY created_at", userId, rideId);
   return rows.map(row => JSON.parse(row.payload) as QueuedChatMessage);
@@ -84,6 +98,7 @@ export async function getQueueCounts(userId: string) {
     locations: rows.find(r => r.kind === 'location')?.count || 0,
     alerts: rows.find(r => r.kind === 'alert')?.count || 0,
     messages: rows.find(r => r.kind === 'message')?.count || 0,
+    roadReports: rows.find(r => r.kind === 'road_report')?.count || 0,
   };
 }
 export async function getQueuedCountForRide(userId: string, rideId: string) {

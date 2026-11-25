@@ -449,3 +449,4 @@ export * from './crash';
 export * from './chat';
 export * from './lockScreen';
 export * from './touringKnowledge';
+export * from './roadReports';

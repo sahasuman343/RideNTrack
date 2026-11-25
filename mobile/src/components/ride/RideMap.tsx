@@ -1,7 +1,7 @@
 import React, { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { Camera } from '@rnmapbox/maps';
-import type { Ride } from '@ridentrack/shared';
+import type { Ride, roadReportFeatures } from '@ridentrack/shared';
 import type { RidePalette } from '../../theme';
 import type { RideStyles } from './rideStyles';
 
@@ -116,7 +116,50 @@ const RidersLayer = memo(function RidersLayer({ features, theme }: { features: R
   );
 });
 
+export type RoadReportFeatureCollection = ReturnType<typeof roadReportFeatures>;
+
+/** F11: rider road reports. Severe ones (landslide, closure) are red, others amber; pending ones are hollow. */
+const RoadReportsLayer = memo(function RoadReportsLayer({ features, theme, onPress }: { features: RoadReportFeatureCollection; theme: RidePalette; onPress?: (id: string) => void }) {
+  if (!Mapbox || !features.features.length) return null;
+  return (
+    <Mapbox.ShapeSource
+      id="road-reports"
+      shape={features}
+      onPress={e => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (id && onPress) onPress(id);
+      }}
+    >
+      <Mapbox.CircleLayer
+        id="road-report-dot"
+        style={{
+          circleRadius: 9,
+          circleColor: ['case', ['==', ['get', 'severe'], true], theme.danger, theme.warning],
+          circleOpacity: ['case', ['==', ['get', 'pending'], true], 0.25, 0.95],
+          circleStrokeWidth: 2.5,
+          circleStrokeColor: ['case', ['==', ['get', 'pending'], true], ['case', ['==', ['get', 'severe'], true], theme.danger, theme.warning], '#fff'],
+        }}
+      />
+      <Mapbox.SymbolLayer
+        id="road-report-label"
+        minZoomLevel={11}
+        style={{
+          textField: ['get', 'label'],
+          textOffset: [0, 1.5],
+          textSize: 11,
+          textColor: theme.text,
+          textHaloColor: theme.surface,
+          textHaloWidth: 2,
+        }}
+      />
+    </Mapbox.ShapeSource>
+  );
+});
+
 export interface RideMapProps {
+  /** F11: road reports along the ride. */
+  roadReports?: RoadReportFeatureCollection;
+  onRoadReportPress?: (id: string) => void;
   /** F5: offline packs are saved in outdoors-v12, so use it with no signal. */
   offline?: boolean;
   s: RideStyles;
@@ -164,6 +207,7 @@ export const RideMap = memo(function RideMap(props: RideMapProps) {
       {hasRoute && <RouteLayer route={route} />}
       {trail && <TrailLayer trail={trail} />}
       <EndpointsLayer origin={origin} destination={destination} surface={theme.surface} />
+      {props.roadReports && <RoadReportsLayer features={props.roadReports} theme={theme} onPress={props.onRoadReportPress} />}
       <RidersLayer features={riders} theme={theme} />
     </Mapbox.MapView>
   );

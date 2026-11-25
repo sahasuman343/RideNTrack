@@ -218,7 +218,7 @@ test('offline chat messages queue per ride and count separately from alerts', as
   await queue.enqueueMessage({ id:'11111111-1111-4111-8111-111111111111',ride_id:'r1',user_id:'u',body:'Copy',message_type:'quick_reply',created_at:'2026-11-25T10:00:00Z' });
   await queue.enqueueMessage({ id:'22222222-2222-4222-8222-222222222222',ride_id:'r2',user_id:'u',body:'Other ride',message_type:'text',created_at:'2026-11-25T10:01:00Z' });
   const counts = await queue.getQueueCounts('u');
-  assert.deepEqual(counts, { locations:0, alerts:0, messages:2 });
+  assert.deepEqual(counts, { locations:0, alerts:0, messages:2, roadReports:0 });
   const r1 = await queue.getQueuedMessagesForRide('u','r1');
   assert.equal(r1.length,1); assert.equal(r1[0].body,'Copy');
   sqlite.close();
@@ -245,6 +245,31 @@ test('queued chat uploads with its client id; a refused message is reported, not
   assert.equal(upserts[0][2].onConflict,'client_id');
   assert.equal(service.rejectedMessageIds.has('m2'),true);
   assert.equal(service.rejectedMessageIds.has('m1'),false);
+});
+test('queued road reports upload by id; rate-limited ones are dropped, network errors kept', async () => {
+  let reports=[
+    {id:'r1',ride_id:'ride',user_id:'u',type:'pothole',lat:12,lng:77,note:null,created_at:'t'},
+    {id:'r2',ride_id:'ride',user_id:'u',type:'pothole',lat:12,lng:77,note:null,created_at:'t'},
+    {id:'r3',ride_id:'ride',user_id:'u',type:'pothole',lat:12,lng:77,note:null,created_at:'t'},
+  ];
+  const calls=[];
+  const service = loader({
+    '../lib/supabase':{supabase:{
+      auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},
+      rpc:async(name,args)=>{calls.push([name,args.p_id]);
+        if(args.p_id==='r2') return {data:null,error:{code:'P0001',message:'Too many road reports in the last hour'}};
+        if(args.p_id==='r3') return {data:null,error:{message:'Network request failed'}};
+        return {data:args.p_id,error:null};},
+    }},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},
+      getQueueCounts:async()=>({locations:0,alerts:0,messages:0,roadReports:reports.length}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>[],
+      getQueuedMessages:async()=>[],getQueuedRoadReports:async()=>reports,
+      clearQueuedItems:async(_u,ids)=>{reports=reports.filter(r=>!ids.includes(r.id));},
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await service.syncQueue();
+  assert.deepEqual(calls.map(c=>c[0]),['create_road_report','create_road_report','create_road_report']);
+  assert.deepEqual(reports.map(r=>r.id),['r3']);
 });
 test('legacy invalid alert IDs migrate once to durable UUIDs', async () => {
   const legacy = new Map([['@ridentrack/alert_queue',JSON.stringify([{id:'123-random',ride_id:'r',user_id:'u',type:'fuel',lat:0,lng:0,created_at:'2026-10-01T00:00:00Z'}])]]);
