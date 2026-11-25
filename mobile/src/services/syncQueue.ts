@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { getQueueCounts, getQueuedAlerts, getQueuedLocations, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
+import { getQueueCounts, getQueuedAlerts, getQueuedLocations, getQueuedMessages, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
 
 // Queued items older than this are not useful to the group and would only
 // grow the device database on a phone that stays offline for weeks.
@@ -15,6 +15,9 @@ function isPermanentRejection(error: { code?: string | null } | null | undefined
 }
 
 let running: Promise<void> | null = null;
+
+/** Chat messages the server refused for good (shown as Failed with a retry). */
+export const rejectedMessageIds = new Set<string>();
 const LOCATION_BATCH_SIZE = 100;
 // Bound each pass so background sync does not monopolize the JS thread or
 // radio. The next connectivity/app-state cycle continues from the queue head.
@@ -32,7 +35,7 @@ async function flush() {
   if (!userId) return;
   await pruneQueue(MAX_QUEUE_AGE_MS).catch(() => {});
   const counts = await getQueueCounts(userId);
-  if (counts.locations === 0 && counts.alerts === 0) return;
+  if (counts.locations === 0 && counts.alerts === 0 && !counts.messages) return;
 
   let alertError: string | null = null;
   const alerts = await getQueuedAlerts(userId);
@@ -66,6 +69,27 @@ async function flush() {
         await clearQueuedItems(userId, [alert.id]);
       }
       alertError = firstError;
+    }
+  }
+
+  // F8: chat written offline. client_id makes a retry after a lost
+  // acknowledgement a no-op on the server.
+  let messageError: string | null = null;
+  if (counts.messages) {
+    const messages = await getQueuedMessages(userId);
+    for (const m of messages) {
+      const { error } = await supabase.from('ride_messages').upsert({
+        client_id: m.id, ride_id: m.ride_id, sender_id: m.user_id, body: m.body,
+        message_type: m.message_type, client_created_at: m.created_at,
+      }, { onConflict: 'client_id', ignoreDuplicates: true });
+      if (!error) { await clearQueuedItems(userId, [m.id]); continue; }
+      if (isPermanentRejection(error)) {
+        // e.g. the rider left the ride; keep it out of the queue but let the chat show it as failed.
+        await clearQueuedItems(userId, [m.id]);
+        rejectedMessageIds.add(m.id);
+        continue;
+      }
+      messageError ||= error.message;
     }
   }
 
@@ -104,4 +128,5 @@ async function flush() {
     await clearQueuedItems(userId, batch.map(item => item.id!));
   }
   if (alertError) throw new Error('Some alerts remain queued: ' + alertError);
+  if (messageError) throw new Error('Some messages remain queued: ' + messageError);
 }

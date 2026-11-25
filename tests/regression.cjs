@@ -212,6 +212,40 @@ test('concurrent writes and exact-ID acknowledgement preserve samples and accoun
   assert.equal((await queue.getQueuedLocations('user-b')).length,1);
   sqlite.close();
 });
+test('offline chat messages queue per ride and count separately from alerts', async () => {
+  const { queue,sqlite } = queueFixture();
+  await queue.enqueueMessage({ id:'11111111-1111-4111-8111-111111111111',ride_id:'r1',user_id:'u',body:'Copy',message_type:'quick_reply',created_at:'2026-11-25T10:00:00Z' });
+  await queue.enqueueMessage({ id:'11111111-1111-4111-8111-111111111111',ride_id:'r1',user_id:'u',body:'Copy',message_type:'quick_reply',created_at:'2026-11-25T10:00:00Z' });
+  await queue.enqueueMessage({ id:'22222222-2222-4222-8222-222222222222',ride_id:'r2',user_id:'u',body:'Other ride',message_type:'text',created_at:'2026-11-25T10:01:00Z' });
+  const counts = await queue.getQueueCounts('u');
+  assert.deepEqual(counts, { locations:0, alerts:0, messages:2 });
+  const r1 = await queue.getQueuedMessagesForRide('u','r1');
+  assert.equal(r1.length,1); assert.equal(r1[0].body,'Copy');
+  sqlite.close();
+});
+test('queued chat uploads with its client id; a refused message is reported, not retried forever', async () => {
+  let messages=[{id:'m1',ride_id:'r',user_id:'u',body:'ok',message_type:'text',created_at:'t'},{id:'m2',ride_id:'old',user_id:'u',body:'left ride',message_type:'text',created_at:'t'}];
+  const upserts=[];
+  const service = loader({
+    '../lib/supabase':{supabase:{
+      auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},
+      from:table=>({upsert:async(row,opts)=>{upserts.push([table,row,opts]);return row.ride_id==='old'?{error:{code:'42501',message:'RLS'}}:{error:null};}}),
+      rpc:async()=>({data:0,error:null}),
+    }},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},
+      getQueueCounts:async()=>({locations:0,alerts:0,messages:messages.length}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>[],
+      getQueuedMessages:async()=>messages,
+      clearQueuedItems:async(_u,ids)=>{messages=messages.filter(m=>!ids.includes(m.id));},
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await service.syncQueue();
+  assert.equal(messages.length,0);
+  assert.equal(upserts[0][0],'ride_messages');
+  assert.equal(upserts[0][1].client_id,'m1');
+  assert.equal(upserts[0][2].onConflict,'client_id');
+  assert.equal(service.rejectedMessageIds.has('m2'),true);
+  assert.equal(service.rejectedMessageIds.has('m1'),false);
+});
 test('legacy invalid alert IDs migrate once to durable UUIDs', async () => {
   const legacy = new Map([['@ridentrack/alert_queue',JSON.stringify([{id:'123-random',ride_id:'r',user_id:'u',type:'fuel',lat:0,lng:0,created_at:'2026-10-01T00:00:00Z'}])]]);
   const { queue,sqlite } = queueFixture(legacy);

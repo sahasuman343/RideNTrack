@@ -27,25 +27,27 @@ function useOfflineSyncState() {
   const { user } = useAuth();
   const userId = user?.id;
   const [isOnline, setIsOnline] = useState(false);
-  const [counts, setCounts] = useState({ locations: 0, alerts: 0 });
+  const [counts, setCounts] = useState({ locations: 0, alerts: 0, messages: 0 });
+  type Counts = typeof counts;
+  const same = (a: Counts, b: Counts) => a.locations === b.locations && a.alerts === b.alerts && a.messages === b.messages;
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const updateCounts = useCallback(async () => {
     if (!userId) return;
     const next = await getQueueCounts(userId);
-    setCounts(previous => previous.locations === next.locations && previous.alerts === next.alerts ? previous : next);
+    setCounts(previous => same(previous, next) ? previous : next);
   }, [userId]);
   const flushQueue = useCallback(async () => {
     if (!userId) return;
-    let pending: { locations: number; alerts: number };
+    let pending: Counts;
     try {
       pending = await getQueueCounts(userId);
     } catch (e) {
       setSyncError(e instanceof Error ? e.message : 'Could not read device storage.');
       return;
     }
-    setCounts(previous => previous.locations === pending.locations && previous.alerts === pending.alerts ? previous : pending);
-    if (pending.locations === 0 && pending.alerts === 0) {
+    setCounts(previous => same(previous, pending) ? previous : pending);
+    if (pending.locations === 0 && pending.alerts === 0 && pending.messages === 0) {
       setSyncError(null);
       return;
     }
@@ -63,7 +65,7 @@ function useOfflineSyncState() {
     return () => { unsubscribe(); clearInterval(timer); app.remove(); };
   }, [flushQueue, updateCounts]);
   return useMemo(
-    () => ({ isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, isSyncing, syncError, updateCounts, flushQueue }),
+    () => ({ isOnline, pendingLocationsCount: counts.locations, pendingAlertsCount: counts.alerts, pendingMessagesCount: counts.messages, isSyncing, syncError, updateCounts, flushQueue }),
     [isOnline, counts, isSyncing, syncError, updateCounts, flushQueue],
   );
 }

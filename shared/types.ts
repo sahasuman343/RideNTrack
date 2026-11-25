@@ -379,6 +379,10 @@ export interface RideMessage {
   attachment_url?: string | null;
   is_pinned: boolean;
   created_at: string;
+  /** F8: id the phone gave the message, so retries never duplicate it. */
+  client_id?: string | null;
+  /** F8: when the rider wrote it (created_at is when it reached the server). */
+  client_created_at?: string | null;
 }
 
 export const QUICK_REPLY_PRESETS = [
@@ -442,3 +446,4 @@ export * from './battery';
 export * from './corridor';
 export * from './sos';
 export * from './crash';
+export * from './chat';

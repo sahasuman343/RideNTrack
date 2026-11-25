@@ -40,8 +40,6 @@ import {
   formatMechanicalBreakdownMessage,
   SEEDED_BREAKDOWN_DIRECTORY,
   type VerifiedBreakdownService,
-  sendRideMessage,
-  type RideMessageType,
   resolveRideEntitlements,
   attentionFromAlerts,
   crashCountdownAttention,
@@ -55,6 +53,7 @@ import {
   hoursLeft,
   profileForRole,
   LOW_BATTERY_PERCENT,
+  riderPresence,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -67,6 +66,7 @@ import { useRideAlerts } from '../../src/hooks/ride/useRideAlerts';
 import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
 import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
 import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
+import { useRideChat } from '../../src/hooks/ride/useRideChat';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import {
@@ -308,6 +308,11 @@ export default function LiveRideScreen() {
       ]),
   });
   const { triggerSosWorkflow, broadcastSosToGroup } = sos;
+  // F8: chat goes through the offline queue, so it works in dead zones.
+  const chat = useRideChat({
+    rideId: id, userId, online: sync.isOnline, messages,
+    pendingMessagesCount: sync.pendingMessagesCount, flushQueue: sync.flushQueue,
+  });
   // F7: crash countdown (beta flag) and the hidden sensor recorder.
   const crashDetectionFlag = useFlag('crash_detection_beta');
   const sensorRecorderFlag = useFlag('sensor_recorder');
@@ -446,7 +451,13 @@ export default function LiveRideScreen() {
         return {
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-          properties: { name: p.display_name || 'Rider', mine: p.user_id === userId, stale: liveStatus.status === 'disconnected', status: liveStatus.status },
+          properties: {
+            name: p.display_name || 'Rider',
+            mine: p.user_id === userId,
+            stale: liveStatus.status === 'disconnected',
+            status: liveStatus.status,
+            age: p.user_id === userId ? '' : (() => { const presence = riderPresence(p.timestamp, now); return presence.state === 'live' ? '' : presence.label; })(),
+          },
         };
       }),
   }), [points, userId, now, ride?.status]);
@@ -1620,13 +1631,11 @@ export default function LiveRideScreen() {
       <TripChatSheet
         visible={chatVisible}
         onClose={() => setChatVisible(false)}
-        messages={messages}
-        currentUserId={userId}
+        lines={chat.lines}
+        summary={chat.summary}
         isOnline={sync.isOnline}
-        onSend={async (body: string, messageType: RideMessageType) => {
-          if (!userId || !id) return;
-          await sendRideMessage(supabase, { rideId: id, senderId: userId, body, messageType });
-        }}
+        onSend={chat.send}
+        onRetry={message => void chat.retry(message)}
       />
 
       <MechanicalSheet

@@ -24,7 +24,7 @@ export type RiderFeatureCollection = {
   features: Array<{
     type: 'Feature';
     geometry: { type: 'Point'; coordinates: number[] };
-    properties: { name: string; mine: boolean; stale: boolean; status: string };
+    properties: { name: string; mine: boolean; stale: boolean; status: string; /** "4 min ago" / "In dead zone"; empty while live. */ age: string };
   }>;
 };
 
@@ -98,7 +98,13 @@ const RidersLayer = memo(function RidersLayer({ features, theme }: { features: R
       <Mapbox.SymbolLayer
         id="rider-label"
         style={{
-          textField: ['coalesce', ['to-string', ['get', 'name']], 'Rider'],
+          // Old positions say how old they are, right under the name.
+          textField: [
+            'case',
+            ['>', ['length', ['coalesce', ['get', 'age'], '']], 0],
+            ['concat', ['coalesce', ['to-string', ['get', 'name']], 'Rider'], '\n', ['get', 'age']],
+            ['coalesce', ['to-string', ['get', 'name']], 'Rider'],
+          ],
           textOffset: [0, 1.8],
           textSize: 12,
           textColor: theme.text,

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SQLite from 'expo-sqlite';
-import { BufferedLocation, BufferedAlert } from '@ridentrack/shared';
+import { BufferedLocation, BufferedAlert, type QueuedChatMessage } from '@ridentrack/shared';
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
 const uuid = (hex: string) => hex.slice(0,8) + '-' + hex.slice(8,12) + '-4' + hex.slice(13,16) + '-8' + hex.slice(17,20) + '-' + hex.slice(20);
@@ -52,18 +52,25 @@ export async function newQueueId() {
   }
   return fallbackUuid();
 }
-async function enqueue(kind: string, item: BufferedLocation | BufferedAlert) {
+async function enqueue(kind: string, item: BufferedLocation | BufferedAlert | QueuedChatMessage) {
   const id = item.id || await newQueueId();
   await (await getDatabase()).runAsync('INSERT OR IGNORE INTO queue VALUES (?, ?, ?, ?, ?, ?)', id, kind, item.user_id, item.ride_id, JSON.stringify({ ...item, id }), 'timestamp' in item ? item.timestamp : item.created_at);
 }
 export const enqueueLocation = (item: BufferedLocation) => enqueue('location', item);
 export const enqueueAlert = (item: BufferedAlert) => enqueue('alert', item);
+/** F8: chat written with no signal. */
+export const enqueueMessage = (item: QueuedChatMessage) => enqueue('message', item);
 async function read<T>(kind: string, userId: string, limit: number): Promise<T[]> {
   const rows = await (await getDatabase()).getAllAsync<{ payload: string }>('SELECT payload FROM queue WHERE kind = ? AND user_id = ? ORDER BY created_at LIMIT ?', kind, userId, limit);
   return rows.map(row => JSON.parse(row.payload) as T);
 }
 export const getQueuedLocations = (userId: string, limit = 100) => read<BufferedLocation>('location', userId, limit);
 export const getQueuedAlerts = (userId: string) => read<BufferedAlert>('alert', userId, 100);
+export const getQueuedMessages = (userId: string) => read<QueuedChatMessage>('message', userId, 200);
+export async function getQueuedMessagesForRide(userId: string, rideId: string): Promise<QueuedChatMessage[]> {
+  const rows = await (await getDatabase()).getAllAsync<{ payload: string }>("SELECT payload FROM queue WHERE kind = 'message' AND user_id = ? AND ride_id = ? ORDER BY created_at", userId, rideId);
+  return rows.map(row => JSON.parse(row.payload) as QueuedChatMessage);
+}
 export async function clearQueuedItems(userId: string, ids: string[]) {
   const validIds = ids.filter(Boolean);
   if (validIds.length) await (await getDatabase()).runAsync('DELETE FROM queue WHERE user_id = ? AND id IN (' + validIds.map(() => '?').join(',') + ')', userId, ...validIds);
@@ -73,7 +80,11 @@ export async function clearQueuedItemsForUser(userId: string) {
 }
 export async function getQueueCounts(userId: string) {
   const rows = await (await getDatabase()).getAllAsync<{ kind: string; count: number }>('SELECT kind, count(*) AS count FROM queue WHERE user_id = ? GROUP BY kind', userId);
-  return { locations: rows.find(r => r.kind === 'location')?.count || 0, alerts: rows.find(r => r.kind === 'alert')?.count || 0 };
+  return {
+    locations: rows.find(r => r.kind === 'location')?.count || 0,
+    alerts: rows.find(r => r.kind === 'alert')?.count || 0,
+    messages: rows.find(r => r.kind === 'message')?.count || 0,
+  };
 }
 export async function getQueuedCountForRide(userId: string, rideId: string) {
   const row = await (await getDatabase()).getFirstAsync<{ count: number }>('SELECT count(*) AS count FROM queue WHERE user_id = ? AND ride_id = ?', userId, rideId);
