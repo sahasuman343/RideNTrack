@@ -204,7 +204,7 @@ test('lost acknowledgements retain local samples; retry is single-flight', async
   let ack = 0, calls = 0;
   const service = loader({
     '../lib/supabase': { supabase: { auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},rpc:async()=>{calls++;return {data:ack,error:null};} } },
-    '../lib/offlineQueue': {
+    '../lib/offlineQueue': { pruneQueue: async () => {},
       getQueueCounts:async()=>({locations:batch.length,alerts:0}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>batch,
       clearQueuedItems:async(user,ids)=>{assert.equal(user,'u');batch=batch.filter(p=>!ids.includes(p.id));},
     },
@@ -224,7 +224,7 @@ test('failed alerts do not prevent GPS upload or get removed', async () => {
       from:()=>({upsert:async()=>({error:{message:'temporary'}})}),
       rpc:async()=>({data:1,error:null}),
     }},
-    '../lib/offlineQueue':{
+    '../lib/offlineQueue':{ pruneQueue: async () => {},
       getQueueCounts:async()=>({locations:locations.length,alerts:1}),getQueuedAlerts:async()=>[{id:'a',user_id:'u'}],
       getQueuedLocations:async()=>locations,
       clearQueuedItems:async(_user,ids)=>{deleted.push(...ids);locations=[];},
@@ -256,7 +256,7 @@ test('unauthorized or stale breadcrumbs are isolated and cleared without blockin
         },
       },
     },
-    '../lib/offlineQueue': {
+    '../lib/offlineQueue': { pruneQueue: async () => {},
       getQueueCounts: async () => ({ locations: locations.length, alerts: 0 }),
       getQueuedAlerts: async () => [],
       getQueuedLocations: async () => locations,
@@ -287,7 +287,7 @@ test('an in-flight GPS save cannot publish through the next ride callback', asyn
       setItem:async(key,value)=>{storage.set(key,value);},removeItem:async key=>{storage.delete(key);},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async point=>{saved.push(point);notifySave();await committed;}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async point=>{saved.push(point);notifySave();await committed;}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   await service.startBackgroundLocationUpdates({rideId:'first',userId:'u',displayName:'Rider',publish:()=>published.push('first')});
@@ -318,7 +318,7 @@ test('foreground GPS subscription failure is not a successful start and a retry 
       setItem:async(_,value)=>{stored=value;}, removeItem:async()=>{stored=null;},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async()=>{}}, './syncQueue':{syncQueue:async()=>{}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async()=>{}}, './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   const {gpsStatus} = loader()('mobile/src/lib/gpsStatus.ts');
   let fix;
@@ -402,7 +402,7 @@ test('Android background permission and native GPS service start are separate us
       removeItem:async key=>{storage.delete(key);},
     },
     '../lib/supabase':{supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})}}},
-    '../lib/offlineQueue':{enqueueLocation:async()=>{}},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async()=>{}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
   const params={rideId:'ride',userId:'u',displayName:'Rider'};
@@ -497,7 +497,7 @@ test('auth startup cannot overwrite auth events; account changes clear cached pr
     react,
     '../services/backgroundLocation': { stopBackgroundLocationUpdates: async () => {} },
     '../services/pushNotifications': { unregisterPushToken: async () => {} },
-    '../lib/offlineQueue': { clearQueuedItemsForUser: async () => {} },
+    '../lib/offlineQueue': { pruneQueue: async () => {}, clearQueuedItemsForUser: async () => {} },
     '../lib/tripCache': { clearAllCachedTripsForUser: async () => {} },
     '../lib/supabase': { supabase: {
       auth: {
@@ -791,7 +791,10 @@ test('leave_ride migration exists and trip workspace exposes self-service leave 
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
   assert.match(tripSource, /confirmLeaveRide/);
   assert.match(tripSource, /leaveRide/);
-  assert.match(tripSource, /supabase\.rpc\('leave_ride'/);
+  assert.match(tripSource, /leaveRideSafely\(id, user\.id\)/);
+  const leaveSource = fs.readFileSync(path.resolve('mobile/src/services/leaveRide.ts'), 'utf8');
+  // Breadcrumbs upload while the rider is still a member; leaving first would get them rejected and deleted.
+  assert.match(leaveSource, /stopBackgroundLocationUpdates\(rideId\)[\s\S]*syncQueue\(\)[\s\S]*getQueuedCountForRide[\s\S]*supabase\.rpc\('leave_ride'/);
   assert.match(tripSource, /Leave group ride/);
   assert.match(tripSource, /!isAdmin && roster\.some/);
 });
@@ -933,7 +936,8 @@ test('emergency SOS workflow supports group broadcast, SMS with GPS, and selecte
   assert.match(rideSource, /dialEmergencyContact/);
   assert.match(rideSource, /shareLiveLocation/);
   assert.match(rideSource, /maps\.google\.com\/\?q=/);
-  assert.match(rideSource, /Emergency alert broadcast to group with your live coordinates/);
+  assert.match(rideSource, /Emergency alert sent to the group/);
+  assert.match(rideSource, /It includes your last known location from/);
 });
 
 test('motorcycle profile migration defines fuel tank, mileage, reserve, and category columns', () => {
@@ -1094,7 +1098,7 @@ test('trip cards expose a direct delete button with confirmation and RPC executi
   const indexSource = fs.readFileSync(path.resolve('mobile/app/(tabs)/trips.tsx'), 'utf8');
   assert.match(indexSource, /handleDeleteTrip/);
   assert.match(indexSource, /delete_trip/);
-  assert.match(indexSource, /leave_ride/);
+  assert.match(indexSource, /leaveRideSafely/);
   assert.match(indexSource, /cardDeleteBtn/);
   assert.match(indexSource, /Permanently delete/);
 });
@@ -1737,7 +1741,9 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
   const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
 
   assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
-  assert.match(rideSource, /isStale\(position.timestamp\)\)\s*\{[^}]*return 'failed'/);
+  // Routine alerts need a fresh fix; an SOS is never blocked by GPS.
+  assert.match(rideSource, /!hasFreshFix && type !== 'emergency'\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /location_recorded_at: fix \? fix\.timestamp : null/);
   assert.match(rideSource, /if \(outcome === 'sent'\) \{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
 });
 
@@ -1886,7 +1892,7 @@ test('navigation architecture defines exactly three bottom tabs with Home as def
   assert.match(tripsSource, /Skeleton/);
   assert.match(tripsSource, /a\.status === 'active' && b\.status !== 'active'/); // Pinned live trips
   assert.match(tripsSource, /delete_trip[\s\S]*stopBackgroundLocationUpdates/);
-  assert.match(tripsSource, /leave_ride[\s\S]*stopBackgroundLocationUpdates/);
+  assert.match(tripsSource, /leaveRideSafely\(item\.id, user\.id\)/);
 });
 
 test('Home screen renders time-based greeting, default motorcycle, active trip details, and next planned trip', () => {
@@ -2172,7 +2178,7 @@ function trackingFixture({ nativeStarted = false, savedContext = null } = {}) {
       removeItem: async key => { storage.delete(key); },
     },
     '../lib/supabase': { supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } } },
-    '../lib/offlineQueue': { enqueueLocation: async () => {} },
+    '../lib/offlineQueue': { pruneQueue: async () => {}, enqueueLocation: async () => {} },
     './syncQueue': { syncQueue: async () => {} },
   })('mobile/src/services/backgroundLocation.ts');
   return { service, calls, storage, native, fix: () => listener({ coords: { latitude: 1, longitude: 2, speed: 0, heading: 0, accuracy: 5 }, timestamp: Date.now() }) };
@@ -2469,4 +2475,66 @@ test('Phase 6 spectator links migration enforces Pro gating and zero-PII public 
   const trackPage = fs.readFileSync(path.resolve('web/src/app/track/[token]/track-view.tsx'), 'utf8');
   assert.match(trackPage, /get_public_ride_snapshot/);
   assert.match(trackPage, /Link expired or revoked/);
+});
+
+test('a rider stopped on the planned road between sparse stops is not treated as off-route', () => {
+  const safety = loader()('shared/safety.ts');
+  const waypoints = [
+    { latitude: 12.97, longitude: 77.59, waypoint_type: 'origin' },
+    { latitude: 13.34, longitude: 77.12, waypoint_type: 'destination' },
+  ];
+  const route = [[77.59, 12.97], [77.355, 13.155], [77.12, 13.34]];
+  // Midway along the road, tens of km from either waypoint.
+  const onRoad = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000, currentLat: 13.155, currentLng: 77.355, waypoints, routeCoordinates: route,
+  });
+  assert.equal(onRoad.shouldPrompt, false);
+  assert.ok(onRoad.routeDistanceMeters < 50);
+  const offRoad = safety.evaluateStationaryOffRouteCheckIn({
+    stationaryDurationMs: 6 * 60 * 1000, currentLat: 13.155, currentLng: 77.45, waypoints, routeCoordinates: route,
+  });
+  assert.equal(offRoad.shouldPrompt, true);
+});
+
+test('alerts the server will never accept are dropped; network failures stay queued', async () => {
+  const deleted = [];
+  const alerts = [
+    { id: 'rejected', user_id: 'u', ride_id: 'left-ride' },
+    { id: 'network', user_id: 'u', ride_id: 'r' },
+  ];
+  const service = loader({
+    '../lib/supabase': { supabase: {
+      auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) },
+      from: () => ({ upsert: async row => Array.isArray(row)
+        ? { error: { message: 'batch failed', code: '42501' } }
+        : row.id === 'rejected'
+          ? { error: { message: 'new row violates row-level security policy', code: '42501' } }
+          : { error: { message: 'Network request failed', code: '' } } }),
+      rpc: async () => ({ data: 0, error: null }),
+    } },
+    '../lib/offlineQueue': {
+      pruneQueue: async () => {},
+      getQueueCounts: async () => ({ locations: 0, alerts: alerts.length }),
+      getQueuedAlerts: async () => alerts,
+      getQueuedLocations: async () => [],
+      clearQueuedItems: async (_user, ids) => { deleted.push(...ids); },
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await assert.rejects(service.syncQueue(), /Some alerts remain queued: Network request failed/);
+  assert.deepEqual(deleted, ['rejected']);
+});
+
+test('SOS pushes are never throttled and other alerts throttle only against the same type', () => {
+  const fn = fs.readFileSync(path.resolve('supabase/functions/notify-ride-alert/index.ts'), 'utf8');
+  assert.match(fn, /if \(!emergency\) \{[\s\S]*isLocalRateLimited[\s\S]*\.eq\('type', alert\.type\)/);
+  assert.doesNotMatch(fn, /emergency \? 5_000/);
+});
+
+test('safety migration closes the review findings', () => {
+  const sql = fs.readFileSync(path.resolve('supabase/migrations/036_safety_and_access_fixes.sql'), 'utf8');
+  assert.match(sql, /keep_ride_message_identity/);
+  assert.match(sql, /FUNCTION public\.get_trip_stages[\s\S]*is_ride_participant\(p_ride_id, auth\.uid\(\)\)/);
+  assert.match(sql, /type = 'emergency' AND lat IS NULL AND lng IS NULL/);
+  assert.match(sql, /ALTER COLUMN token SET DEFAULT/);
+  assert.match(sql, /FUNCTION public\.get_ride_fuel_specs/);
 });

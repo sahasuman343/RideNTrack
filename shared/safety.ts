@@ -1,3 +1,5 @@
+import { distanceToRouteMeters } from './route';
+
 /**
  * Safety & Emergency Coordination Telemetry
  * Pure functions supporting emergency escalation, mechanical breakdown classification,
@@ -150,7 +152,10 @@ export function evaluateStationaryOffRouteCheckIn(params: {
   waypoints: Array<{ latitude: number; longitude: number; waypoint_type?: string | null }>;
   minStationaryMs?: number;
   minWaypointDistanceMeters?: number;
-}): { shouldPrompt: boolean; nearestWaypointMeters: number | null } {
+  /** Planned route as [lng, lat] pairs. A stop on the route itself is not off-route. */
+  routeCoordinates?: number[][] | null;
+  minRouteDistanceMeters?: number;
+}): { shouldPrompt: boolean; nearestWaypointMeters: number | null; routeDistanceMeters?: number | null } {
   const minStationaryMs = params.minStationaryMs ?? 5 * 60 * 1000;
   const minWaypointDistanceMeters = params.minWaypointDistanceMeters ?? 300;
 
@@ -175,8 +180,21 @@ export function evaluateStationaryOffRouteCheckIn(params: {
   const isStationaryLongEnough = params.stationaryDurationMs >= minStationaryMs;
   const isAwayFromPlannedStop = nearest === null || nearest > minWaypointDistanceMeters;
 
+  // Sparse waypoints are not the route: a rider pulled over on the planned
+  // road between two stops is on route. Only prompt when the route geometry
+  // (if we have one) also says the rider is away from it.
+  let routeDistance: number | null = null;
+  const route = params.routeCoordinates;
+  if (Array.isArray(route) && route.length >= 2) {
+    const d = distanceToRouteMeters({ lat: params.currentLat, lng: params.currentLng }, route);
+    if (Number.isFinite(d)) routeDistance = d;
+  }
+  const minRouteDistanceMeters = params.minRouteDistanceMeters ?? 150;
+  const isAwayFromRoute = routeDistance === null || routeDistance > minRouteDistanceMeters;
+
   return {
-    shouldPrompt: isStationaryLongEnough && isAwayFromPlannedStop,
+    shouldPrompt: isStationaryLongEnough && isAwayFromPlannedStop && isAwayFromRoute,
     nearestWaypointMeters: nearest !== null ? Math.round(nearest) : null,
+    routeDistanceMeters: routeDistance !== null ? Math.round(routeDistance) : null,
   };
 }

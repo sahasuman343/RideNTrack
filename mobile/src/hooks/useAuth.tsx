@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { Session, User } from '@supabase/supabase-js';
 import { stopBackgroundLocationUpdates } from '../services/backgroundLocation';
 import { unregisterPushToken } from '../services/pushNotifications';
+import { syncQueue } from '../services/syncQueue';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
@@ -165,10 +166,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     await stopBackgroundLocationUpdates();
+    // Upload what we can while the session is still valid, then remove this
+    // rider's GPS trail from the device so the next account cannot see it.
+    await syncQueue().catch(() => {});
     await unregisterPushToken().catch(() => {});
     const userId = activeUserId.current;
     if (userId) {
       await clearAllCachedTripsForUser(userId).catch(() => {});
+      await clearQueuedItemsForUser(userId).catch(() => {});
     }
     const { error } = await supabase.auth.signOut();
     activeUserId.current = null;

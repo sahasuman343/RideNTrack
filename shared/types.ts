@@ -231,8 +231,11 @@ export interface Alert {
   display_name: string;
   type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement';
   message?: string;
-  lat: number;
-  lng: number;
+  /** Null when an SOS was sent before the phone ever got a GPS fix. */
+  lat: number | null;
+  lng: number | null;
+  /** When the attached position was recorded; older than created_at means last known. */
+  location_recorded_at?: string | null;
   created_at: string;
   acknowledged_at?: string;
 }
@@ -243,8 +246,9 @@ export interface BufferedAlert {
   user_id: string;
   type: AlertType;
   message?: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
+  location_recorded_at?: string | null;
   created_at: string;
 }
 

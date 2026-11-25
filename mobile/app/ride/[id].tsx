@@ -27,6 +27,7 @@ import {
   type AlertType,
   ALERT_LABELS,
   isStale,
+  validCoordinates,
   distanceMeters,
   distanceToRouteMeters,
   buildGoogleMapsNavigationUrl,
@@ -170,6 +171,15 @@ export default function LiveRideScreen() {
   const { height: windowHeight, width: windowWidth } = Dimensions.get('window');
   const active = ride?.status === 'active';
   const rideLoaded = Boolean(ride);
+  // destination_coords is [lng, lat]. Kept in a ref so the tracker effect does
+  // not restart GPS when the ride row refreshes with the same coordinates.
+  const destinationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  {
+    const coords = ride?.destination_coords;
+    destinationRef.current = Array.isArray(coords) && validCoordinates(coords[1], coords[0])
+      ? { latitude: coords[1], longitude: coords[0] }
+      : null;
+  }
 
   const cameraPadding = useMemo(() => {
     const maxTop = Math.max(20, Math.floor(windowHeight * 0.25));
@@ -253,12 +263,16 @@ export default function LiveRideScreen() {
       return;
     }
     try {
-      const token = `${ride.id.slice(0, 8)}${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
+      // The database generates the token (crypto-random); Math.random() on the
+      // phone is guessable and this link reveals live rider positions.
       const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-      const { error: linkErr } = await supabase
+      const { data: link, error: linkErr } = await supabase
         .from('ride_share_links')
-        .insert({ ride_id: ride.id, token, created_by: userId, expires_at: expiresAt });
+        .insert({ ride_id: ride.id, created_by: userId, expires_at: expiresAt })
+        .select('token')
+        .single();
       if (linkErr) throw linkErr;
+      const token = (link as { token: string }).token;
       setHasActiveSpectatorLink(true);
       await Share.share({
         title: `${ride.name} · Live Family Link`,
@@ -280,6 +294,7 @@ export default function LiveRideScreen() {
       setHasActiveSpectatorLink(false);
       setMessage('All active family spectator links revoked.');
     }
+    else Dialog.alert('Could not turn off the family links', revErr.message);
   }
   const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
 
@@ -321,18 +336,19 @@ export default function LiveRideScreen() {
       currentLat: position.lat,
       currentLng: position.lng,
       waypoints: upcomingWaypoints,
+      routeCoordinates: route?.geometry?.coordinates,
     });
     if (check.shouldPrompt && stationaryCountdown === null) {
       setStationaryCountdown(120);
     }
-  }, [active, position?.lat, position?.lng, position?.speed, position?.timestamp, now, upcomingWaypoints, stationaryCountdown]);
+  }, [active, position?.lat, position?.lng, position?.speed, position?.timestamp, now, upcomingWaypoints, route, stationaryCountdown]);
 
   useEffect(() => {
     if (stationaryCountdown === null) return;
     if (stationaryCountdown <= 0) {
       setStationaryCountdown(null);
       stationaryCooldownUntilRef.current = Date.now() + 10 * 60 * 1000;
-      if (position && userId && ride) {
+      if (userId && ride) {
         void sendAlert('emergency', 'Stationary off-route check-in unanswered — please check on rider.');
       }
       return;
@@ -522,16 +538,20 @@ export default function LiveRideScreen() {
       displayName: nameRef.current,
       publish,
       batterySaver,
+      destination: destinationRef.current,
       onLocationUpdate: p => {
         if (!cancelled) { setNow(Date.now()); setPosition(p); }
       },
       onError: e => {
         if (!cancelled) setGpsError(e);
       },
-      onAutoStop: () => {
+      onAutoStop: reason => {
         if (!cancelled) {
           setSharing(false);
           setTracking('paused');
+          setMessage(reason === 'arrived'
+            ? 'You reached the destination, so location sharing stopped.'
+            : 'Location sharing stopped after 12 hours. Turn it back on if you are still riding.');
         }
       },
       onGpsRecovered: () => {
@@ -676,7 +696,10 @@ export default function LiveRideScreen() {
   async function navigateToNextWaypoint() {
     if (!nextWaypoint) return;
     try {
-      if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+      // Only a fresh fix may be the route origin. Without one, hand the maps
+      // app just the next stop so it starts from the phone's real location
+      // instead of from a stale point or from a planned waypoint.
+      if (position && !isStale(position.timestamp) && validCoordinates(position.lat, position.lng)) {
         const remaining = upcomingWaypoints.slice(targetWaypointIndex);
         const legPoints: RoutePoint[] = [
           {
@@ -704,11 +727,13 @@ export default function LiveRideScreen() {
       }
 
       await Linking.openURL(
-        buildGoogleMapsNavigationUrl({
-          latitude: nextWaypoint.latitude,
-          longitude: nextWaypoint.longitude,
-          placeId: nextWaypoint.provider_place_id,
-        })
+        navProvider === 'apple_maps'
+          ? `https://maps.apple.com/?daddr=${nextWaypoint.latitude},${nextWaypoint.longitude}&dirflg=d`
+          : buildGoogleMapsNavigationUrl({
+              latitude: nextWaypoint.latitude,
+              longitude: nextWaypoint.longitude,
+              placeId: nextWaypoint.provider_place_id,
+            })
       );
     } catch (e: any) {
       Dialog.alert('Could not open navigation', e?.message || 'Please check that a maps app is available and try again.');
@@ -787,6 +812,15 @@ export default function LiveRideScreen() {
         displayName: name,
         publish,
         batterySaver,
+        destination: destinationRef.current,
+        onAutoStop: reason => {
+          if (session !== gpsSession.current) return;
+          setSharing(false);
+          setTracking('paused');
+          setMessage(reason === 'arrived'
+            ? 'You reached the destination, so location sharing stopped.'
+            : 'Location sharing stopped after 12 hours. Turn it back on if you are still riding.');
+        },
         onLocationUpdate: p => {
           if (session === gpsSession.current) { setNow(Date.now()); setPosition(p); }
         },
@@ -832,13 +866,24 @@ export default function LiveRideScreen() {
   }
 
   async function sendAlert(type: AlertType, customMessage?: string): Promise<'sent' | 'queued' | 'failed'> {
-    if (!position || !userId || isStale(position.timestamp)) {
+    if (!userId) return 'failed';
+    const hasFreshFix = Boolean(position && !isStale(position.timestamp));
+    // An SOS must never be blocked by GPS: in a tunnel, a valley, or right
+    // after unlocking a phone that only had foreground permission, the last
+    // known position (with its age) is far better than nothing.
+    if (!hasFreshFix && type !== 'emergency') {
       setMessage('Wait for a fresh GPS fix before sending an alert.');
       return 'failed';
     }
+    const fix = position && validCoordinates(position.lat, position.lng) ? position : null;
     setBusy(true);
     try {
-      const alert = { id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage, lat: position.lat, lng: position.lng, created_at: new Date().toISOString() };
+      const alert = {
+        id: await newQueueId(), ride_id: id, user_id: userId, type, message: customMessage,
+        lat: fix ? fix.lat : null, lng: fix ? fix.lng : null,
+        location_recorded_at: fix ? fix.timestamp : null,
+        created_at: new Date().toISOString(),
+      };
       if (sync.isOnline) {
         const { error, status } = await supabase.from('alerts').upsert(alert, { onConflict: 'id', ignoreDuplicates: true });
         if (!error) {
@@ -1017,12 +1062,15 @@ export default function LiveRideScreen() {
 
   async function broadcastSosToGroup() {
     setSosModal(false);
-    if (!position || !userId || isStale(position.timestamp)) {
-      setMessage('Wait for a fresh GPS fix before sending an emergency alert.');
-      return;
-    }
-    if ((await sendAlert('emergency')) !== 'sent') return;
-    setMessage('Emergency alert broadcast to group with your live coordinates.');
+    const outcome = await sendAlert('emergency');
+    if (outcome === 'failed') return;
+    const fixAgeMin = position ? Math.floor((Date.now() - Date.parse(position.timestamp)) / 60000) : null;
+    const where = !position
+      ? 'GPS has no fix yet, so the alert has no location.'
+      : isStale(position.timestamp)
+        ? `It includes your last known location from ${Math.max(1, fixAgeMin ?? 1)} min ago.`
+        : 'It includes your live location.';
+    setMessage((outcome === 'sent' ? 'Emergency alert sent to the group. ' : 'No signal: emergency alert saved and will send as soon as you are back online. ') + where);
   }
 
   async function dialEmergencyContact() {
@@ -1400,6 +1448,13 @@ export default function LiveRideScreen() {
           </View>
 
           {newest.message ? <Text style={s.floatingAlertMessage}>"{newest.message}"</Text> : null}
+          {newest.type === 'emergency' && (newest.lat == null
+            ? <Text style={s.floatingAlertMessage}>No GPS fix was available when this was sent.</Text>
+            : newest.location_recorded_at && Date.parse(newest.created_at) - Date.parse(newest.location_recorded_at) > 60_000
+              ? <Text style={s.floatingAlertMessage}>
+                  Location is the last known fix, {Math.round((Date.parse(newest.created_at) - Date.parse(newest.location_recorded_at)) / 60000)} min before the alert.
+                </Text>
+              : null)}
 
           <View style={s.floatingAlertActionsRow}>
             {newest.type === 'announcement' && (
@@ -1422,7 +1477,7 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             )}
 
-            {newest.lat && newest.lng && (
+            {newest.lat != null && newest.lng != null && (
               <>
                 <TouchableOpacity
                   style={s.floatingAlertSecondaryBtn}

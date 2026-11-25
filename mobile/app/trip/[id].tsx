@@ -58,6 +58,7 @@ import {
   setPreferredNavProvider,
 } from '../../src/lib/externalNav';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { leaveRideSafely } from '../../src/services/leaveRide';
 import {
   Avatar,
   AvatarStack,
@@ -132,6 +133,13 @@ type Regroup = {
   closed_at?: string | null;
 };
 
+type RiderFuelSpec = {
+  user_id: string;
+  display_name: string;
+  fuel_tank_capacity_liters: number | string | null;
+  mileage_km_per_liter: number | string | null;
+  fuel_reserve_liters: number | string | null;
+};
 type Rider = {
   user_id: string;
   display_name: string;
@@ -195,6 +203,7 @@ export default function TripWorkspaceScreen() {
     }
   }
   const [roster, setRoster] = useState<Rider[]>([]);
+  const [fuelSpecs, setFuelSpecs] = useState<Record<string, RiderFuelSpec>>({});
   const [now, setNow] = useState(Date.now());
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<RideParticipantRole>('member');
@@ -329,16 +338,22 @@ export default function TripWorkspaceScreen() {
   const packFuelPlan = useMemo(() => {
     const distKm = (trip?.estimated_distance_meters || 0) / 1000;
     return calculatePackFuelPlan(
-      roster.map(r => ({
-        id: r.user_id,
-        displayName: r.display_name,
-        tankLiters: r.user_id === user?.id ? profile?.fuel_tank_capacity_liters : null,
-        mileageKmPerL: r.user_id === user?.id ? profile?.mileage_km_per_liter : null,
-        reserveLiters: r.user_id === user?.id ? profile?.fuel_reserve_liters : null,
-      })),
+      roster.map(r => {
+        // Your own profile is freshest; other riders come from the ride's fuel specs.
+        const own = r.user_id === user?.id;
+        const spec = fuelSpecs[r.user_id];
+        const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+        return {
+          id: r.user_id,
+          displayName: r.display_name,
+          tankLiters: own ? profile?.fuel_tank_capacity_liters : num(spec?.fuel_tank_capacity_liters),
+          mileageKmPerL: own ? profile?.mileage_km_per_liter : num(spec?.mileage_km_per_liter),
+          reserveLiters: own ? profile?.fuel_reserve_liters : num(spec?.fuel_reserve_liters),
+        };
+      }),
       distKm,
     );
-  }, [trip?.estimated_distance_meters, roster, user?.id, profile]);
+  }, [trip?.estimated_distance_meters, roster, fuelSpecs, user?.id, profile]);
 
   const advisories = useMemo(() => {
     const base = generateTouringAdvisories({
@@ -347,12 +362,33 @@ export default function TripWorkspaceScreen() {
       weatherPoints,
     });
     if (trip?.start_date && trip?.estimated_duration_seconds) {
-      const sunsetIso = new Date(`${trip.start_date.slice(0, 10)}T18:00:00`).toISOString();
-      const departureIso = new Date(`${trip.start_date.slice(0, 10)}T07:00:00`).toISOString();
+      // Judge each riding day against its own departure and sunset. A
+      // multi-day trip is not one 07:00 start with the whole route in a day.
       const terrain = trip.trip_type === 'expedition' ? 'ghat' : 'mixed';
-      const daylight = evaluateDaylightRisk(departureIso, trip.estimated_duration_seconds, sunsetIso, terrain);
-      if (daylight.advisory) {
-        base.unshift(daylight.advisory);
+      const startMs = Date.parse(`${trip.start_date.slice(0, 10)}T00:00:00`);
+      const dayDurations = new Map<number, number>();
+      for (const stage of stages) {
+        const day = stage.day_number || 1;
+        const secs = Number(stage.estimated_duration_seconds) || 0;
+        if (secs > 0) dayDurations.set(day, (dayDurations.get(day) || 0) + secs);
+      }
+      if (dayDurations.size === 0) {
+        const endMs = trip.end_date ? Date.parse(`${trip.end_date.slice(0, 10)}T00:00:00`) : startMs;
+        const dayCount = Math.max(1, days.length, Number.isFinite(endMs) ? Math.round((endMs - startMs) / 86_400_000) + 1 : 1);
+        for (let d = 1; d <= dayCount; d++) dayDurations.set(d, trip.estimated_duration_seconds / dayCount);
+      }
+      for (const [dayNumber, secs] of [...dayDurations.entries()].sort((a, b) => a[0] - b[0])) {
+        const dayStart = new Date(startMs + (dayNumber - 1) * 86_400_000);
+        const ymd = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`;
+        const daylight = evaluateDaylightRisk(
+          new Date(`${ymd}T07:00:00`).toISOString(), secs, new Date(`${ymd}T18:00:00`).toISOString(), terrain,
+        );
+        if (daylight.advisory) {
+          base.unshift(dayDurations.size > 1
+            ? { ...daylight.advisory, title: `Day ${dayNumber}: ${daylight.advisory.title}` }
+            : daylight.advisory);
+          break;
+        }
       }
     }
     if (packFuelPlan.limitingRider && packFuelPlan.recommendedFuelStops !== null) {
@@ -373,7 +409,7 @@ export default function TripWorkspaceScreen() {
       });
     }
     return base;
-  }, [trip?.estimated_distance_meters, trip?.start_date, trip?.estimated_duration_seconds, trip?.trip_type, fuelPlan, weatherPoints, packFuelPlan]);
+  }, [trip?.estimated_distance_meters, trip?.start_date, trip?.end_date, trip?.estimated_duration_seconds, trip?.trip_type, stages, days, fuelPlan, weatherPoints, packFuelPlan]);
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   const loadGeneration = useRef(0);
@@ -412,6 +448,12 @@ export default function TripWorkspaceScreen() {
       setStays((stayResult.data || []) as Stay[]);
       setStages((stageResult.data || []) as TripStage[]);
       setRoster((rosterResult.data || []) as Rider[]);
+      // Fuel specs of every active rider, so the pack plan reflects the bike
+      // with the shortest range, not just this phone's owner. Best effort.
+      void supabase.rpc('get_ride_fuel_specs', { p_ride_id: id }).then(({ data }) => {
+        if (!Array.isArray(data)) return;
+        setFuelSpecs(Object.fromEntries((data as RiderFuelSpec[]).map(spec => [spec.user_id, spec])));
+      });
       setRegroupPoints((regroupResult.data || []) as Regroup[]);
       const list = expensesResult.error ? null : expensesResult.data as TripExpense[] | null;
       const summary = expenseSummaryResult.error ? null : expenseSummaryResult.data as TripExpenseSummary | null;
@@ -840,9 +882,8 @@ export default function TripWorkspaceScreen() {
     if (!trip || isAdmin) return;
     setSaving(true); setError('');
     try {
-      const { error: leaveError } = await supabase.rpc('leave_ride', { p_ride_id: id });
-      if (leaveError) throw leaveError;
-      await stopBackgroundLocationUpdates(id).catch(() => {});
+      if (!user?.id) throw new Error('Sign in again to leave this ride.');
+      await leaveRideSafely(id, user.id);
       router.replace('/(tabs)');
     } catch (e: any) {
       setError(e?.message || 'Could not leave this ride.');

@@ -111,6 +111,7 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   let points: LocationUpdate[] = [];
   let members = new Map<string, string>();
   let lastPublished: LocationUpdate | null = null;
+  let lastMemberRefreshMs = 0;
 
   const emit = (incoming: LocationUpdate[]) => {
     if (disposed) return;
@@ -200,12 +201,22 @@ export function watchRide(client: SupabaseClient, rideId: string, userId: string
   const presence = client.channel('ride:' + rideId, { config: { private: true, presence: { key: userId } } });
   presence.on('presence', { event: 'sync' }, () => {
     const incoming: LocationUpdate[] = [];
+    let unknownPresence = false;
     for (const [id, entries] of Object.entries(presence.presenceState<LocationUpdate>())) {
-      if (!members.has(id)) continue;
+      if (!members.has(id)) {
+        // A rider who just joined is in Presence before our member list knows
+        // them; refresh members now instead of hiding them for up to a minute.
+        unknownPresence = true;
+        continue;
+      }
       for (const entry of entries) if (validCoordinates(entry.lat, entry.lng))
         incoming.push({ ...entry, user_id: id, display_name: members.get(id)! });
     }
     emit(incoming);
+    if (unknownPresence && Date.now() - lastMemberRefreshMs > 10_000) {
+      lastMemberRefreshMs = Date.now();
+      void refreshLocations();
+    }
   })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts', filter: 'ride_id=eq.' + rideId }, () => void refreshAlerts())
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ride_messages', filter: 'ride_id=eq.' + rideId }, payload => {

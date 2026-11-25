@@ -47,6 +47,7 @@ interface AlertRow {
   message: string | null;
   lat: number | null;
   lng: number | null;
+  location_recorded_at?: string | null;
   created_at: string;
 }
 
@@ -73,30 +74,38 @@ Deno.serve(async req => {
     return new Response('Stale alert', { status: 202 });
   }
 
-  // Fast-path in-memory rate check (process-local optimization)
-  const throttleKey = `${alert.ride_id}:${alert.user_id}:${alert.type}`;
-  const throttleInterval = emergency ? 5_000 : 15_000;
-  if (isLocalRateLimited(throttleKey, throttleInterval)) {
-    return new Response('Rate limited', { status: 429 });
-  }
-
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false },
   });
 
-  // Atomic shared-store check in PostgreSQL: verify no delivered alert exists for this sender in the throttle window
-  const cutoffIso = new Date(Date.now() - throttleInterval).toISOString();
-  const { data: recentDelivered } = await admin
-    .from('alerts')
-    .select('id')
-    .eq('ride_id', alert.ride_id)
-    .eq('user_id', alert.user_id)
-    .neq('id', alert.id)
-    .gte('notified_at', cutoffIso)
-    .limit(1);
-
-  if (recentDelivered && recentDelivered.length > 0) {
-    return new Response('Rate limited', { status: 429 });
+  // Throttle repeated routine alerts of the SAME type from the same sender.
+  // An SOS is never throttled: a rider who just sent "Fuel stop" and then
+  // crashes must still reach the group. Webhooks do not retry, so a dropped
+  // SOS push would be lost for good.
+  if (!emergency) {
+    const throttleKey = `${alert.ride_id}:${alert.user_id}:${alert.type}`;
+    const throttleInterval = 15_000;
+    if (isLocalRateLimited(throttleKey, throttleInterval)) {
+      return new Response('Rate limited', { status: 429 });
+    }
+    const cutoffIso = new Date(Date.now() - throttleInterval).toISOString();
+    let query = admin
+      .from('alerts')
+      .select('id')
+      .eq('ride_id', alert.ride_id)
+      .eq('user_id', alert.user_id)
+      .eq('type', alert.type)
+      .neq('id', alert.id)
+      .gte('notified_at', cutoffIso);
+    // The leader sends one "rider behind" per lagging rider; those carry
+    // different coordinates and must not suppress each other.
+    if (alert.type === 'rider_behind' && typeof alert.lat === 'number' && typeof alert.lng === 'number') {
+      query = query.eq('lat', alert.lat).eq('lng', alert.lng);
+    }
+    const { data: recentDelivered } = await query.limit(1);
+    if (recentDelivered && recentDelivered.length > 0) {
+      return new Response('Rate limited', { status: 429 });
+    }
   }
   const [ride, sender, members] = await Promise.all([
     admin.from('rides').select('name,status').eq('id', alert.ride_id).maybeSingle(),
@@ -116,9 +125,11 @@ Deno.serve(async req => {
   const riderName = sender.data?.display_name || 'A rider';
   const rideName = ride.data.name;
   const label = LABELS[alert.type] ?? 'Ride alert';
+  const fixAgeMs = alert.location_recorded_at ? Date.parse(alert.created_at) - Date.parse(alert.location_recorded_at) : 0;
+  const fixAge = Number.isFinite(fixAgeMs) && fixAgeMs > 60_000 ? ` (last known, ${Math.round(fixAgeMs / 60000)} min old)` : '';
   const location = typeof alert.lat === 'number' && typeof alert.lng === 'number'
-    ? ` · https://maps.google.com/?q=${alert.lat.toFixed(5)},${alert.lng.toFixed(5)}`
-    : '';
+    ? ` · https://maps.google.com/?q=${alert.lat.toFixed(5)},${alert.lng.toFixed(5)}${fixAge}`
+    : emergency ? ' · no GPS fix' : '';
   const detail = alert.message?.trim() || (emergency ? 'needs immediate assistance' : label.replace(/^\S+\s/, ''));
   const messages = tokens.data.map(({ token }) => ({
     to: token,
@@ -150,7 +161,7 @@ Deno.serve(async req => {
   // Record successful notification delivery in both shared database and local cache
   const deliveryIso = new Date().toISOString();
   await admin.from('alerts').update({ notified_at: deliveryIso }).eq('id', alert.id);
-  recordLocalThrottle(throttleKey, Date.now());
+  if (!emergency) recordLocalThrottle(`${alert.ride_id}:${alert.user_id}:${alert.type}`, Date.now());
 
   return new Response(JSON.stringify({ sent: messages.length, removed: stale.length }), {
     headers: { 'content-type': 'application/json' },

@@ -8,7 +8,13 @@ import { supabase } from '../lib/supabase';
 import { syncQueue } from './syncQueue';
 export const BACKGROUND_LOCATION_TASK = 'RIDENTRACK_BACKGROUND_LOCATION_TASK';
 const CONTEXT_KEY = '@ridentrack/active-ride';
-interface Context { rideId: string; userId: string; displayName: string; startedAtMs?: number }
+interface Context {
+  rideId: string;
+  userId: string;
+  displayName: string;
+  startedAtMs?: number;
+  destination?: { latitude: number; longitude: number } | null;
+}
 interface Params extends Context {
   onLocationUpdate?: (point: LocationUpdate) => void;
   publish?: (point: LocationUpdate) => Promise<void> | void;
@@ -17,7 +23,6 @@ interface Params extends Context {
   onAutoStop?: (reason: 'arrived' | 'timeout') => void;
   batterySaver?: boolean;
   activeRidersCount?: number;
-  destination?: { latitude: number; longitude: number } | null;
   maxRideDurationMs?: number;
 }
 let context: Params | null = null;
@@ -69,6 +74,22 @@ function setContext(next: Params | null) {
   }
 }
 
+/**
+ * The persisted context is what a headless (app-killed) background task sees,
+ * so it must carry everything record() needs: start time for the ride
+ * timeout and the destination for arrival auto-stop.
+ */
+function persistContext(params: Context) {
+  const saved: Context = {
+    rideId: params.rideId,
+    userId: params.userId,
+    displayName: params.displayName,
+    startedAtMs: params.startedAtMs,
+    destination: params.destination ?? null,
+  };
+  return AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify(saved));
+}
+
 /** Ride whose location is currently being shared, or null. */
 export function getActiveTracking(): ActiveTracking | null {
   return announced;
@@ -86,7 +107,10 @@ export function subscribeActiveTracking(listener: (tracking: ActiveTracking | nu
  */
 export function detachBackgroundLocationCallbacks(rideId: string) {
   if (!context || context.rideId !== rideId) return;
-  setContext({ rideId: context.rideId, userId: context.userId, displayName: context.displayName });
+  setContext({
+    rideId: context.rideId, userId: context.userId, displayName: context.displayName,
+    startedAtMs: context.startedAtMs, destination: context.destination, maxRideDurationMs: context.maxRideDurationMs,
+  });
 }
 
 function trackingOptions(params: Pick<Params, 'batterySaver'>) {
@@ -197,7 +221,7 @@ async function record(locations: Location.LocationObject[]) {
     lastFixTimestamp = Math.max(lastFixTimestamp, location.timestamp);
 
     // Auto-stop on arrival within 200m of destination for 10 minutes, or max ride timeout.
-    const dest = context?.destination;
+    const dest = context?.destination ?? saved.destination;
     if (dest && validCoordinates(dest.latitude, dest.longitude)) {
       if (approxDistanceMeters(lat, lng, dest.latitude, dest.longitude) <= ARRIVAL_RADIUS_METERS) {
         arrivedAtDestSinceMs ??= nowMs;
@@ -266,10 +290,9 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
         fallback = null;
         const restoredStartedAtMs = saved.startedAtMs ?? (trackingStartedAtMs || Date.now());
         trackingStartedAtMs = restoredStartedAtMs;
-        setContext({ ...params, startedAtMs: restoredStartedAtMs });
-        await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-          rideId: params.rideId, userId: params.userId, displayName: params.displayName, startedAtMs: restoredStartedAtMs,
-        }));
+        const next = { ...params, startedAtMs: restoredStartedAtMs, destination: params.destination ?? saved.destination };
+        setContext(next);
+        await persistContext(next);
         return { mode: 'background', permissionGranted: true };
       }
       await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
@@ -279,10 +302,9 @@ export function startBackgroundLocationUpdates(params: Params): Promise<Backgrou
 
     const startedAtMs = Date.now();
     trackingStartedAtMs = startedAtMs;
-    setContext({ ...params, startedAtMs });
-    await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-      rideId: params.rideId, userId: params.userId, displayName: params.displayName, startedAtMs,
-    }));
+    const next = { ...params, startedAtMs };
+    setContext(next);
+    await persistContext(next);
     fallback?.remove();
     fallback = null;
     lastFixTimestamp = 0;
@@ -347,10 +369,15 @@ export function enableBackgroundLocationUpdates(params: Params): Promise<Backgro
       if (version !== generation) return { mode: 'stopped' };
       fallback?.remove();
       fallback = null;
-      setContext(params);
-      await AsyncStorage.setItem(CONTEXT_KEY, JSON.stringify({
-        rideId: params.rideId, userId: params.userId, displayName: params.displayName,
-      }));
+      // Upgrading to background GPS continues the same ride session, so keep
+      // the original start time; otherwise the 12-hour limit would restart.
+      const saved = context || JSON.parse(await AsyncStorage.getItem(CONTEXT_KEY) || 'null') as Context | null;
+      const sameRide = saved?.rideId === params.rideId && saved.userId === params.userId;
+      const startedAtMs = (sameRide && saved?.startedAtMs) || trackingStartedAtMs || Date.now();
+      trackingStartedAtMs = startedAtMs;
+      const next = { ...params, startedAtMs, destination: params.destination ?? (sameRide ? saved?.destination : null) };
+      setContext(next);
+      await persistContext(next);
       return { mode: 'background', permissionGranted: true };
     } catch (e) {
       if (version !== generation) return { mode: 'stopped' };

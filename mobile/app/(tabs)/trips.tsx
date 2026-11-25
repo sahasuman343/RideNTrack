@@ -21,6 +21,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRideTheme, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { stopBackgroundLocationUpdates } from '../../src/services/backgroundLocation';
+import { leaveRideSafely } from '../../src/services/leaveRide';
 import {
   Card,
   StatusBadge,
@@ -141,9 +142,8 @@ export default function TripsScreen() {
             onPress: async () => {
               setDeletingRideId(item.id);
               try {
-                const { error } = await supabase.rpc('leave_ride', { p_ride_id: item.id });
-                if (error) throw error;
-                await stopBackgroundLocationUpdates(item.id).catch(() => {});
+                if (!user?.id) throw new Error('Sign in again to leave this ride.');
+                await leaveRideSafely(item.id, user.id);
                 setRides(prev => prev.filter(r => r.id !== item.id));
                 await fetchRides();
               } catch (err: any) {

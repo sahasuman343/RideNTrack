@@ -573,6 +573,14 @@ BEGIN
     RAISE EXCEPTION 'expected 2 stages, found %', stage_count;
   END IF;
 
+  -- 1b. A signed-in outsider cannot read a private trip's stages and route.
+  PERFORM set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', true);
+  SELECT count(*) INTO stage_count FROM public.get_trip_stages(stage_trip_id);
+  IF stage_count <> 0 THEN
+    RAISE EXCEPTION 'outsider read % private trip stages', stage_count;
+  END IF;
+  PERFORM set_config('request.jwt.claim.sub', owner_id::text, true);
+
   -- 2. Non-owner cannot create or delete stages
   PERFORM set_config('request.jwt.claim.sub', member_id::text, true);
   BEGIN
@@ -1447,3 +1455,46 @@ VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','11111111-1111-4111-8111-11111111
 DO $$ BEGIN
   IF public.purge_old_location_history(90) < 1 THEN RAISE EXCEPTION 'retention did not purge old GPS history'; END IF;
 END $$;
+
+-- SOS is never blocked by GPS: an emergency may carry no position, other alerts may not.
+SET ROLE authenticated;
+DO $$
+DECLARE
+  v_trip uuid;
+  v_other uuid;
+  v_msg uuid;
+  v_code text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  v_trip := public.create_trip_plan(
+    '{"name":"SOS fixture","trip_type":"group","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb, NULL);
+  INSERT INTO public.alerts (ride_id,user_id,type,lat,lng) VALUES (v_trip,auth.uid(),'emergency',NULL,NULL);
+  INSERT INTO public.alerts (ride_id,user_id,type,lat,lng,location_recorded_at)
+    VALUES (v_trip,auth.uid(),'emergency',12.5,77.5,now() - interval '8 minutes');
+  BEGIN
+    INSERT INTO public.alerts (ride_id,user_id,type,lat,lng) VALUES (v_trip,auth.uid(),'fuel',NULL,NULL);
+    RAISE EXCEPTION 'routine alert without a position accepted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+
+  -- Chat: a sender cannot move their message into a ride they are not part of.
+  PERFORM set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  v_other := public.create_trip_plan(
+    '{"name":"Other pack","trip_type":"group","visibility":"invite_only","origin":"A","destination":"B","origin_coords":[77,12],"destination_coords":[78,13]}'::jsonb,
+    '[{"sequence":0,"waypoint_type":"origin","name":"A","latitude":12,"longitude":77},{"sequence":1,"waypoint_type":"destination","name":"B","latitude":13,"longitude":78}]'::jsonb,
+    '[]'::jsonb, NULL);
+  PERFORM set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', true);
+  INSERT INTO public.ride_messages (ride_id,sender_id,body) VALUES (v_trip,auth.uid(),'hello') RETURNING id INTO v_msg;
+  BEGIN
+    UPDATE public.ride_messages SET ride_id = v_other WHERE id = v_msg;
+    IF EXISTS (SELECT 1 FROM public.ride_messages WHERE id = v_msg AND ride_id = v_other) THEN
+      RAISE EXCEPTION 'message moved into another pack';
+    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+
+  PERFORM public.delete_trip(v_trip);
+  PERFORM set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', true);
+  PERFORM public.delete_trip(v_other);
+END $$;
+RESET ROLE;
