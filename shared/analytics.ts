@@ -32,6 +32,8 @@ export const ANALYTICS_EVENTS = [
   'road_report_created',
   'voice_note_sent',
   'language_changed',
+  'headset_prompt_shown',
+  'headset_autostart_changed',
   'ride_perf_sample',
   'referral_shared',
 ] as const;

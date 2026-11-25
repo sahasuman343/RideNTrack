@@ -7,7 +7,8 @@ import { StatusBar } from 'expo-status-bar';
 import * as Sentry from '@sentry/react-native';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/hooks/useAuth';
-import { FeatureFlagsProvider } from '../src/hooks/useFeatureFlags';
+import { FeatureFlagsProvider, useFlag } from '../src/hooks/useFeatureFlags';
+import { startHeadsetMonitor } from '../src/services/headsetAutostart';
 import { LocaleProvider } from '../src/hooks/useLocale';
 import { identifyAnalyticsUser, track } from '../src/services/analytics';
 import { startOtaUpdateChecks } from '../src/services/otaUpdates';
@@ -27,6 +28,18 @@ Sentry.init({
 
 function PushNotifications() {
   usePushNotifications();
+  return null;
+}
+
+/** F20: listens for the helmet headset while the app runs (Android, native module only). */
+function HeadsetMonitor() {
+  const { user } = useAuth();
+  const enabled = useFlag('headset_autostart');
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    if (!enabled || !userId) return;
+    return startHeadsetMonitor(userId);
+  }, [enabled, userId]);
   return null;
 }
 
@@ -56,6 +69,7 @@ function AppNavigator() {
       <OfflineSyncProvider>
         <StatusBar style={theme.scheme === 'light' ? 'dark' : 'light'} />
         <PushNotifications />
+        <HeadsetMonitor />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />

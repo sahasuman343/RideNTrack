@@ -26,6 +26,7 @@ import { Icon, SheetModal } from '../../src/components/ui';
 import { SAVED_PLACE_ICONS } from '../../src/icons';
 import { LanguagePicker } from '../../src/components/profile/LanguagePicker';
 import { InviteCard } from '../../src/components/InviteCard';
+import { HeadsetCard } from '../../src/components/profile/HeadsetCard';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -48,6 +49,7 @@ export default function ProfileScreen() {
   const sensorRecorderFlag = useFlag('sensor_recorder');
   const lockScreenFlag = useFlag('lock_screen_card');
   const languagesFlag = useFlag('languages');
+  const headsetFlag = useFlag('headset_autostart');
   const [lockCardOn, setLockCardOn] = useLockScreenCardSetting();
   const [researchBusy, setResearchBusy] = useState(false);
   const researchConsent = Boolean(profile?.crash_research_consent_at);
@@ -615,6 +617,7 @@ export default function ProfileScreen() {
 
         <InviteCard source="profile" />
         {languagesFlag && <LanguagePicker />}
+        {headsetFlag && <HeadsetCard />}
 
         {/* Sign Out & Delete Account Actions */}
         <View style={styles.accountActionsContainer}>
