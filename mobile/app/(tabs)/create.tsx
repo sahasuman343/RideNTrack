@@ -916,7 +916,7 @@ export default function CreateRideScreen() {
         {currentStep === 1 && (
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.section}>Quick Trip Setup</Text>
+              <Text style={styles.section}>Quick setup</Text>
               <View style={styles.badgeEssential}>
                 <Text style={styles.badgeEssentialText}>STEP 1: ESSENTIALS</Text>
               </View>
@@ -1011,7 +1011,7 @@ export default function CreateRideScreen() {
         {currentStep === 2 && (
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.section}>Route & Navigation</Text>
+              <Text style={styles.section}>Route</Text>
               <View style={styles.badgeEssential}>
                 <Text style={styles.badgeEssentialText}>STEP 2: ROUTE</Text>
               </View>
@@ -1170,7 +1170,7 @@ export default function CreateRideScreen() {
                 <Text style={styles.stayDateText}>
                   {checkIn
                     ? `Stay: ${formatDateNice(checkIn)} → ${formatDateNice(checkOut || checkIn)}`
-                    : 'Select Stay Dates in Calendar'}
+                    : 'Pick stay dates'}
                 </Text>
               </TouchableOpacity>
               <TextInput
@@ -1189,7 +1189,7 @@ export default function CreateRideScreen() {
         {currentStep === 5 && (
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.section}>Rider Notes & Calibration</Text>
+              <Text style={styles.section}>Rider notes</Text>
               <View style={styles.badgeOptional}>
                 <Text style={styles.badgeOptionalText}>STEP 5: OPTIONAL</Text>
               </View>
@@ -1216,7 +1216,7 @@ export default function CreateRideScreen() {
               <Text style={styles.calibrationHeader}>PASS ROUTING CALIBRATION</Text>
               <View style={styles.calibrationRow}>
                 <View style={styles.calibrationLabelCol}>
-                  <Text style={styles.calibrationTitle}>Prefer Technical Twisties & Passes</Text>
+                  <Text style={styles.calibrationTitle}>Prefer twisty roads and passes</Text>
                   <Text style={styles.calibrationSub}>Technical twisties routing (Provider unsupported - standard driving active)</Text>
                 </View>
                 <Switch
@@ -1230,7 +1230,7 @@ export default function CreateRideScreen() {
               <View style={styles.calibrationDivider} />
               <View style={styles.calibrationRow}>
                 <View style={styles.calibrationLabelCol}>
-                  <Text style={styles.calibrationTitle}>Avoid Commercial Tollways</Text>
+                  <Text style={styles.calibrationTitle}>Avoid tolls</Text>
                   <Text style={styles.calibrationSub}>Prioritize high mountain bypass lines</Text>
                 </View>
                 <Switch
@@ -1245,7 +1245,7 @@ export default function CreateRideScreen() {
                 <View style={styles.offlineCacheLeft}>
                   <Icon name="cloud-download-outline" size="md" color={theme.textMuted} />
                   <View>
-                    <Text style={styles.offlineCacheTitle}>Offline Vector & Radar Pack</Text>
+                    <Text style={styles.offlineCacheTitle}>Offline maps and radar</Text>
                     <Text style={styles.offlineCacheSub}>Available for download (340 MB)</Text>
                   </View>
                 </View>
@@ -1366,7 +1366,7 @@ export default function CreateRideScreen() {
           startDate={calendarTarget === 'trip' ? startDate : checkIn}
           endDate={calendarTarget === 'trip' ? endDate : checkOut}
           onSelectRange={handleSelectDates}
-          title={calendarTarget === 'trip' ? 'Select Trip Dates' : 'Select Stay Dates'}
+          title={calendarTarget === 'trip' ? 'Select trip dates' : 'Select stay dates'}
         />
 
         <Text style={styles.footer}>

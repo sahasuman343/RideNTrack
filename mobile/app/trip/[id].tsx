@@ -69,6 +69,7 @@ import {
   LiveDot,
   RouteLine,
   StatusBadge,
+  SheetModal,
 } from '../../src/components/ui';
 import { ATTENDANCE_ICONS, CHECKLIST_ICONS, EXPENSE_ICONS, ROLE_ICONS, weatherIcon } from '../../src/icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -1214,7 +1215,7 @@ export default function TripWorkspaceScreen() {
       const { error: closeError } = await supabase.rpc('close_regroup_point', { p_regroup_point_id: pointId });
       if (closeError) throw closeError;
       await load();
-      Alert.alert('Regroup Point Closed', 'The regroup point has been closed and the pack notified.');
+      Alert.alert('Regroup point closed', 'The regroup point has been closed and the pack notified.');
     } catch (e: any) { setError(e?.message || 'Could not close regroup point.'); }
     finally { setSaving(false); }
   }
@@ -2021,7 +2022,7 @@ export default function TripWorkspaceScreen() {
 
             {/* Camp & Safety Manifest / Accommodation */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Camp & Safety Manifest</Text>
+              <Text style={styles.sectionTitle}>Stays</Text>
               {stays.length === 0 ? (
                 <Text style={styles.muted}>No accommodation added yet.</Text>
               ) : (
@@ -2061,7 +2062,7 @@ export default function TripWorkspaceScreen() {
 
             {/* Touring Intelligence & Motorcycle Fuel */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Touring Intelligence & Motorcycle Fuel</Text>
+              <Text style={styles.sectionTitle}>Fuel and touring notes</Text>
 
               <View style={styles.intelBlock}>
                 <Text style={styles.intelTitle}>
@@ -2092,7 +2093,7 @@ export default function TripWorkspaceScreen() {
               </View>
 
               <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                <Text style={styles.intelTitle}>Route Weather Forecast</Text>
+                <Text style={styles.intelTitle}>Weather on the route</Text>
                 {weatherLoading && weatherPoints.length === 0 ? (
                   <ActivityIndicator size="small" color={theme.accent} style={{ marginVertical: 8 }} />
                 ) : weatherPoints.length === 0 ? (
@@ -2119,7 +2120,7 @@ export default function TripWorkspaceScreen() {
 
               {advisories.length > 0 && (
                 <View style={[styles.intelBlock, { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 }]}>
-                  <Text style={styles.intelTitle}>Touring Advisories & Safety</Text>
+                  <Text style={styles.intelTitle}>Before you ride</Text>
                   {advisories.map((adv, idx) => (
                     <View
                       key={idx}
@@ -2257,7 +2258,7 @@ export default function TripWorkspaceScreen() {
             {/* Trip Expenses & Bill Splitting */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>Trip Expenses & Splitting</Text>
+                <Text style={styles.sectionTitle}>Expenses</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={() => {
                   const activeMemberIds = roster.filter(r => r.is_active).map(r => r.user_id);
                   setNewExpenseSplitUsers(activeMemberIds.length > 0 ? activeMemberIds : user?.id ? [user.id] : []);
@@ -2361,7 +2362,7 @@ export default function TripWorkspaceScreen() {
             {/* Ride Journal & Travel Memories */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>Ride Journal & Memories</Text>
+                <Text style={styles.sectionTitle}>Ride journal</Text>
                 <TouchableOpacity style={styles.smallButton} onPress={openJournalEditor}>
                   <Text style={styles.smallButtonText}>{journalEntry ? 'Edit journal' : 'Add entry'}</Text>
                 </TouchableOpacity>
@@ -2405,13 +2406,13 @@ export default function TripWorkspaceScreen() {
               )}
 
               <TouchableOpacity style={[styles.secondary, { marginTop: 12, alignItems: 'center' }]} onPress={() => void shareRideCard()}>
-                <Text style={styles.secondaryText}>Share Ride Card (WhatsApp / Instagram)</Text>
+                <Text style={styles.secondaryText}>Share ride card</Text>
               </TouchableOpacity>
             </Card>
 
             {/* Share Group Ride & Ride Code */}
             <Card style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>Share Group Ride & Access</Text>
+              <Text style={styles.sectionTitle}>Invite riders</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.surfaceRaised, padding: 12, borderRadius: 10 }}>
                 <View>
                   <Text style={styles.mutedSmall}>RIDE CODE</Text>
@@ -2478,7 +2479,7 @@ export default function TripWorkspaceScreen() {
             style={styles.tacticalSosBtn}
             onPress={() => {
               Alert.alert(
-                'Open Emergency Controls?',
+                'Open emergency options?',
                 `Access live emergency SOS and distress beacon controls for "${trip.name}"?`,
                 [
                   { text: 'Cancel', style: 'cancel' },
@@ -2497,12 +2498,12 @@ export default function TripWorkspaceScreen() {
             style={styles.primaryRouteLauncherBtn}
             onPress={() => router.push('/ride/' + trip.id)}
             accessibilityRole="button"
-            accessibilityLabel={isTripOngoing ? 'Open Live Tracker' : 'Start Tracking'}
+            accessibilityLabel={isTripOngoing ? 'Open live map' : 'Start Tracking'}
           >
             <View style={styles.routeLauncherLeft}>
               <LiveDot pulse={isTripOngoing} size={10} />
               <Text style={styles.primaryRouteLauncherText}>
-                {isTripOngoing ? 'Open Live Tracker' : 'Start Tracking'}
+                {isTripOngoing ? 'Open live map' : 'Start Tracking'}
               </Text>
             </View>
             <Icon name="arrow-forward" size="lg" color={theme.onAccent} />
@@ -2511,10 +2512,9 @@ export default function TripWorkspaceScreen() {
       </View>
 
       {/* Modals: Stage, Edit Trip, Journal, Role, Expense */}
-      <Modal visible={stageModalVisible} transparent animationType="slide" onRequestClose={() => setStageModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={stageModalVisible} onRequestClose={() => setStageModalVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Add Riding Stage</Text>
+            <Text style={styles.sectionTitle}>Add stage</Text>
             <Text style={styles.mutedSmall}>Divide this day's ride into a focused stage with start and finish milestones.</Text>
             
             <Text style={styles.label}>Stage Name *</Text>
@@ -2544,17 +2544,15 @@ export default function TripWorkspaceScreen() {
             <TextInput style={styles.input} value={stageNotes} onChangeText={setStageNotes} placeholder="e.g. Steep descent, hairpins, beware of oncoming buses" placeholderTextColor={theme.subtle} multiline />
 
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveStage()}>
-              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save Riding Stage'}</Text>
+              <Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save stage'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setStageModalVisible(false)}>
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={editTripVisible} transparent animationType="slide" onRequestClose={() => setEditTripVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={editTripVisible} onRequestClose={() => setEditTripVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
             <Text style={styles.sectionTitle}>Edit trip details</Text>
             <Text style={styles.mutedSmall}>You can update the plan even after the ride has started. Changes are saved to the shared trip.</Text>
@@ -2563,7 +2561,7 @@ export default function TripWorkspaceScreen() {
             <Text style={styles.label}>Description</Text>
             <TextInput style={styles.input} value={editDescription} onChangeText={setEditDescription} placeholder="Description (optional)" placeholderTextColor={theme.subtle} multiline />
 
-            <Text style={styles.label}>Access & Visibility</Text>
+            <Text style={styles.label}>Who can join</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
               {[
                 { key: 'private', label: 'Private' },
@@ -2580,7 +2578,7 @@ export default function TripWorkspaceScreen() {
               ))}
             </View>
 
-            <Text style={styles.label}>Maximum Pack Capacity (riders)</Text>
+            <Text style={styles.label}>Maximum riders</Text>
             <TextInput
               style={styles.input}
               value={editMaxParticipants}
@@ -2590,7 +2588,7 @@ export default function TripWorkspaceScreen() {
               placeholderTextColor={theme.subtle}
             />
 
-            <Text style={styles.label}>Group Ride Rules & Safety Guidelines</Text>
+            <Text style={styles.label}>Group ride rules</Text>
             <TextInput
               style={[styles.input, { height: 80 }]}
               value={editRideRules}
@@ -2602,13 +2600,11 @@ export default function TripWorkspaceScreen() {
             <TouchableOpacity style={styles.primaryWide} disabled={saving} onPress={() => void saveTripDetails()}><Text style={styles.primaryText}>{saving ? 'Saving…' : 'Save trip changes'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setEditTripVisible(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={journalModalVisible} transparent animationType="slide" onRequestClose={() => setJournalModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={journalModalVisible} onRequestClose={() => setJournalModalVisible(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Trip Journal & Photos</Text>
+            <Text style={styles.sectionTitle}>Journal and photos</Text>
             <Text style={styles.mutedSmall}>Preserve your personal memories, road observations, and photo links for this tour.</Text>
             <Text style={styles.label}>Journal title</Text>
             <TextInput style={styles.input} value={journalTitle} onChangeText={setJournalTitle} placeholder="e.g. Monsoon Ghats Ride" placeholderTextColor={theme.subtle} />
@@ -2649,14 +2645,12 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Role Management Modal */}
-      <Modal visible={riderRoleModalVisible} transparent animationType="slide" onRequestClose={() => setRiderRoleModalVisible(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={riderRoleModalVisible} onRequestClose={() => setRiderRoleModalVisible(false)}>
           <View style={styles.editModal}>
-            <Text style={styles.sectionTitle}>Manage Rider Role</Text>
+            <Text style={styles.sectionTitle}>Rider role</Text>
             {selectedRider && (
               <>
                 <Text style={styles.pointName}>{selectedRider.display_name}</Text>
@@ -2687,7 +2681,7 @@ export default function TripWorkspaceScreen() {
                   ))}
                 </View>
 
-                <Text style={[styles.label, { marginTop: 10 }]}>Update Attendance Status</Text>
+                <Text style={[styles.label, { marginTop: 10 }]}>Update attendance</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
                   {(['confirmed', 'tentative', 'declined', 'attended'] as const).map(att => {
                     const isSel = (selectedRider.attendance_status || 'confirmed') === att;
@@ -2716,7 +2710,7 @@ export default function TripWorkspaceScreen() {
                   disabled={saving}
                   onPress={() => void transferLeadership(selectedRider)}
                 >
-                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>Transfer Captain Role</Text>
+                  <Text style={[styles.secondaryText, { color: theme.accent, fontWeight: '800' }]}>Make captain</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -2733,14 +2727,12 @@ export default function TripWorkspaceScreen() {
               </>
             )}
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Add Expense Modal */}
-      <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
-        <View style={styles.modalOverlay}>
+      <SheetModal visible={expenseModal} onRequestClose={() => setExpenseModal(false)}>
           <ScrollView style={styles.editModal} contentContainerStyle={{ paddingBottom: 28 }} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Add Trip Expense</Text>
+            <Text style={styles.sectionTitle}>Add expense</Text>
             <Text style={styles.mutedSmall}>Log group spending and split equally among selected riders.</Text>
 
             <Text style={styles.label}>Expense Title *</Text>
@@ -2813,8 +2805,7 @@ export default function TripWorkspaceScreen() {
               <Text style={styles.secondaryText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {!!error && <Text style={styles.error}>{error}</Text>}
     </View>
@@ -3087,7 +3078,6 @@ const makeStyles = (c: RidePalette) => StyleSheet.create({
   input: { backgroundColor: c.background, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 11, color: c.text, marginTop: 6, fontSize: 13 },
   row: { flexDirection: 'row', gap: 10 },
   half: { flex: 1 },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' },
   editModal: { maxHeight: '90%', backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
   smallButton: { borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6 },
   smallButtonText: { color: c.accent, fontSize: 10, fontWeight: '700' },

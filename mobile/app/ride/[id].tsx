@@ -78,7 +78,7 @@ import {
 } from '../../src/services/backgroundLocation';
 import { playAlertSound } from '../../src/services/alertSound';
 import { registerPushToken } from '../../src/services/pushNotifications';
-import { HoldToConfirmButton, Icon, LiveDot } from '../../src/components/ui';
+import { HoldToConfirmButton, Icon, LiveDot, SheetModal } from '../../src/components/ui';
 import { ALERT_ICONS, MECHANICAL_ICONS, plainLabel } from '../../src/icons';
 import { RiderRoster } from '../../src/components/ride/RiderRoster';
 
@@ -1091,9 +1091,9 @@ export default function LiveRideScreen() {
     }
     const phone = profile?.emergency_contact || '';
     if (!phone) {
-      Dialog.alert('No Emergency Contact Set', 'Set an emergency contact in your Profile to send 1-tap SOS SMS.', [
+      Dialog.alert('No emergency contact', 'Set an emergency contact in your Profile to send 1-tap SOS SMS.', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Go to Profile', onPress: () => router.push('/(tabs)/profile') },
+        { text: 'Go to profile', onPress: () => router.push('/(tabs)/profile') },
       ]);
       return;
     }
@@ -1268,7 +1268,7 @@ export default function LiveRideScreen() {
         </Mapbox.MapView>
       ) : (
         <View style={s.fallback}>
-          <Text style={s.heading}>Cockpit Ride Mode Active</Text>
+          <Text style={s.heading}>Ride mode on</Text>
           <Text style={s.muted}>The native map is unavailable. GPS status and ride controls are shown below.</Text>
         </View>
       )}
@@ -1379,7 +1379,7 @@ export default function LiveRideScreen() {
           </View>
           <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
             <TouchableOpacity style={s.floatingAlertSecondaryBtn} onPress={() => void Linking.openSettings()}>
-              <Text style={s.floatingAlertActionText}>Open Battery Settings</Text>
+              <Text style={s.floatingAlertActionText}>Open battery settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1461,11 +1461,11 @@ export default function LiveRideScreen() {
               acknowledgedAlertIds.includes(newest.id) ? (
                 <View style={s.acknowledgedBadge}>
                   <Icon name="checkmark" size="sm" color={theme.green} />
-                  <Text style={s.acknowledgedText}>✓ Acknowledged</Text>
+                  <Text style={s.acknowledgedText}>Seen</Text>
                 </View>
               ) : (
                 <TouchableOpacity style={s.floatingAlertActionBtn} onPress={() => void acknowledgeAnnouncement(newest.id)}>
-                  <Text style={s.floatingAlertActionText}>👍 Acknowledge</Text>
+                  <Text style={s.floatingAlertActionText}>Got it</Text>
                 </TouchableOpacity>
               )
             )}
@@ -1859,8 +1859,7 @@ export default function LiveRideScreen() {
       </View>
 
       {/* Modals */}
-      <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={modal} onRequestClose={() => setModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
             <Text style={s.heading}>Let your group know</Text>
             <Text style={s.muted}>Your location is attached. Offline alerts are delivered after reconnecting.</Text>
@@ -1909,19 +1908,17 @@ export default function LiveRideScreen() {
               }}
             >
               <Icon name="call-outline" size="md" color={theme.textMuted} />
-              <Text style={s.text}>Breakdown Assistance Directory (1033 / RSA)</Text>
+              <Text style={s.text}>Roadside help (1033 / RSA)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setModal(false)}>
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={announcementModal} transparent animationType="slide" onRequestClose={() => setAnnouncementModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={announcementModal} onRequestClose={() => setAnnouncementModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.accent }]}>Captain Announcement</Text>
+            <Text style={[s.heading, { color: theme.accent }]}>Announcement</Text>
             {message && <Text style={s.warningText}>{message}</Text>}
             <Text style={s.muted}>Broadcast a quick directive or sticky status alert to all riders' heads-up display.</Text>
             <View style={{ gap: 8, marginVertical: 4 }}>
@@ -1959,16 +1956,14 @@ export default function LiveRideScreen() {
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
-      <Modal visible={sosModal} transparent animationType="slide" onRequestClose={() => setSosModal(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={sosModal} onRequestClose={() => setSosModal(false)}>
           <View style={[s.modal, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-            <Text style={[s.heading, { color: theme.danger }]}>Motorcycle Emergency SOS</Text>
+            <Text style={[s.heading, { color: theme.danger }]}>Emergency</Text>
             <Text style={s.muted}>Broadcast an instant emergency alert with your live GPS location to your group, and reach your emergency contact.</Text>
             <TouchableOpacity style={s.sosEmergencyOption} disabled={busy} onPress={() => void broadcastSosToGroup()}>
-              <Text style={s.sosEmergencyText}>Broadcast to Group Now</Text>
+              <Text style={s.sosEmergencyText}>Send to group</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.alertOption} disabled={busy} onPress={() => void sendEmergencySms()}>
               <Icon name="chatbubble-outline" size="md" color={theme.textMuted} />
@@ -1986,22 +1981,20 @@ export default function LiveRideScreen() {
               }}
             >
               <Icon name="call-outline" size="md" color={theme.accent} />
-              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway Assistance & RSA Directory (1033 / 112)</Text>
+              <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway help (1033 / 112)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondary} onPress={() => setSosModal(false)}>
               <Text style={s.text}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Live Ride Statistics Modal */}
-      <Modal visible={statsModalVisible} transparent animationType="slide" onRequestClose={() => setStatsModalVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={statsModalVisible} onRequestClose={() => setStatsModalVisible(false)}>
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={s.heading}>Live Ride Telemetry & Statistics</Text>
+                <Text style={s.heading}>Ride stats</Text>
                 <TouchableOpacity onPress={() => setStatsModalVisible(false)} accessibilityLabel="Close statistics">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -2095,16 +2088,14 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Captain Command Dashboard Modal */}
-      <Modal visible={captainDashboardVisible} transparent animationType="slide" onRequestClose={() => setCaptainDashboardVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={captainDashboardVisible} onRequestClose={() => setCaptainDashboardVisible(false)}>
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>Captain Command Dashboard</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Captain's view</Text>
                 <TouchableOpacity onPress={() => setCaptainDashboardVisible(false)} accessibilityLabel="Close dashboard">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -2177,7 +2168,7 @@ export default function LiveRideScreen() {
                           </View>
                         ) : (
                           <TouchableOpacity style={s.regroupCloseBtn} disabled={busy} onPress={() => void handleCloseRegroup(point.id)}>
-                            <Text style={s.regroupCloseBtnText}>Close & Resume</Text>
+                            <Text style={s.regroupCloseBtnText}>Close</Text>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -2229,7 +2220,7 @@ export default function LiveRideScreen() {
                 onPress={() => void shareFamilySpectatorLink(24)}
               >
                 <Icon name="share-social-outline" size="md" color={theme.accent} />
-                <Text style={[s.text, { color: theme.accent }]}>Share Live Family Link (24h)</Text>
+                <Text style={[s.text, { color: theme.accent }]}>Share live link with family (24 h)</Text>
               </TouchableOpacity>
               {hasActiveSpectatorLink && (
                 <TouchableOpacity
@@ -2237,7 +2228,7 @@ export default function LiveRideScreen() {
                   onPress={() => void revokeFamilySpectatorLink()}
                 >
                   <Icon name="close-circle-outline" size="md" color={theme.danger} />
-                  <Text style={[s.text, { color: theme.danger }]}>Revoke Active Family Link</Text>
+                  <Text style={[s.text, { color: theme.danger }]}>Turn off family links</Text>
                 </TouchableOpacity>
               )}
 
@@ -2249,7 +2240,7 @@ export default function LiveRideScreen() {
                 }}
               >
                 <Icon name="call-outline" size="md" color={theme.accent} />
-                <Text style={[s.text, { color: theme.accent }]}>Open Roadside Breakdown Directory</Text>
+                <Text style={[s.text, { color: theme.accent }]}>Find roadside help</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setCaptainDashboardVisible(false)}>
@@ -2257,8 +2248,7 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Upgrade Prompt Modal */}
       <UpgradePromptModal
@@ -2282,12 +2272,11 @@ export default function LiveRideScreen() {
       />
 
       {/* Mechanical Breakdown Modal */}
-      <Modal visible={mechanicalModalVisible} transparent animationType="slide" onRequestClose={() => setMechanicalModalVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={mechanicalModalVisible} onRequestClose={() => setMechanicalModalVisible(false)}>
           <View style={[s.modal, { maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.warning }]}>Mechanical Breakdown Alert</Text>
+                <Text style={[s.heading, { color: theme.warning }]}>Report a breakdown</Text>
                 <TouchableOpacity onPress={() => setMechanicalModalVisible(false)} accessibilityLabel="Close">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -2319,7 +2308,7 @@ export default function LiveRideScreen() {
               />
 
               <TouchableOpacity style={[s.primary, { backgroundColor: theme.warningSoft, borderWidth: 1, borderColor: theme.warning, marginBottom: 10 }]} disabled={busy} onPress={() => void sendMechanicalBreakdownAlert()}>
-                <Text style={[s.buttonText, { color: theme.warning, fontWeight: '800' }]}>Broadcast Breakdown Alert</Text>
+                <Text style={[s.buttonText, { color: theme.warning, fontWeight: '800' }]}>Send breakdown alert</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -2330,7 +2319,7 @@ export default function LiveRideScreen() {
                 }}
               >
                 <Icon name="call-outline" size="md" color={theme.textMuted} />
-                <Text style={s.text}>View Roadside Assistance Numbers</Text>
+                <Text style={s.text}>Roadside assistance numbers</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={s.secondary} onPress={() => setMechanicalModalVisible(false)}>
@@ -2338,16 +2327,14 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
 
       {/* Breakdown Directory Modal */}
-      <Modal visible={breakdownDirectoryVisible} transparent animationType="slide" onRequestClose={() => setBreakdownDirectoryVisible(false)}>
-        <View style={s.overlay}>
+      <SheetModal visible={breakdownDirectoryVisible} onRequestClose={() => setBreakdownDirectoryVisible(false)}>
           <View style={[s.modal, { maxHeight: '88%', paddingBottom: Math.max(insets.bottom, 24) }]}>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[s.heading, { color: theme.accent }]}>Roadside Breakdown Directory</Text>
+                <Text style={[s.heading, { color: theme.accent }]}>Roadside help</Text>
                 <TouchableOpacity onPress={() => setBreakdownDirectoryVisible(false)} accessibilityLabel="Close directory">
                   <Icon name="close" size="lg" color={theme.muted} />
                 </TouchableOpacity>
@@ -2394,8 +2381,7 @@ export default function LiveRideScreen() {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
-      </Modal>
+      </SheetModal>
     </View>
   );
 }
@@ -2699,7 +2685,6 @@ const makeStyles = (c: RidePalette) =>
     sync: { paddingVertical: 10, alignItems: 'center' },
 
     // Modals
-    overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: c.shadow + '88' },
     modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, backgroundColor: c.surface, gap: 12 },
     alertOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, borderRadius: radius.md, backgroundColor: c.surfaceRaised },
     inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

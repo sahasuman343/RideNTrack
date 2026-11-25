@@ -186,7 +186,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
             </View>
 
             {/* Leg / Sector Tag */}
-            <Text style={styles.sectorTag}>Active Expedition Sector</Text>
+            <Text style={styles.sectorTag}>Riding now</Text>
 
             {/* Trip Title */}
             <Text style={styles.heroTripName} numberOfLines={1}>

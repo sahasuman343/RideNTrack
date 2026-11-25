@@ -1,9 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,7 +10,7 @@ import {
 } from 'react-native';
 import { QUICK_REPLY_PRESETS, type RideMessage, type RideMessageType } from '@ridentrack/shared';
 import { useRideTheme, radius, spacing, typography } from '../../theme';
-import { Icon } from '../ui';
+import { Icon, SheetModal } from '../ui';
 
 interface Props {
   visible: boolean;
@@ -59,11 +56,7 @@ export function TripChatSheet({
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={s.backdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+    <SheetModal visible={visible} onRequestClose={onClose}>
         <View style={s.sheet}>
           <View style={s.header}>
             <View style={s.headerLeft}>
@@ -160,8 +153,7 @@ export function TripChatSheet({
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    </SheetModal>
   );
 }
 

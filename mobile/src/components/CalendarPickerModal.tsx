@@ -46,7 +46,7 @@ export default function CalendarPickerModal({
   startDate = '',
   endDate = '',
   onSelectRange,
-  title = 'Select Trip Dates',
+  title = 'Select trip dates',
 }: CalendarPickerModalProps) {
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);

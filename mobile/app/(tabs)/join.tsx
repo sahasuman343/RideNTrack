@@ -63,7 +63,7 @@ export default function JoinRideScreen() {
     } catch (err: any) {
       const errMsg = err?.message || 'Check the ride code and try again.';
       setErrorState({
-        title: errMsg.toLowerCase().includes('expired') ? 'Code Expired' : 'Ride Code Error',
+        title: errMsg.toLowerCase().includes('expired') ? 'Code Expired' : 'That code didn’t work',
         message: errMsg.toLowerCase().includes('expired')
           ? 'This expedition code has expired. Please check with your ride leader for a new invite code.'
           : errMsg,
@@ -162,7 +162,7 @@ export default function JoinRideScreen() {
                 >
                   <View style={s.clearCodeRow}>
                     <Icon name="backspace-outline" size="sm" color={theme.accent} />
-                    <Text style={s.clearCodeAction}>Clear & Re-enter</Text>
+                    <Text style={s.clearCodeAction}>Clear and re-enter</Text>
                   </View>
                 </TouchableOpacity>
               </View>
@@ -191,7 +191,7 @@ export default function JoinRideScreen() {
                 }}
               >
                 <Icon name="refresh" size="lg" color={theme.onAccent} />
-                <Text style={s.giantBtnTextPrimary}>Try Another Code</Text>
+                <Text style={s.giantBtnTextPrimary}>Try another code</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -209,7 +209,7 @@ export default function JoinRideScreen() {
                 style={s.dismissActionBtn}
                 onPress={() => router.back()}
               >
-                <Text style={s.dismissActionText}>Dismiss & Return to Solo Ride Mode</Text>
+                <Text style={s.dismissActionText}>Back to solo ride</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -399,7 +399,7 @@ export default function JoinRideScreen() {
               </View>
               <View style={s.meshTextCol}>
                 <View style={s.meshTitleRow}>
-                  <Text style={s.meshTitle}>Zero Cell Coverage?</Text>
+                  <Text style={s.meshTitle}>No phone signal?</Text>
                   <View style={s.meshDot} />
                 </View>
                 <Text style={s.meshBody}>

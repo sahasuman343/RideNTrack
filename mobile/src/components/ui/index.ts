@@ -11,3 +11,4 @@ export * from './Skeleton';
 export * from './FallbackTripCover';
 export * from './Icon';
 export * from './Dialog';
+export * from './SheetModal';

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
+  Animated,
+  Pressable,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   StyleProp,
@@ -10,7 +11,7 @@ import {
   Platform,
   Vibration,
 } from 'react-native';
-import { useRideTheme, RidePalette, radius } from '../../theme';
+import { useRideTheme, RidePalette, radius, motion } from '../../theme';
 
 export interface ButtonProps {
   title: string;
@@ -44,13 +45,39 @@ export function Button({
   testID,
 }: ButtonProps) {
   const theme = useRideTheme();
-  const styles = makeStyles(theme);
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const inactive = disabled || loading;
+
+  // A short spring on press-in/out gives every tap a physical response
+  // without buzzing the phone; only destructive actions get a haptic tick.
+  const pressIn = () => {
+    Animated.spring(scale, { toValue: motion.pressScale, useNativeDriver: true, ...motion.pressIn }).start();
+  };
+  const pressOut = () => {
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, ...motion.pressOut }).start();
+  };
+
+  // Layout props position the pressable; everything else styles the face.
+  const { outerStyle, innerStyle } = React.useMemo(() => {
+    const flat = (StyleSheet.flatten(style) || {}) as ViewStyle;
+    const outer: ViewStyle = {};
+    const inner: ViewStyle = {};
+    for (const [key, value] of Object.entries(flat)) {
+      const target = /^(flex|flexGrow|flexShrink|flexBasis|alignSelf|margin|position|top|left|right|bottom|zIndex|width|minWidth|maxWidth)/.test(key) ? outer : inner;
+      (target as Record<string, unknown>)[key] = value;
+    }
+    if (outer.width !== undefined || outer.flex !== undefined || outer.flexGrow !== undefined || outer.alignSelf === 'stretch') {
+      inner.width = '100%';
+    }
+    return { outerStyle: outer, innerStyle: inner };
+  }, [style]);
 
   const handlePress = () => {
-    if (disabled || loading) return;
-    if (Platform.OS !== 'web') {
+    if (inactive) return;
+    if (variant === 'danger' && Platform.OS === 'android') {
       try {
-        Vibration.vibrate(20);
+        Vibration.vibrate(12);
       } catch {}
     }
     onPress();
@@ -85,23 +112,30 @@ export function Button({
   }[size];
 
   return (
-    <TouchableOpacity
-      style={[
-        styles.base,
-        sizeStyle,
-        buttonStyle,
-        (disabled || loading) && styles.disabled,
-        style,
-      ]}
+    <Pressable
       onPress={handlePress}
-      disabled={disabled || loading}
-      activeOpacity={0.85}
+      onPressIn={inactive ? undefined : pressIn}
+      onPressOut={inactive ? undefined : pressOut}
+      disabled={inactive}
+      hitSlop={size === 'sm' ? 6 : 0}
+      android_ripple={variant === 'ghost' || variant === 'outline' ? { color: theme.border, borderless: false } : undefined}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel || title}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       testID={testID}
+      style={outerStyle}
     >
+      <Animated.View
+        style={[
+          styles.base,
+          sizeStyle,
+          buttonStyle,
+          inactive && styles.disabled,
+          innerStyle,
+          { transform: [{ scale }] },
+        ]}
+      >
       {loading ? (
         <ActivityIndicator
           size="small"
@@ -116,7 +150,8 @@ export function Button({
           {iconRight}
         </>
       )}
-    </TouchableOpacity>
+      </Animated.View>
+    </Pressable>
   );
 }
 

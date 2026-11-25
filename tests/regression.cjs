@@ -1008,11 +1008,11 @@ test('profile screen supports motorcycle configuration and displays safe fuel ra
 
 test('trip workspace renders touring intelligence, motorcycle fuel advisory, and weather forecast', () => {
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
-  assert.match(tripSource, /Touring Intelligence & Motorcycle Fuel/);
+  assert.match(tripSource, /Fuel and touring notes/);
   assert.match(tripSource, /Motorcycle Fuel Advisory/);
-  assert.match(tripSource, /Route Weather Forecast/);
+  assert.match(tripSource, /Weather on the route/);
   assert.match(tripSource, /Open-Meteo/);
-  assert.match(tripSource, /Touring Advisories & Safety/);
+  assert.match(tripSource, /Before you ride/);
 });
 
 test('formatShareableRideCard produces formatted text for social sharing', () => {
@@ -1075,8 +1075,8 @@ test('trip workspace renders journal entries, photos, and shareable ride card ac
   const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
   assert.match(tripSource, /trip_journal_entries/);
   assert.match(tripSource, /save_trip_journal_entry/);
-  assert.match(tripSource, /Ride Journal & Memories/);
-  assert.match(tripSource, /Share Ride Card \(WhatsApp \/ Instagram\)/);
+  assert.match(tripSource, /Ride journal/);
+  assert.match(tripSource, /Share ride card/);
   assert.match(tripSource, /formatShareableRideCard/);
 });
 
@@ -1117,12 +1117,12 @@ test('trip planner allows quick creation with essentials, calendar date picker, 
   assert.match(createSource, /handlePresetNextWeekend/);
 
   // Quick creation with essentials (Name, Origin, Destination, Dates)
-  assert.match(createSource, /Quick Trip Setup/);
+  assert.match(createSource, /Quick setup/);
   assert.match(createSource, /Create trip plan/);
   assert.match(createSource, /Customize Trip/);
 
   // CalendarPickerModal logic
-  assert.match(calendarSource, /Select Trip Dates/);
+  assert.match(calendarSource, /Select trip dates/);
   assert.match(calendarSource, /This Weekend/);
   assert.match(calendarSource, /formatDateNice/);
   assert.match(calendarSource, /formatYMD/);
@@ -1338,7 +1338,7 @@ test('live ride screen renders pack formation strip and captain announcement mod
   assert.match(rideSource, /FORMATION & SPACING/);
   assert.match(rideSource, /formationBadge/);
   assert.match(rideSource, /announcementModal/);
-  assert.match(rideSource, /Captain Announcement/);
+  assert.match(rideSource, /Announcement/);
   assert.match(rideSource, /broadcastAnnouncement/);
   assert.match(rideSource, /Fuel stop at next pump/);
   assert.match(rideSource, /Wet roads \/ rain ahead/);
@@ -1349,7 +1349,7 @@ test('trip workspace integrates GPX export, group expenses, and settlements', ()
   assert.match(tripSource, /exportGpxFile/);
   assert.match(tripSource, /exportTripToGpx/);
   assert.match(tripSource, /Export GPX route/);
-  assert.match(tripSource, /Trip Expenses & Splitting/);
+  assert.match(tripSource, /Expenses/);
   assert.match(tripSource, /expenseSummary/);
   assert.match(tripSource, /settlements/);
   assert.match(tripSource, /calculateExpenseSettlement/);
@@ -1476,7 +1476,7 @@ test('profile screen integrates saved places and touring destination bookmarking
   assert.match(profileSource, /get_user_saved_places/);
   assert.match(profileSource, /add_saved_place/);
   assert.match(profileSource, /delete_saved_place/);
-  assert.match(profileSource, /Bookmark Saved Place/);
+  assert.match(profileSource, /Save a place/);
 });
 
 test('trip workspace integrates trip sharing, pack capacity, ride rules, and rider attendance', () => {
@@ -1488,7 +1488,7 @@ test('trip workspace integrates trip sharing, pack capacity, ride rules, and rid
   assert.match(tripSource, />Share Code</);
   assert.match(tripSource, /Your Attendance RSVP/);
   assert.match(tripSource, /ATTENDANCE_STATUS_LABELS/);
-  assert.match(tripSource, /Group Ride Rules & Safety Guidelines/);
+  assert.match(tripSource, /Group ride rules/);
 });
 
 test('live ride screen integrates complete live ride statistics and touring battery saver', () => {
@@ -1497,7 +1497,7 @@ test('live ride screen integrates complete live ride statistics and touring batt
   assert.match(rideSource, /liveStats/);
   assert.match(rideSource, /statsModalVisible/);
   assert.match(rideSource, /batterySaver/);
-  assert.match(rideSource, /Live Ride Telemetry & Statistics/);
+  assert.match(rideSource, /Ride stats/);
   assert.match(rideSource, /TOURING BATTERY SAVER/);
   assert.match(rideSource, /GPS signal restored/);
 });
@@ -1592,18 +1592,18 @@ test('trip workspace exposes regroup point closure controls for trip captains', 
 test('live ride screen integrates Captain Dashboard, announcement acknowledgements, mechanical alerts, and breakdown directory', () => {
   const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
   assert.match(rideSource, /captainDashboardVisible/);
-  assert.match(rideSource, /Captain Command Dashboard/);
+  assert.match(rideSource, /Captain's view/);
   assert.match(rideSource, /acknowledgeAnnouncement/);
   assert.match(rideSource, /acknowledge_alert/);
-  assert.match(rideSource, /👍 Acknowledge/);
-  assert.match(rideSource, /✓ Acknowledged/);
+  assert.match(rideSource, /Got it/);
+  assert.match(rideSource, /Seen/);
   assert.match(rideSource, /handleCloseRegroup/);
   assert.match(rideSource, /close_regroup_point/);
   assert.match(rideSource, /broadcastPaceAdvisory/);
   assert.match(rideSource, /sendMechanicalBreakdownAlert/);
-  assert.match(rideSource, /Mechanical Breakdown Alert/);
+  assert.match(rideSource, /Report a breakdown/);
   assert.match(rideSource, /breakdownDirectoryVisible/);
-  assert.match(rideSource, /Roadside Breakdown Directory/);
+  assert.match(rideSource, /Roadside help/);
   assert.match(rideSource, /escalateEmergency/);
   assert.match(rideSource, /escalate_emergency_alert/);
 });
@@ -1938,7 +1938,7 @@ test('Trip Details renders sticky section switcher, sticky bottom action bar, da
   assert.match(tripSource, /tacticalSosBtn/);
   assert.match(tripSource, /EMERG/);
   assert.match(tripSource, /primaryRouteLauncherBtn/);
-  assert.match(tripSource, /Open Live Tracker/);
+  assert.match(tripSource, /Open live map/);
   assert.match(tripSource, /Start Tracking/);
 
   // Compact expandable participants with AvatarStack, search, and pinned roles
@@ -2020,9 +2020,9 @@ test('Trip Planner delivers 6-step full-screen flow, draft autosave, telemetry H
   assert.match(createSource, /Net Climb/);
 
   // Pass routing calibration
-  assert.match(createSource, /Prefer Technical Twisties & Passes/);
-  assert.match(createSource, /Avoid Commercial Tollways/);
-  assert.match(createSource, /Offline Vector & Radar Pack/);
+  assert.match(createSource, /Prefer twisty roads and passes/);
+  assert.match(createSource, /Avoid tolls/);
+  assert.match(createSource, /Offline maps and radar/);
 
   // Sticky bottom footer
   assert.match(createSource, /stickyFooter/);
@@ -2058,9 +2058,9 @@ test('Join Ride delivers segmented QR scanner, 6-digit tactile passcode, clipboa
   assert.match(joinSource, /errorContainer/);
   assert.match(joinSource, /errorCard/);
   assert.match(joinSource, /Code Expired/);
-  assert.match(joinSource, /Try Another Code/);
+  assert.match(joinSource, /Try another code/);
   assert.match(joinSource, /Scan Pack QR Pass/);
-  assert.match(joinSource, /Dismiss & Return to Solo Ride Mode/);
+  assert.match(joinSource, /Back to solo ride/);
 
   // Cold-start deep link support
   assert.match(joinSource, /useLocalSearchParams/);
@@ -2111,9 +2111,9 @@ test('Profile and Garage delivers rider card, telemetry stats split, primary ste
   // System and sync settings list
   assert.match(profileSource, /systemSection/);
   assert.match(profileSource, /SYSTEM & SYNC/);
-  assert.match(profileSource, /Offline Topo Storage/);
+  assert.match(profileSource, /Offline topo maps/);
   assert.match(profileSource, /Emergency SOS Protocols/);
-  assert.match(profileSource, /Units & Telemetry/);
+  assert.match(profileSource, /Units/);
   assert.match(profileSource, /Cloud GPX & Telemetry Export/);
 
   // Sign out and build version footer
