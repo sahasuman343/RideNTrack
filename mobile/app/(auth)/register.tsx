@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { referralCodeFrom, referralSourceFrom } from '@ridentrack/shared';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 
@@ -10,6 +11,10 @@ export default function RegisterScreen() {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
+  // F17: ridentrack://register?ref=ABC123&src=recap fills the invite code.
+  const params = useLocalSearchParams<{ ref?: string; src?: string }>();
+  const linkedCode = referralCodeFrom(typeof params.ref === 'string' ? params.ref : null);
+  const [inviteCode, setInviteCode] = useState(linkedCode ?? '');
   const { signUp } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
@@ -26,7 +31,10 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      const signedIn = await signUp(email.trim(), password, username.trim(), displayName.trim());
+      const signedIn = await signUp(email.trim(), password, username.trim(), displayName.trim(), {
+        code: referralCodeFrom(inviteCode),
+        source: linkedCode && referralCodeFrom(inviteCode) === linkedCode ? referralSourceFrom(typeof params.src === 'string' ? params.src : null) : 'typed',
+      });
       if (signedIn) router.replace('/(tabs)');
       else { Alert.alert('Check your email', 'Confirm your account, then sign in.'); router.replace('/(auth)/login'); }
     } catch (error: any) {
@@ -81,6 +89,17 @@ export default function RegisterScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+          />
+          <TextInput
+            style={[styles.input, { letterSpacing: 2 }]}
+            placeholder="Invite code (optional)"
+            placeholderTextColor={theme.subtle}
+            value={inviteCode}
+            onChangeText={setInviteCode}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={12}
+            accessibilityLabel="Invite code, optional"
           />
           <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
             <Text style={styles.buttonText}>{loading ? 'Creating Account...' : 'Register'}</Text>

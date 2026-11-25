@@ -51,3 +51,10 @@
 .family-next span{grid-column:2;font-size:12px;color:#6c7b73}
 @media(max-width:640px){.family-card{left:12px;right:12px;top:12px;max-width:none;padding:14px 16px;border-radius:16px}.family-card h2{font-size:19px}.family-card p{font-size:13px}.map-top-controls{top:auto;bottom:96px;right:14px;left:auto}.ride-notice{top:auto;bottom:150px}}
 @media(max-width:640px){.ride-map-area .mapboxgl-ctrl-top-right{top:auto;bottom:150px}}
+/* F17: quiet growth link at the foot of the spectator panel. */
+.plan-own-ride{display:flex;align-items:center;gap:12px;margin:18px 20px 22px;padding:14px 16px;border:1px solid #e3e8dd;border-radius:14px;background:#fbfcf9;color:var(--ink);text-decoration:none;transition:border-color .15s,background .15s}
+.plan-own-ride:hover{border-color:#de7136;background:#fff7f1}
+.plan-own-ride span{display:flex;flex-direction:column;gap:3px;flex:1}
+.plan-own-ride strong{font-size:14px;font-weight:700}
+.plan-own-ride small{font-size:12px;line-height:1.45;color:#6c7b73}
+.plan-own-ride b{font-size:18px;color:#de7136}

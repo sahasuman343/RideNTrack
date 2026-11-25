@@ -1,5 +1,6 @@
+import { normaliseReferralCode, type ReferralSource } from './referrals';
 type SignupError = { message: string; code?: string; status?: number };
-type SignupPayload = { email: string; password: string; options: { data: { username: string; display_name: string } } };
+type SignupPayload = { email: string; password: string; options: { data: { username: string; display_name: string; referral_code?: string; referral_source?: string } } };
 interface RegistrationClient<T> {
   rpc(name: string, args: { requested_username: string }): PromiseLike<{ data: unknown; error: unknown }>;
   auth: { signUp(payload: SignupPayload): Promise<{ data: T; error: SignupError | null }> };
@@ -14,6 +15,8 @@ export class UsernameUnavailableError extends Error {
 
 export async function registerAccount<T>(client: RegistrationClient<T>, input: {
   email: string; password: string; username: string; displayName: string;
+  /** F17: credited to the inviting rider once the account exists. */
+  referralCode?: string | null; referralSource?: ReferralSource | null;
 }): Promise<T> {
   const username = input.username.trim();
   const displayName = input.displayName.trim();
@@ -29,7 +32,7 @@ export async function registerAccount<T>(client: RegistrationClient<T>, input: {
 
   const { data, error } = await client.auth.signUp({
     email: input.email.trim(), password: input.password,
-    options: { data: { username, display_name: displayName } },
+    options: { data: referralMetadata(username, displayName, input.referralCode, input.referralSource) },
   });
   if (error) {
     // The unique constraint remains authoritative if another signup wins the race.
@@ -41,4 +44,11 @@ export async function registerAccount<T>(client: RegistrationClient<T>, input: {
     throw new Error(error.message);
   }
   return data;
+}
+
+function referralMetadata(username: string, displayName: string, code?: string | null, source?: ReferralSource | null) {
+  const referral = normaliseReferralCode(code);
+  return referral
+    ? { username, display_name: displayName, referral_code: referral, referral_source: source ?? 'typed' }
+    : { username, display_name: displayName };
 }

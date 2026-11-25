@@ -25,6 +25,7 @@ import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, t
 import { Icon, SheetModal } from '../../src/components/ui';
 import { SAVED_PLACE_ICONS } from '../../src/icons';
 import { LanguagePicker } from '../../src/components/profile/LanguagePicker';
+import { InviteCard } from '../../src/components/InviteCard';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -612,6 +613,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <InviteCard source="profile" />
         {languagesFlag && <LanguagePicker />}
 
         {/* Sign Out & Delete Account Actions */}

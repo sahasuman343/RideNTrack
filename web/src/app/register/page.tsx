@@ -1,12 +1,15 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { use, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { registerAccount, UsernameUnavailableError } from '@ridentrack/shared';
+import { referralCodeFrom, referralSourceFrom, registerAccount, UsernameUnavailableError, type ReferralSource } from '@ridentrack/shared';
 
-export default function RegisterPage() {
+export default function RegisterPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  const query = use(searchParams);
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
+  const linkedCode = referralCodeFrom(first(query.ref));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -17,6 +20,9 @@ export default function RegisterPage() {
   const usernameInput = useRef<HTMLInputElement>(null);
   const [usernameError, setUsernameError] = useState(false);
   const router = useRouter();
+  // F17: a code from "Plan your own ride" or a shared recap link (?ref=…&src=…).
+  const [inviteCode, setInviteCode] = useState(linkedCode ?? '');
+  const [inviteSource, setInviteSource] = useState<ReferralSource>(() => (linkedCode ? referralSourceFrom(first(query.src)) : 'typed'));
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -26,7 +32,10 @@ export default function RegisterPage() {
     setSuccessMsg('');
     setUsernameError(false);
     try {
-      const data = await registerAccount(supabase, { email, password, username, displayName });
+      const data = await registerAccount(supabase, {
+        email, password, username, displayName,
+        referralCode: referralCodeFrom(inviteCode), referralSource: inviteSource,
+      });
       if (data.session) {
         router.replace('/dashboard');
       } else {
@@ -105,6 +114,16 @@ export default function RegisterPage() {
             minLength={6}
             className="w-full bg-[#16213e] border border-[#0f3460] rounded-xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF6B00]"
             required
+          />
+          <input
+            type="text"
+            placeholder="Invite code (optional)"
+            aria-label="Invite code, optional"
+            autoCapitalize="characters"
+            maxLength={12}
+            value={inviteCode}
+            onChange={(e) => { setInviteCode(e.target.value); setInviteSource('typed'); }}
+            className="w-full bg-[#16213e] border border-[#0f3460] rounded-xl p-4 text-white placeholder-gray-500 tracking-widest uppercase focus:outline-none focus:border-[#FF6B00]"
           />
           <button
             type="submit"

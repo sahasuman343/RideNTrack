@@ -89,6 +89,7 @@ import { useOfflineMaps } from '../../src/hooks/useOfflineMaps';
 import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
 import { useRideReadiness } from '../../src/hooks/useRideReadiness';
 import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { InviteCard } from '../../src/components/InviteCard';
 
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
@@ -1586,6 +1587,9 @@ export default function TripWorkspaceScreen() {
           <>
             {(trip.status === 'planned' || isTripOngoing) && (
               <RideReadyCard items={readiness.items} summary={readiness.summary} onFix={item => void readiness.fix(item)} footnote={batteryFootnote} />
+            )}
+            {trip.status === 'completed' && (
+              <InviteCard source="recap" ride={{ name: trip.name, distanceKm: trip.estimated_distance_meters ? trip.estimated_distance_meters / 1000 : null }} />
             )}
             <TouringKnowledgeCard
               route={touring.route}

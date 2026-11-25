@@ -6,7 +6,7 @@ import { syncQueue } from '../services/syncQueue';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
-import { registerAccount } from '@ridentrack/shared';
+import { registerAccount, type ReferralSource } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
@@ -16,7 +16,7 @@ interface AuthContextType {
   loading: boolean;
   profileError: boolean;
   reloadProfile: () => Promise<void>;
-  signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
+  signUp: (email: string, password: string, username: string, displayName: string, referral?: { code: string | null; source: ReferralSource } | null) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
@@ -121,8 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return promise;
   }
 
-  async function signUp(email: string, password: string, username: string, displayName: string) {
-    const data = await registerAccount(supabase, { email, password, username, displayName });
+  async function signUp(email: string, password: string, username: string, displayName: string, referral?: { code: string | null; source: ReferralSource } | null) {
+    const data = await registerAccount(supabase, { email, password, username, displayName, referralCode: referral?.code ?? null, referralSource: referral?.source ?? null });
     if (data?.session) {
       setSession(data.session);
       if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);

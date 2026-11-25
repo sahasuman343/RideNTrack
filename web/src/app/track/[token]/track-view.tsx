@@ -47,6 +47,15 @@ export default function TrackView({ token }: { token: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  // F17: "Plan your own ride" carries the sharing rider's code.
+  const [referralCode, setReferralCode] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.rpc('get_referral_code_for_link', { p_token: token }).then(({ data }) => {
+      if (!cancelled && typeof data === 'string') setReferralCode(data);
+    });
+    return () => { cancelled = true; };
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,6 +239,17 @@ export default function TrackView({ token }: { token: string }) {
               )}
             </div>
           </div>
+
+          <a
+            className="plan-own-ride"
+            href={referralCode ? `/register?ref=${encodeURIComponent(referralCode)}&src=spectator` : '/register'}
+          >
+            <span>
+              <strong>Plan your own ride</strong>
+              <small>Live map, SOS that works with no signal, and texts home. Free for groups.</small>
+            </span>
+            <b aria-hidden>→</b>
+          </a>
         </aside>
 
         <section className="ride-map-area" aria-label="Live spectator map">
