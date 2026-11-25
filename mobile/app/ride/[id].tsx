@@ -73,6 +73,7 @@ import { useRideChat } from '../../src/hooks/ride/useRideChat';
 import { useSpectatorLinks } from '../../src/hooks/ride/useSpectatorLinks';
 import { useLastFuelWarning } from '../../src/hooks/ride/useLastFuelWarning';
 import { useRoadReports } from '../../src/hooks/ride/useRoadReports';
+import { useVoiceNotes } from '../../src/hooks/ride/useVoiceNotes';
 import { RoadReportSheet } from '../../src/components/ride/RoadReportSheet';
 import { postRideStartCard, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
@@ -364,9 +365,14 @@ export default function LiveRideScreen() {
   });
 
   // Family spectator links (free during a ride with decision 3, otherwise Pro).
-  const { hasActiveSpectatorLink, shareFamilySpectatorLink, revokeFamilySpectatorLink } = useSpectatorLinks({
+  const { hasActiveSpectatorLink, rideProAccess: hasRideProAccess, shareFamilySpectatorLink, revokeFamilySpectatorLink } = useSpectatorLinks({
     ride, rideId: id, userId, subscriptionTier: profile?.subscription_tier, setMessage, onNeedsUpgrade: () => setUpgradePromptVisible(true),
   });
+  // F12: voice notes (free during a live ride with decision 3, otherwise Pro).
+  const voiceFlag = useFlag('voice_notes');
+  const freeSafetyVoice = useFlag('free_safety_features');
+  const voiceAllowed = voiceFlag && (freeSafetyVoice || hasRideProAccess);
+  const voice = useVoiceNotes({ enabled: voiceAllowed, messages, myUserId: userId, nowIso: new Date(now).toISOString() });
   const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
 
   useEffect(() => {
@@ -992,6 +998,7 @@ export default function LiveRideScreen() {
     if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso));
     if (lastFuel.item) items.push(lastFuel.item);
     if (roadAhead) items.push(roadAhead);
+    if (voice.attention) items.push(voice.attention);
     if (stationaryCountdown !== null) {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
@@ -1011,7 +1018,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, roadAhead, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, roadAhead, voice.attention, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1043,6 +1050,12 @@ export default function LiveRideScreen() {
       case 'dismiss_fuel':
       case 'dismiss_road':
         dismissAttention(item);
+        return;
+      case 'play_voice':
+        voice.playLatest();
+        return;
+      case 'stop_voice':
+        voice.stop();
         return;
       case 'road_confirm':
         void road.confirm(item.id.replace(/^road:/, ''));
@@ -1628,6 +1641,13 @@ export default function LiveRideScreen() {
         isOnline={sync.isOnline}
         onSend={chat.send}
         onRetry={message => void chat.retry(message)}
+        onSendVoice={voiceAllowed ? (uri, ms) => void chat.sendVoice(uri, ms) : undefined}
+        onPlayVoice={line => {
+          const key = line.queued?.id ?? line.key;
+          if (voice.playingKey === key) voice.stop();
+          else if (line.voice) void voice.play({ key, path: line.voice.path, localUri: line.voice.localUri });
+        }}
+        playingKey={voice.playingKey}
       />
 
       <MechanicalSheet

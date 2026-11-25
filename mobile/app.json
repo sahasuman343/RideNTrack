@@ -36,7 +36,19 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "RideNTrack uses the microphone only while you hold the talk button, to send a voice note to your ride group."
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "RideNTrack uses motion sensors during a ride to notice a possible crash and ask if you are OK."
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,

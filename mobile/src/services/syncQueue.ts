@@ -1,3 +1,4 @@
+import { voiceClipPath, VOICE_BUCKET } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 import { getQueueCounts, getQueuedAlerts, getQueuedLocations, getQueuedMessages, getQueuedRoadReports, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
 
@@ -15,6 +16,19 @@ function isPermanentRejection(error: { code?: string | null } | null | undefined
 }
 
 let running: Promise<void> | null = null;
+
+/** 'ok' when the clip is in storage (now or from an earlier try), 'gone' when the local file is lost. */
+async function uploadVoiceClip(path: string, localUri: string): Promise<'ok' | 'retry' | 'gone'> {
+  let body: ArrayBuffer;
+  try {
+    body = await (await fetch(localUri)).arrayBuffer();
+  } catch {
+    return 'gone';
+  }
+  const { error } = await supabase.storage.from(VOICE_BUCKET).upload(path, body, { contentType: 'audio/mp4', upsert: false });
+  if (!error || /exists|duplicate/i.test(error.message)) return 'ok';
+  return 'retry';
+}
 
 /** Chat messages the server refused for good (shown as Failed with a retry). */
 export const rejectedMessageIds = new Set<string>();
@@ -78,9 +92,18 @@ async function flush() {
   if (counts.messages) {
     const messages = await getQueuedMessages(userId);
     for (const m of messages) {
+      // F12: a voice note uploads its clip first; the row then points at it.
+      let voice: { voice_path: string; voice_duration_ms: number } | null = null;
+      if (m.voice) {
+        const path = voiceClipPath(m.ride_id, m.user_id, m.id);
+        const uploaded = await uploadVoiceClip(path, m.voice.local_uri);
+        if (uploaded === 'retry') { messageError ||= 'Voice note upload failed'; continue; }
+        if (uploaded === 'gone') { await clearQueuedItems(userId, [m.id]); rejectedMessageIds.add(m.id); continue; }
+        voice = { voice_path: path, voice_duration_ms: Math.round(m.voice.duration_ms) };
+      }
       const { error } = await supabase.from('ride_messages').upsert({
         client_id: m.id, ride_id: m.ride_id, sender_id: m.user_id, body: m.body,
-        message_type: m.message_type, client_created_at: m.created_at,
+        message_type: m.message_type, client_created_at: m.created_at, ...(voice ?? {}),
       }, { onConflict: 'client_id', ignoreDuplicates: true });
       if (!error) { await clearQueuedItems(userId, [m.id]); continue; }
       if (isPermanentRejection(error)) {

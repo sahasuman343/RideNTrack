@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildChatLines, chatQueueSummary, normaliseChatBody, type QueuedChatMessage, type RideMessage, type RideMessageType } from '@ridentrack/shared';
 import { enqueueMessage, getQueuedMessagesForRide, newQueueId } from '../../lib/offlineQueue';
 import { rejectedMessageIds } from '../../services/syncQueue';
+import * as FileSystem from 'expo-file-system/legacy';
 
 /*
  * F8: trip chat that works in a dead zone. Every message goes through the
@@ -70,6 +71,28 @@ export function useRideChat(params: {
     void flush();
   }, [rideId, userId, flush]);
 
+  /** F12: keep the clip somewhere the OS will not clean, then queue it like any message. */
+  const sendVoice = useCallback(async (uri: string, durationMs: number) => {
+    if (!rideId || !userId) return;
+    const id = await newQueueId();
+    let localUri = uri;
+    try {
+      const dir = `${FileSystem.documentDirectory}voice/`;
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+      localUri = `${dir}${id}.m4a`;
+      await FileSystem.copyAsync({ from: uri, to: localUri });
+    } catch {
+      localUri = uri;
+    }
+    const message: QueuedChatMessage = {
+      id, ride_id: rideId, user_id: userId, body: 'Voice note', message_type: 'voice',
+      created_at: new Date().toISOString(), voice: { local_uri: localUri, duration_ms: durationMs },
+    };
+    await enqueueMessage(message);
+    setQueued(prev => [...prev, message]);
+    void flush();
+  }, [rideId, userId, flush]);
+
   const retry = useCallback(async (message: QueuedChatMessage) => {
     rejectedMessageIds.delete(message.id);
     setFailedIds(ids => ids.filter(id => id !== message.id));
@@ -81,5 +104,5 @@ export function useRideChat(params: {
     server: messages, queued, failedIds, sentIds, myUserId: userId, online,
   }), [messages, queued, failedIds, sentIds, userId, online]);
 
-  return { lines, summary: chatQueueSummary(lines, online), send, retry };
+  return { lines, summary: chatQueueSummary(lines, online), send, sendVoice, retry };
 }

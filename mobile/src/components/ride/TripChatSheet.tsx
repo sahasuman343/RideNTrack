@@ -8,9 +8,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { QUICK_REPLY_PRESETS, chatDeliveryText, type ChatLine, type QueuedChatMessage, type RideMessageType } from '@ridentrack/shared';
+import { QUICK_REPLY_PRESETS, chatDeliveryText, formatClipDuration, type ChatLine, type QueuedChatMessage, type RideMessageType } from '@ridentrack/shared';
 import { useRideTheme, radius, spacing, typography } from '../../theme';
 import { Icon, SheetModal } from '../ui';
+import { HoldToTalkButton } from './HoldToTalkButton';
 
 interface Props {
   visible: boolean;
@@ -22,6 +23,10 @@ interface Props {
   isOnline: boolean;
   onSend: (body: string, messageType: RideMessageType) => Promise<void>;
   onRetry: (message: QueuedChatMessage) => void;
+  /** F12: absent when voice notes are off for this ride. */
+  onSendVoice?: (uri: string, durationMs: number) => void;
+  onPlayVoice?: (line: ChatLine) => void;
+  playingKey?: string | null;
 }
 
 function clock(iso: string) {
@@ -41,6 +46,9 @@ export function TripChatSheet({
   isOnline,
   onSend,
   onRetry,
+  onSendVoice,
+  onPlayVoice,
+  playingKey,
 }: Props) {
   const theme = useRideTheme();
   const s = useMemo(() => makeStyles(theme), [theme]);
@@ -133,7 +141,26 @@ export function TripChatSheet({
                   <Text style={s.msgMeta}>
                     {item.senderName} · {clock(item.writtenAt)}
                   </Text>
-                  <Text style={s.msgBody}>{item.body}</Text>
+                  {item.voice ? (
+                    <TouchableOpacity
+                      style={s.voiceRow}
+                      onPress={() => onPlayVoice?.(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Play voice note, ${formatClipDuration(item.voice.durationMs)}`}
+                    >
+                      <View style={s.voicePlay}>
+                        <Icon name={playingKey === (item.queued?.id ?? item.key) ? 'stop' : 'play'} size="sm" color={theme.onAccent} />
+                      </View>
+                      <View style={s.voiceWave}>
+                        {[6, 12, 18, 10, 16, 8, 14, 20, 9, 15, 7, 12].map((h, i) => (
+                          <View key={i} style={[s.voiceBar, { height: h }]} />
+                        ))}
+                      </View>
+                      <Text style={s.voiceTime}>{formatClipDuration(item.voice.durationMs)}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={s.msgBody}>{item.body}</Text>
+                  )}
                   {item.lateNote && <Text style={s.msgLate}>{item.lateNote}</Text>}
                   {delivery && (
                     <TouchableOpacity
@@ -167,6 +194,12 @@ export function TripChatSheet({
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          {onSendVoice && (
+            <View style={{ marginBottom: spacing.sm }}>
+              <HoldToTalkButton onRecorded={onSendVoice} onError={setSendError} />
+            </View>
+          )}
 
           <View style={s.inputRow}>
             <TextInput
@@ -240,6 +273,11 @@ function makeStyles(theme: ReturnType<typeof useRideTheme>) {
     msgMeta: { ...typography.bodySm, color: theme.textMuted, fontSize: 11, marginBottom: 2 },
     msgBody: { ...typography.bodyMd, color: theme.text },
     msgWaiting: { borderStyle: 'dashed' },
+    voiceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44, minWidth: 180 },
+    voicePlay: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.accent, alignItems: 'center', justifyContent: 'center' },
+    voiceWave: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 3 },
+    voiceBar: { width: 3, borderRadius: 2, backgroundColor: theme.textMuted, opacity: 0.6 },
+    voiceTime: { ...typography.bodySm, color: theme.textMuted, fontVariant: ['tabular-nums'] },
     msgLate: { ...typography.bodySm, fontSize: 11, color: theme.textMuted, fontStyle: 'italic', marginTop: 2 },
     msgDelivery: { ...typography.bodySm, fontSize: 11, fontWeight: '700', marginTop: 4, textAlign: 'right' },
     quickRow: { marginVertical: spacing.sm, maxHeight: 44 },

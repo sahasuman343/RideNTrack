@@ -367,7 +367,7 @@ export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
 export { watchRide, classifyRiderFreshness, formatLastSeenAgo, fetchRideMessages, sendRideMessage, type Connection, type RiderFreshness } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
 
-export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system';
+export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system' | 'voice';
 
 export interface RideMessage {
   id: string;
@@ -383,6 +383,9 @@ export interface RideMessage {
   client_id?: string | null;
   /** F8: when the rider wrote it (created_at is when it reached the server). */
   client_created_at?: string | null;
+  /** F12: clip in the ride-voice bucket and its length. */
+  voice_path?: string | null;
+  voice_duration_ms?: number | null;
 }
 
 export const QUICK_REPLY_PRESETS = [
@@ -450,3 +453,4 @@ export * from './chat';
 export * from './lockScreen';
 export * from './touringKnowledge';
 export * from './roadReports';
+export * from './voice';

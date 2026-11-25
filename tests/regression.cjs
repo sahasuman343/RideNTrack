@@ -271,6 +271,33 @@ test('queued road reports upload by id; rate-limited ones are dropped, network e
   assert.deepEqual(calls.map(c=>c[0]),['create_road_report','create_road_report','create_road_report']);
   assert.deepEqual(reports.map(r=>r.id),['r3']);
 });
+test('queued voice notes upload the clip before the row, and keep both on a failed upload', async () => {
+  let messages=[{id:'v1',ride_id:'ride',user_id:'u',body:'Voice note',message_type:'voice',created_at:'t',voice:{local_uri:'file:///v1.m4a',duration_ms:6400}}];
+  const uploads=[], rows=[]; let fail=true;
+  global.fetch = async () => ({ arrayBuffer: async () => new ArrayBuffer(8) });
+  const service = loader({
+    '../lib/supabase':{supabase:{
+      auth:{getSession:async()=>({data:{session:{user:{id:'u'}}}})},
+      storage:{from:bucket=>({upload:async(path)=>{uploads.push([bucket,path]);return fail?{error:{message:'Network request failed'}}:{error:null};}})},
+      from:()=>({upsert:async row=>{rows.push(row);return {error:null};}}),
+      rpc:async()=>({data:0,error:null}),
+    }},
+    '../lib/offlineQueue':{ pruneQueue: async () => {},
+      getQueueCounts:async()=>({locations:0,alerts:0,messages:messages.length,roadReports:0}),getQueuedAlerts:async()=>[],getQueuedLocations:async()=>[],
+      getQueuedMessages:async()=>messages,getQueuedRoadReports:async()=>[],
+      clearQueuedItems:async(_u,ids)=>{messages=messages.filter(m=>!ids.includes(m.id));},
+    },
+  })('mobile/src/services/syncQueue.ts');
+  await assert.rejects(service.syncQueue(),/messages remain queued/);
+  assert.equal(rows.length,0); assert.equal(messages.length,1);
+  fail=false;
+  await service.syncQueue();
+  assert.deepEqual(uploads[1],['ride-voice','ride/u/v1.m4a']);
+  assert.equal(rows[0].voice_path,'ride/u/v1.m4a');
+  assert.equal(rows[0].voice_duration_ms,6400);
+  assert.equal(messages.length,0);
+  delete global.fetch;
+});
 test('legacy invalid alert IDs migrate once to durable UUIDs', async () => {
   const legacy = new Map([['@ridentrack/alert_queue',JSON.stringify([{id:'123-random',ride_id:'r',user_id:'u',type:'fuel',lat:0,lng:0,created_at:'2026-10-01T00:00:00Z'}])]]);
   const { queue,sqlite } = queueFixture(legacy);

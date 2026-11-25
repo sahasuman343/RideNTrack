@@ -19,6 +19,8 @@ export interface QueuedChatMessage {
   message_type: RideMessageType;
   /** When the rider wrote it. */
   created_at: string;
+  /** F12: a voice note recorded on this phone, uploaded before the row. */
+  voice?: { local_uri: string; duration_ms: number } | null;
 }
 
 export interface ChatLine {
@@ -37,6 +39,8 @@ export interface ChatLine {
   lateNote: string | null;
   /** The queued copy, for a retry. */
   queued?: QueuedChatMessage;
+  /** F12: voice note, by storage path (sent) or local file (still on this phone). */
+  voice?: { path: string | null; localUri: string | null; durationMs: number } | null;
 }
 
 /** A message counts as late when it reached the server this long after it was written. */
@@ -67,7 +71,7 @@ export function lateNote(writtenAt: string | null | undefined, arrivedAt: string
  * A queued message the server already has (same client id) shows once, as sent.
  */
 export function buildChatLines(input: {
-  server: Array<RideMessage & { client_id?: string | null; client_created_at?: string | null }>;
+  server: RideMessage[];
   queued: QueuedChatMessage[];
   failedIds?: Iterable<string>;
   myUserId: string | null | undefined;
@@ -97,6 +101,7 @@ export function buildChatLines(input: {
       writtenAt,
       delivery: mine ? 'sent' : null,
       lateNote: lateNote(m.client_created_at, m.created_at),
+      voice: m.message_type === 'voice' && m.voice_path ? { path: m.voice_path, localUri: null, durationMs: m.voice_duration_ms ?? 0 } : null,
     });
   }
   for (const q of input.queued) {
@@ -116,6 +121,7 @@ export function buildChatLines(input: {
       delivery: state,
       lateNote: null,
       queued: q,
+      voice: q.voice ? { path: null, localUri: q.voice.local_uri, durationMs: q.voice.duration_ms } : null,
     });
   }
   return lines.sort((a, b) => Date.parse(a.writtenAt) - Date.parse(b.writtenAt) || (a.key < b.key ? -1 : 1));
