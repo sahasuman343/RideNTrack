@@ -38,6 +38,10 @@ export const FLAG_DEFAULTS = {
   perf_sampling: false,
   /** F15: clubs. */
   clubs: true,
+  /** F16: club plan through the stores (needs store_billing and club products). */
+  club_plan: false,
+  /** F16: paid ride registration through Razorpay payment links. */
+  paid_registrations: false,
   /** F17: referral prompts on the spectator page and recap card. */
   referrals: true,
   /** F20: Android headset auto-start prompt (needs the native receiver). */

@@ -46,6 +46,11 @@ Deno.serve(async req => {
         p_event_id: event.id, p_event_type: event.type, p_user_id: action.userId, p_ride_id: null, p_transaction_id: action.transactionId, p_grant: false,
       });
       break;
+    case 'set_club_plan':
+      result = await admin.rpc('apply_club_plan', {
+        p_event_id: event.id, p_user_id: action.userId, p_club_id: action.clubId, p_active: action.active, p_expires_at: action.expiresAt,
+      });
+      break;
     default:
       return new Response(JSON.stringify({ ignored: action.reason }), { headers: { 'content-type': 'application/json' } });
   }

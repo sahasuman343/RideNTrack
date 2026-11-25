@@ -7,7 +7,7 @@
  * shows plans and prices but no buy buttons. Setup: docs/features/store-billing.md
  */
 
-export type BillingProduct = 'pro_monthly' | 'pro_annual' | 'expedition_pass';
+export type BillingProduct = 'pro_monthly' | 'pro_annual' | 'expedition_pass' | 'club_monthly' | 'club_annual';
 
 export type PurchaseOutcome =
   | { status: 'purchased' }
@@ -20,8 +20,11 @@ export interface BillingProvider {
   identify(userId: string): Promise<void>;
   /** Localised store prices, e.g. { pro_monthly: '₹199.00' }. */
   prices(): Promise<Partial<Record<BillingProduct, string>>>;
-  /** rideId is required for the Expedition Pass so the webhook knows which trip it unlocks. */
-  purchase(product: BillingProduct, opts?: { rideId?: string }): Promise<PurchaseOutcome>;
+  /**
+   * rideId is required for the Expedition Pass so the webhook knows which trip it unlocks;
+   * clubId for a club plan (set as the pending_club_id subscriber attribute).
+   */
+  purchase(product: BillingProduct, opts?: { rideId?: string; clubId?: string }): Promise<PurchaseOutcome>;
   restore(): Promise<PurchaseOutcome>;
 }
 
@@ -46,9 +49,9 @@ export function onBillingProviderChange(fn: () => void) {
 export function purchaseMessage(outcome: PurchaseOutcome, product: BillingProduct): string | null {
   switch (outcome.status) {
     case 'purchased':
-      return product === 'expedition_pass'
-        ? 'Expedition Pass unlocked for this trip. It can take a few seconds to show for everyone.'
-        : 'Welcome to Pro Tourer. Your features unlock in a few seconds.';
+      if (product === 'expedition_pass') return 'Expedition Pass unlocked for this trip. It can take a few seconds to show for everyone.';
+      if (product === 'club_monthly' || product === 'club_annual') return 'Club plan on. Every club ride gets Pro in a few seconds.';
+      return 'Welcome to Pro Tourer. Your features unlock in a few seconds.';
     case 'pending':
       return 'Payment is pending with the store. We will unlock it as soon as it clears.';
     case 'failed':

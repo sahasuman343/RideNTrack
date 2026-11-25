@@ -461,3 +461,4 @@ export * from './performance';
 export * from './crashTuning';
 export * from './referrals';
 export * from './clubs';
+export * from './registrations';

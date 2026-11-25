@@ -15,6 +15,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, radius, spacing, type RidePalette } from '../../src/theme';
 import { Button, Icon, Skeleton } from '../../src/components/ui';
 import { SeriesSheet } from '../../src/components/club/SeriesSheet';
+import { ClubPlanCard } from '../../src/components/club/ClubPlanCard';
 
 const WEB_BASE = process.env.EXPO_PUBLIC_WEB_URL || 'https://ridentrack.app';
 
@@ -182,6 +183,8 @@ export default function ClubScreen() {
               })}
             </View>
           )}
+
+          {manage && <ClubPlanCard clubId={view.club.id} canBuy={manage} />}
 
           {view.my_role && (
             <View style={{ gap: spacing.sm }}>

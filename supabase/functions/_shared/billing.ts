@@ -9,6 +9,9 @@ export const PRODUCT_IDS = {
   proMonthly: 'ridentrack_pro_monthly',
   proAnnual: 'ridentrack_pro_annual',
   expeditionPass: 'ridentrack_expedition_pass',
+  /** F16: club plan, bought by a club owner or admin; unlocks Pro on every club ride. */
+  clubMonthly: 'ridentrack_club_monthly',
+  clubAnnual: 'ridentrack_club_annual',
 } as const;
 
 export const PRO_ENTITLEMENT = 'pro_tourer';
@@ -30,6 +33,7 @@ export type BillingAction =
   | { kind: 'set_tier'; userId: string; tier: 'free' | 'pro_tourer'; expiresAt: string | null }
   | { kind: 'grant_pass'; userId: string; rideId: string; transactionId: string }
   | { kind: 'revoke_pass'; userId: string; transactionId: string }
+  | { kind: 'set_club_plan'; userId: string; clubId: string; active: boolean; expiresAt: string | null }
   | { kind: 'ignore'; reason: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,6 +56,18 @@ export function billingActionFor(event: RevenueCatEvent, nowMs: number = Date.no
     }
     if (event.type === 'REFUND' || event.type === 'CANCELLATION') return { kind: 'revoke_pass', userId, transactionId: txn };
     return { kind: 'ignore', reason: `pass_event_${event.type}` };
+  }
+
+  if (event.product_id === PRODUCT_IDS.clubMonthly || event.product_id === PRODUCT_IDS.clubAnnual) {
+    const clubId = event.subscriber_attributes?.pending_club_id?.value ?? '';
+    if (!UUID.test(clubId)) return { kind: 'ignore', reason: 'club_plan_without_club' };
+    const expiresAt = typeof event.expiration_at_ms === 'number' ? new Date(event.expiration_at_ms).toISOString() : null;
+    if (ACTIVE_TYPES.has(event.type)) {
+      const live = !(event.expiration_at_ms && event.expiration_at_ms < nowMs);
+      return { kind: 'set_club_plan', userId, clubId, active: live, expiresAt };
+    }
+    if (ENDING_TYPES.has(event.type) || event.type === 'REFUND') return { kind: 'set_club_plan', userId, clubId, active: false, expiresAt };
+    return { kind: 'ignore', reason: `club_event_${event.type}` };
   }
 
   const grantsPro = (event.entitlement_ids ?? []).includes(PRO_ENTITLEMENT)
