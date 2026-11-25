@@ -58,6 +58,9 @@ jobs:
             psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f "$migration"
           done
           psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f tests/db-regression.sql
+          for db_test in tests/db/*.sql; do
+            psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f "$db_test"
+          done
       - name: Production web build
         if: always()
         run: npm --workspace=web run build

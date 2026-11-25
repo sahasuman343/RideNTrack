@@ -11,7 +11,7 @@
     "mobile": "npm --workspace=mobile run start",
     "web": "npm --workspace=web run dev",
     "lint": "npm --workspace=web run lint",
-    "test": "node --test tests/regression.cjs",
+    "test": "node --test tests/regression.cjs tests/unit/*.test.cjs",
     "typecheck": "tsc --project mobile/tsconfig.json --noEmit && tsc --project web/tsconfig.json --noEmit"
   },
   "devDependencies": {

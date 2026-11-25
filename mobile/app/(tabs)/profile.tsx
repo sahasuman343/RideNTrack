@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
+import { BikeModelPicker } from '../../src/components/profile/BikeModelPicker';
 import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { supabase } from '../../src/lib/supabase';
@@ -41,6 +42,7 @@ export default function ProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
+  const [modelId, setModelId] = useState<string | null>(profile?.motorcycle_model_id ?? null);
   const [category, setCategory] = useState<NonNullable<NonNullable<typeof profile>['motorcycle_category']> | ''>(profile?.motorcycle_category ?? '');
   const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
   const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
@@ -165,6 +167,7 @@ export default function ProfileScreen() {
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
+    setModelId(profile?.motorcycle_model_id ?? null);
     setCategory(profile.motorcycle_category ?? '');
     setTankCapacity(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
     setMileage(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
@@ -222,6 +225,7 @@ export default function ProfileScreen() {
       } : {
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
+        motorcycle_model_id: modelId,
         motorcycle_category: category || null,
         fuel_tank_capacity_liters: tankNum,
         mileage_km_per_liter: mileageNum,
@@ -662,10 +666,22 @@ export default function ProfileScreen() {
             </>}
             {section === 'bike' && <>
             <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
+            <BikeModelPicker
+              selectedId={modelId}
+              onPick={bike => {
+                setModelId(bike.id);
+                setMake(bike.make);
+                setModel(bike.model);
+                setCategory(bike.category);
+                setTankCapacity(String(bike.tankLiters));
+                setMileage(String(bike.mileageKmpl));
+                setReserve(String(bike.reserveLiters));
+              }}
+            />
             <Text style={styles.fieldLabel}>Make / Manufacturer</Text>
-            <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
+            <TextInput style={styles.input} value={make} onChangeText={v => { setMake(v); setModelId(null); }} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Model</Text>
-            <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="e.g. Himalayan 450, 390 Adventure" placeholderTextColor={theme.subtle} />
+            <TextInput style={styles.input} value={model} onChangeText={v => { setModel(v); setModelId(null); }} placeholder="e.g. Himalayan 450, 390 Adventure" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Motorcycle category</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
               {(['adventure', 'tourer', 'cruiser', 'sport', 'commuter', 'scooter'] as const).map(cat => (

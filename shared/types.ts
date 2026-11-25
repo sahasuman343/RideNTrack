@@ -12,6 +12,7 @@ export interface User {
   fuel_tank_capacity_liters?: number | null;
   mileage_km_per_liter?: number | null;
   fuel_reserve_liters?: number | null;
+  motorcycle_model_id?: string | null;
   motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
   blood_group?: string | null;
   share_ice_with_ride?: boolean;
@@ -419,3 +420,10 @@ export * from './navigation';
 
 
 
+export * from './attention';
+export * from './status';
+export * from './rideAttention';
+export * from './analytics';
+export * from './flags';
+export * from './readiness';
+export * from './bikeModels';

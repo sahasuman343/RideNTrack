@@ -5,6 +5,28 @@ const path = require('node:path');
 const ts = require('typescript');
 const { DatabaseSync } = require('node:sqlite');
 
+// The live ride screen is split into hooks and components (R1). Source-text
+// checks read the whole ride feature, not only the route file.
+function readRideScreenSource() {
+  const parts = [path.resolve('mobile/app/ride/[id].tsx')];
+  for (const dir of ['mobile/src/components/ride', 'mobile/src/hooks/ride']) {
+    for (const file of fs.readdirSync(path.resolve(dir)).sort()) {
+      if (/\.tsx?$/.test(file)) parts.push(path.resolve(dir, file));
+    }
+  }
+  parts.push(path.resolve('shared/rideAttention.ts'), path.resolve('shared/attention.ts'));
+  return parts.map(file => fs.readFileSync(file, 'utf8')).join('\n');
+}
+
+// The trip workspace is split into section components (R1-b).
+function readTripScreenSource() {
+  const parts = [path.resolve('mobile/app/trip/[id].tsx')];
+  for (const file of fs.readdirSync(path.resolve('mobile/src/components/trip')).sort()) {
+    if (/\.tsx?$/.test(file)) parts.push(path.resolve('mobile/src/components/trip', file));
+  }
+  return parts.map(file => fs.readFileSync(file, 'utf8')).join('\n');
+}
+
 function loader(stubs = {}) {
   const cache = new Map();
   function load(filename) {
@@ -28,7 +50,7 @@ function loader(stubs = {}) {
 }
 
 test('trip workspace exposes deletion only behind the leader check and confirms before RPC', () => {
-  const source=fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'),'utf8');
+  const source=readTripScreenSource();
   assert.match(source,/isAdmin && <TouchableOpacity style=\{styles\.dangerButton\}/);
   assert.match(source,/Delete this trip permanently\?/);
   assert.match(source,/Delete permanently/);
@@ -702,7 +724,7 @@ test('route editor uses dedicated place search modal and never leaves dummy plac
   assert.match(routeSource, /onRequestClose=\{closeSearchModal\}/);
   assert.match(routeSource, /Cancel without adding/);
 
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /router\.push\('\/trip\/' \+ trip\.id \+ '\/route'\)/);
   assert.match(tripSource, /promptDayAssignment/);
 });
@@ -725,7 +747,7 @@ test('Google Maps navigation URL preserves a destination Place ID and rejects in
   assert.throws(() => shared.buildGoogleMapsNavigationUrl({ latitude: 91, longitude: 77 }), /valid destination coordinate/i);
 });
 test('trip workspace exposes external next-stop navigation without replacing the group ride map', () => {
-  const source=fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'),'utf8');
+  const source=readTripScreenSource();
   assert.match(source,/buildGoogleMapsNavigationUrl/);
   assert.match(source,/Navigate to next stop/);
   assert.match(source,/Navigate here/);
@@ -734,7 +756,7 @@ test('trip workspace exposes external next-stop navigation without replacing the
 
 
 test('live ride screen offers external navigation while keeping the in-app group map', () => {
-  const source=fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'),'utf8');
+  const source=readRideScreenSource();
   assert.match(source,/buildGoogleMapsNavigationUrl/);
   assert.match(source,/trip_waypoints/);
   assert.match(source,/Navigate to \{nextWaypoint\.name\}/);
@@ -788,7 +810,7 @@ test('leave_ride migration exists and trip workspace exposes self-service leave 
   assert.match(migrationSource, /REVOKE ALL ON FUNCTION public\.leave_ride\(UUID\) FROM PUBLIC, anon/);
   assert.match(migrationSource, /GRANT EXECUTE ON FUNCTION public\.leave_ride\(UUID\) TO authenticated/);
 
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /confirmLeaveRide/);
   assert.match(tripSource, /leaveRide/);
   assert.match(tripSource, /leaveRideSafely\(id, user\.id\)/);
@@ -800,7 +822,7 @@ test('leave_ride migration exists and trip workspace exposes self-service leave 
 });
 
 test('live ride map renders actual GPS trail distinct from planned route', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /actualTrailGeoJson/);
   assert.match(rideSource, /id="actual-trail"/);
   assert.match(rideSource, /id="actual-trail-line"/);
@@ -842,7 +864,7 @@ test('trip stages migration defines atomic RPCs and cascading foreign keys', () 
 });
 
 test('trip workspace integrates multi-day stages and touring itinerary sharing', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /get_trip_stages/);
   assert.match(tripSource, /save_trip_stage/);
   assert.match(tripSource, /delete_trip_stage/);
@@ -862,7 +884,7 @@ test('route workshop includes repair and accommodation stop pills', () => {
 });
 
 test('riding HUD renders speed, trail distance, and next stop distance during active ride', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /hudContainer/);
   assert.match(rideSource, /hudItem/);
   assert.match(rideSource, /hudValue/);
@@ -873,19 +895,21 @@ test('riding HUD renders speed, trail distance, and next stop distance during ac
 });
 
 test('waypoint progression advances when rider arrives within 250m and shows arrival toast', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /distance < 250/);
   assert.match(rideSource, /setLastArrivedWaypoint/);
-  assert.match(rideSource, /arrivalToast/);
-  assert.match(rideSource, /Arrived at \{lastArrivedWaypoint\}! Next stop loaded/);
+  // Arrival is an attention-queue notice, not its own toast.
+  assert.match(rideSource, /noticeAttention\('arrived', `Arrived at \$\{lastArrivedWaypoint\}`/);
+  assert.match(rideSource, /Next stop loaded/);
 });
 
 test('route deviation alert triggers when distance exceeds deviation threshold', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /distanceToRouteMeters/);
   assert.match(rideSource, /route_deviation_threshold_meters \|\| 500/);
-  assert.match(rideSource, /deviationWarning/);
-  assert.match(rideSource, /Route Deviation: ~\{Math\.round\(routeDeviation\)\} m/);
+  assert.match(rideSource, /routeDeviation > deviationLimit/);
+  assert.match(rideSource, /routeDeviationAttention\(routeDeviation, nowIso\)/);
+  assert.match(rideSource, /off the planned route/);
 });
 
 test('rider live status differentiates riding, stopped, disconnected, and completed', () => {
@@ -920,15 +944,16 @@ test('regroup alert migration, ALERT_LABELS, and proximity regroup confirmation'
   assert.ok(shared.ALERT_LABELS.regroup);
   assert.match(shared.ALERT_LABELS.regroup, /Regroup/);
 
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /get_regroup_points/);
   assert.match(rideSource, /confirm_regroup_arrival/);
-  assert.match(rideSource, /regroupBanner/);
-  assert.match(rideSource, /Near Regroup/);
+  assert.match(rideSource, /regroupArrivalAttention\(arrivingRegroupPoint, nowIso\)/);
+  assert.match(rideSource, /Near regroup: /);
+  assert.match(rideSource, /case 'confirm':\s*if \(arrivingRegroupPoint\) void confirmArrival/);
 });
 
 test('emergency SOS workflow supports group broadcast, SMS with GPS, and selected contact sharing', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /sosTopButton/);
   assert.match(rideSource, /triggerSosWorkflow/);
   assert.match(rideSource, /broadcastSosToGroup/);
@@ -1007,7 +1032,7 @@ test('profile screen supports motorcycle configuration and displays safe fuel ra
 });
 
 test('trip workspace renders touring intelligence, motorcycle fuel advisory, and weather forecast', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /Fuel and touring notes/);
   assert.match(tripSource, /Motorcycle Fuel Advisory/);
   assert.match(tripSource, /Weather on the route/);
@@ -1072,7 +1097,7 @@ test('my rides screen integrates rider analytics and milestones banner', () => {
 });
 
 test('trip workspace renders journal entries, photos, and shareable ride card action', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /trip_journal_entries/);
   assert.match(tripSource, /save_trip_journal_entry/);
   assert.match(tripSource, /Ride journal/);
@@ -1129,7 +1154,7 @@ test('trip planner allows quick creation with essentials, calendar date picker, 
 });
 
 test('live ride bottom sheet aligns action buttons in responsive structured rows without overflow', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /activeActionsContainer/);
   assert.match(rideSource, /actionsRow/);
   assert.match(rideSource, /subActionsRow/);
@@ -1181,7 +1206,7 @@ test('my rides screen integrates segmented status filters and duplicate trip act
 });
 
 test('trip workspace exposes trip duplication, archive toggle, and offline trip cache', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /duplicateTrip/);
   assert.match(tripSource, /toggleArchiveTrip/);
   assert.match(tripSource, /saveCachedTrip/);
@@ -1216,7 +1241,7 @@ test('5-tier group ride roles and pre-ride preparation checklist migration and s
 });
 
 test('trip workspace integrates pre-ride preparation checklist and captain role management', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /Pre-Ride Preparation Checklist/);
   assert.match(tripSource, /toggleChecklist/);
   assert.match(tripSource, /updateRiderRole/);
@@ -1332,7 +1357,7 @@ test('group expense settlement algorithm resolves net balances into minimal tran
 });
 
 test('live ride screen renders pack formation strip and captain announcement modal', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /calculatePackFormation/);
   assert.match(rideSource, /packFormation/);
   assert.match(rideSource, /FORMATION & SPACING/);
@@ -1345,7 +1370,7 @@ test('live ride screen renders pack formation strip and captain announcement mod
 });
 
 test('trip workspace integrates GPX export, group expenses, and settlements', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /exportGpxFile/);
   assert.match(tripSource, /exportTripToGpx/);
   assert.match(tripSource, /Export GPX route/);
@@ -1480,7 +1505,7 @@ test('profile screen integrates saved places and touring destination bookmarking
 });
 
 test('trip workspace integrates trip sharing, pack capacity, ride rules, and rider attendance', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /editVisibility/);
   assert.match(tripSource, /editMaxParticipants/);
   assert.match(tripSource, /editRideRules/);
@@ -1492,7 +1517,7 @@ test('trip workspace integrates trip sharing, pack capacity, ride rules, and rid
 });
 
 test('live ride screen integrates complete live ride statistics and touring battery saver', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /calculateLiveRideStats/);
   assert.match(rideSource, /liveStats/);
   assert.match(rideSource, /statsModalVisible/);
@@ -1582,7 +1607,7 @@ test('phase 4 & 5 migration defines regroup closure, acknowledgements, escalatio
 });
 
 test('trip workspace exposes regroup point closure controls for trip captains', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
   assert.match(tripSource, /closeRegroupPoint/);
   assert.match(tripSource, /close_regroup_point/);
   assert.match(tripSource, /Close Point/);
@@ -1590,9 +1615,9 @@ test('trip workspace exposes regroup point closure controls for trip captains', 
 });
 
 test('live ride screen integrates Captain Dashboard, announcement acknowledgements, mechanical alerts, and breakdown directory', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /captainDashboardVisible/);
-  assert.match(rideSource, /Captain's view/);
+  assert.match(rideSource, /Captain&apos;s view/);
   assert.match(rideSource, /acknowledgeAnnouncement/);
   assert.match(rideSource, /acknowledge_alert/);
   assert.match(rideSource, /Got it/);
@@ -1738,7 +1763,7 @@ test('auth hook verifies target user ID, invokes delete_user_account RPC with ex
 });
 
 test('live ride broadcast announcement strictly validates GPS fix and sendAlert outcome before reporting success', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
 
   assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
   // Routine alerts need a fresh fix; an SOS is never blocked by GPS.
@@ -1748,7 +1773,7 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
 });
 
 test('trip workspace exports GPX via native file system and sharing dialog, and reports expense load errors', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
 
   // GPX export writes to cacheDirectory and invokes native sharing with web compatibility
   assert.match(tripSource, /Platform\.OS === 'web'/);
@@ -1802,12 +1827,13 @@ test('syncQueue does not clear queued items on unauthorized error if active sess
 });
 
 test('live ride displays incoming broadcast alerts as a floating card on the map with notification chime and haptic feedback', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /playAlertSound/);
   assert.match(rideSource, /lastPlayedAlertId/);
-  assert.match(rideSource, /floatingAlertBanner/);
-  assert.match(rideSource, /floatingAlertHeader/);
-  assert.match(rideSource, /floatingAlertTitle/);
+  // Incoming alerts reach the rider through the single attention bar.
+  assert.match(rideSource, /attentionFromAlerts\(alerts, \{ myUserId: userId/);
+  assert.match(rideSource, /<RideAttentionBar/);
+  assert.match(rideSource, /playHaptic/);
 
   const soundSource = fs.readFileSync(path.resolve('mobile/src/services/alertSound.ts'), 'utf8');
   assert.match(soundSource, /Vibration\.vibrate/);
@@ -1924,7 +1950,7 @@ test('Home screen renders time-based greeting, default motorcycle, active trip d
 });
 
 test('Trip Details renders sticky section switcher, sticky bottom action bar, day-grouped timeline, and compact expandable participants', () => {
-  const tripSource = fs.readFileSync(path.resolve('mobile/app/trip/[id].tsx'), 'utf8');
+  const tripSource = readTripScreenSource();
 
   // Sticky Section Switcher (Details | Live Tracker) shown only for planned or ongoing trips
   assert.match(tripSource, /canShowLiveTracker/);
@@ -1960,7 +1986,7 @@ test('Trip Details renders sticky section switcher, sticky bottom action bar, da
 });
 
 test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm offline queue, and hold-to-confirm SOS', () => {
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
 
   // Cockpit HUD status strip: GPS freshness, cellular lock, pack count
   assert.match(rideSource, /cockpitStatusStrip/);
@@ -1987,7 +2013,9 @@ test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm off
   // Hold-to-confirm SOS emergency button (2000ms duration with progress ring)
   assert.match(rideSource, /HoldToConfirmButton/);
   assert.match(rideSource, /durationMs=\{2000\}/);
-  assert.match(rideSource, /EMERGENCY SOS/);
+  // One SMS builder everywhere (no hand-written SOS text).
+  assert.match(rideSource, /const body = formatEmergencySms\(/);
+  assert.doesNotMatch(rideSource, /EMERGENCY SOS: I need help/);
 
   // Screen keep-awake while tracking
   assert.match(rideSource, /useKeepAwake/);
@@ -2207,7 +2235,7 @@ test('leaving the live-ride screen keeps location sharing and only explicit stop
   assert.deepEqual(announced, ['ride', null]);
   assert.equal(calls.watch, 1);
 
-  const rideSource = fs.readFileSync(path.resolve('mobile/app/ride/[id].tsx'), 'utf8');
+  const rideSource = readRideScreenSource();
   assert.match(rideSource, /detachBackgroundLocationCallbacks\(id\)/);
   assert.doesNotMatch(rideSource, /stopBackgroundLocationUpdates\(\)/, 'the ride screen must only stop its own ride');
 });

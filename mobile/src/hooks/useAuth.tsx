@@ -27,6 +27,7 @@ interface AuthContextType {
     avatar_url?: string | null;
     motorcycle_make?: string | null;
     motorcycle_model?: string | null;
+    motorcycle_model_id?: string | null;
     fuel_tank_capacity_liters?: number | null;
     mileage_km_per_liter?: number | null;
     fuel_reserve_liters?: number | null;

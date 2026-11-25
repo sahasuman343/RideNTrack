@@ -1,0 +1,137 @@
+import type { Alert, AlertType } from './types';
+import type { AttentionItem, AttentionKind } from './attention';
+
+/*
+ * Builders that turn ride events into attention items. Kept pure so the
+ * wording and the action set are reviewed in one place and unit-tested.
+ * Text is plain and short: a rider reads it in under two seconds.
+ */
+
+export const RECENT_ALERT_WINDOW_MS = 5 * 60 * 1000;
+
+const ALERT_KIND: Record<AlertType, AttentionKind> = {
+  emergency: 'incoming_sos',
+  regroup: 'regroup',
+  fuel: 'fuel',
+  mechanical: 'hazard',
+  break: 'info',
+  route_deviation: 'info',
+  rider_behind: 'info',
+  announcement: 'info',
+};
+
+const ALERT_TITLE: Record<AlertType, (name: string) => string> = {
+  emergency: name => `${name} needs help`,
+  regroup: name => `${name}: regroup now`,
+  fuel: name => `${name}: fuel stop`,
+  mechanical: name => `${name} has a breakdown`,
+  break: name => `${name}: break`,
+  route_deviation: name => `${name} is off the route`,
+  rider_behind: name => `${name}: rider behind`,
+  announcement: () => 'Captain announcement',
+};
+
+function minutesBetween(laterIso: string, earlierIso: string): number {
+  return Math.round((Date.parse(laterIso) - Date.parse(earlierIso)) / 60000);
+}
+
+export function sosLocationSentence(alert: Pick<Alert, 'lat' | 'lng' | 'created_at' | 'location_recorded_at'>): string {
+  if (alert.lat == null || alert.lng == null) return 'No GPS fix was available when this was sent.';
+  if (alert.location_recorded_at && Date.parse(alert.created_at) - Date.parse(alert.location_recorded_at) > 60_000) {
+    return `Location is the last known fix, ${minutesBetween(alert.created_at, alert.location_recorded_at)} min before the alert.`;
+  }
+  return 'Live location attached.';
+}
+
+/** Group alerts from other riders in the last five minutes become attention items. */
+export function attentionFromAlerts(
+  alerts: Alert[],
+  options: { myUserId?: string | null; now?: number; acknowledgedIds?: string[] },
+): AttentionItem[] {
+  const now = options.now ?? Date.now();
+  const acknowledged = new Set(options.acknowledgedIds ?? []);
+  const items: AttentionItem[] = [];
+  for (const alert of alerts) {
+    if (!alert || alert.user_id === options.myUserId) continue;
+    const created = Date.parse(alert.created_at);
+    if (!Number.isFinite(created) || now - created >= RECENT_ALERT_WINDOW_MS) continue;
+    const name = alert.display_name || 'Rider';
+    const kind = ALERT_KIND[alert.type] ?? 'info';
+    const hasLocation = alert.lat != null && alert.lng != null;
+    const actions: AttentionItem['actions'] = [];
+    let body: string | null = alert.message ? alert.message : null;
+
+    if (alert.type === 'emergency') {
+      body = [alert.message, sosLocationSentence(alert)].filter(Boolean).join(' ');
+      actions.push({ id: 'escalate', label: 'Call 112', emphasis: 'danger' });
+      if (hasLocation) actions.push({ id: 'directions', label: 'Directions', emphasis: 'primary' });
+    } else if (alert.type === 'announcement') {
+      if (acknowledged.has(alert.id)) continue;
+      actions.push({ id: 'ack', label: 'Got it', emphasis: 'primary' });
+    }
+    if (hasLocation && alert.type !== 'announcement') actions.push({ id: 'focus', label: 'Show on map', emphasis: 'secondary' });
+
+    items.push({
+      id: `alert:${alert.id}`,
+      kind,
+      title: alert.type === 'announcement' && alert.message ? alert.message : ALERT_TITLE[alert.type]?.(name) ?? `${name} sent an alert`,
+      body: alert.type === 'announcement' ? `From ${name}` : body,
+      createdAt: alert.created_at,
+      expiresAt: new Date(created + RECENT_ALERT_WINDOW_MS).toISOString(),
+      actions,
+    });
+  }
+  return items;
+}
+
+export function checkInAttention(secondsLeft: number, canTextContact: boolean, nowIso: string): AttentionItem {
+  return {
+    id: 'check-in',
+    kind: 'check_in',
+    title: 'Stopped off-route. Are you OK?',
+    body: 'If you do not answer, your group gets an alert.',
+    createdAt: nowIso,
+    countdownSeconds: Math.max(0, Math.round(secondsLeft)),
+    sticky: true,
+    actions: [
+      { id: 'ok', label: "I'm OK", emphasis: 'primary' },
+      ...(canTextContact ? [{ id: 'sms', label: 'Text my contact', emphasis: 'danger' as const }] : []),
+    ],
+  };
+}
+
+export function regroupArrivalAttention(point: { id: string; name: string }, nowIso: string): AttentionItem {
+  return {
+    id: `regroup:${point.id}`,
+    kind: 'regroup',
+    title: `Near regroup: ${point.name}`,
+    body: 'Confirm so the captain knows you are here.',
+    createdAt: nowIso,
+    actions: [{ id: 'confirm', label: 'Confirm arrival', emphasis: 'primary' }],
+  };
+}
+
+export function routeDeviationAttention(meters: number, nowIso: string): AttentionItem {
+  return {
+    id: 'route-deviation',
+    kind: 'info',
+    priority: 20,
+    title: `About ${meters >= 1000 ? (meters / 1000).toFixed(1) + ' km' : Math.round(meters) + ' m'} off the planned route`,
+    body: 'Your group has been told. Rejoin the route when it is safe.',
+    createdAt: nowIso,
+    actions: [{ id: 'navigate', label: 'Navigate back', emphasis: 'secondary' }],
+  };
+}
+
+export function noticeAttention(id: string, title: string, nowIso: string, options: { body?: string | null; actionLabel?: string; ttlMs?: number } = {}): AttentionItem {
+  return {
+    id: `notice:${id}`,
+    kind: 'info',
+    priority: 5,
+    title,
+    body: options.body ?? null,
+    createdAt: nowIso,
+    expiresAt: options.ttlMs ? new Date(Date.parse(nowIso) + options.ttlMs).toISOString() : null,
+    actions: options.actionLabel ? [{ id: 'retry', label: options.actionLabel, emphasis: 'secondary' }] : [],
+  };
+}

@@ -80,6 +80,14 @@
         "projectId": "91502983-9cb8-45db-b01a-f1c296405a2c"
       }
     },
-    "owner": "sahasuman343"
+    "owner": "sahasuman343",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/91502983-9cb8-45db-b01a-f1c296405a2c",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    }
   }
 }

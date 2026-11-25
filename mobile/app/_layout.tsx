@@ -1,10 +1,15 @@
 import 'react-native-gesture-handler';
+import type React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Sentry from '@sentry/react-native';
-import { AuthProvider } from '../src/hooks/useAuth';
+import { useEffect } from 'react';
+import { AuthProvider, useAuth } from '../src/hooks/useAuth';
+import { FeatureFlagsProvider } from '../src/hooks/useFeatureFlags';
+import { identifyAnalyticsUser, track } from '../src/services/analytics';
+import { startOtaUpdateChecks } from '../src/services/otaUpdates';
 import { OfflineSyncProvider } from '../src/hooks/useOfflineSync';
 import { usePushNotifications } from '../src/hooks/usePushNotifications';
 import { RideThemeProvider, useRideTheme, palettes, radius } from '../src/theme';
@@ -24,10 +29,25 @@ function PushNotifications() {
   return null;
 }
 
+/** Flags and analytics follow the signed-in rider. */
+function SignedInServices({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    identifyAnalyticsUser(userId);
+  }, [userId]);
+  useEffect(() => {
+    startOtaUpdateChecks();
+    track('app_opened');
+  }, []);
+  return <FeatureFlagsProvider userId={userId}>{children}</FeatureFlagsProvider>;
+}
+
 function AppNavigator() {
   const theme = useRideTheme();
   return (
     <AuthProvider>
+      <SignedInServices>
       <OfflineSyncProvider>
         <StatusBar style={theme.scheme === 'light' ? 'dark' : 'light'} />
         <PushNotifications />
@@ -38,6 +58,7 @@ function AppNavigator() {
           <Stack.Screen name="ride" options={{ headerShown: false }} />
         </Stack>
       </OfflineSyncProvider>
+      </SignedInServices>
     </AuthProvider>
   );
 }
