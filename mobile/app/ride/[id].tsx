@@ -290,11 +290,14 @@ export default function LiveRideScreen() {
   const [briefingVisible, setBriefingVisible] = useState(false);
   const [rollCallVisible, setRollCallVisible] = useState(false);
   const [debriefVisible, setDebriefVisible] = useState(false);
+  const serverSmsFlag = useFlag('server_sms');
   const sos = useSosWorkflow({
     ride,
     profile,
     riderName: name,
     position,
+    online: sync.isOnline,
+    serverSms: serverSmsFlag,
     sendAlert,
     setMessage,
     onMissingContact: () =>
@@ -303,7 +306,7 @@ export default function LiveRideScreen() {
         { text: 'Go to profile', onPress: () => router.push('/(tabs)/profile') },
       ]),
   });
-  const { triggerSosWorkflow, broadcastSosToGroup, sendEmergencySms, dialEmergencyContact } = sos;
+  const { triggerSosWorkflow, broadcastSosToGroup } = sos;
   const { stationaryCountdown, confirmOk: confirmStationaryOk } = useStationaryCheckIn({
     active,
     position,
@@ -1574,10 +1577,14 @@ export default function LiveRideScreen() {
         visible={sos.sosModal}
         busy={busy}
         emergencyContact={profile?.emergency_contact}
+        started={sos.started}
+        steps={sos.steps}
+        recipients={sos.recipients}
+        primaryLabel={sos.primaryLabel}
         onClose={sos.closeSos}
-        onSendToGroup={() => void broadcastSosToGroup()}
-        onSms={() => void sendEmergencySms()}
-        onCall={() => void dialEmergencyContact()}
+        onPrimary={() => void (sos.started ? sos.openComposer() : sos.sendSos())}
+        onCallContact={() => void sos.dialEmergencyContact()}
+        onCall112={() => void sos.dial112()}
         onHighwayHelp={() => { sos.closeSos(); void loadBreakdownDirectory(); }}
       />
 

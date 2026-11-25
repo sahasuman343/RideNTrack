@@ -12,21 +12,28 @@ export interface EmergencySmsPayload {
   riderName: string;
   motorcycleModel?: string | null;
   rideName: string;
-  latitude: number;
-  longitude: number;
+  /** Null when there is no GPS fix: an SOS must still go out. */
+  latitude: number | null;
+  longitude: number | null;
+  /** Minutes since the fix, when it is not live. */
+  locationAgeMinutes?: number | null;
   emergencyNote?: string | null;
 }
 
+/** The one SOS text builder, used by every path (composer, check-in, server). */
 export function formatEmergencySms(payload: EmergencySmsPayload): string {
-  const { riderName, motorcycleModel, rideName, latitude, longitude, emergencyNote } = payload;
-  const mapsUrl = `https://maps.google.com/?q=${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+  const { riderName, motorcycleModel, rideName, latitude, longitude, emergencyNote, locationAgeMinutes } = payload;
   const bikeInfo = motorcycleModel ? ` riding ${motorcycleModel}` : '';
   const noteInfo = emergencyNote ? ` Note: "${emergencyNote.trim()}".` : '';
-
-  return (
-    `EMERGENCY ALERT: ${riderName}${bikeInfo} on trip "${rideName}" requires immediate assistance.` +
-    `${noteInfo} Live GPS Location: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}. Google Maps: ${mapsUrl}`
-  );
+  let where: string;
+  if (latitude == null || longitude == null || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    where = ' Location: no GPS fix yet; call them.';
+  } else {
+    const mapsUrl = `https://maps.google.com/?q=${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+    const label = locationAgeMinutes && locationAgeMinutes >= 2 ? `Last known GPS location (${Math.round(locationAgeMinutes)} min ago)` : 'Live GPS Location';
+    where = ` ${label}: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}. Google Maps: ${mapsUrl}`;
+  }
+  return `EMERGENCY ALERT: ${riderName}${bikeInfo} on trip "${rideName}" requires immediate assistance.${noteInfo}${where}`;
 }
 
 export interface MechanicalBreakdownPayload {

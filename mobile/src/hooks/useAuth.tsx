@@ -34,6 +34,7 @@ interface AuthContextType {
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
     blood_group?: string | null;
     share_ice_with_ride?: boolean;
+    share_phone_with_ride?: boolean;
   }) => Promise<void>;
 }
 
@@ -155,6 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
     blood_group?: string | null;
     share_ice_with_ride?: boolean;
+    share_phone_with_ride?: boolean;
   }) {
     const userId = activeUserId.current;
     if (!userId || profile?.id !== userId) throw new Error('Load your rider profile before making changes.');

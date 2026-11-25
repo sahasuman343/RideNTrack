@@ -38,7 +38,9 @@ async function openDatabase() {
     '  bytes INTEGER NOT NULL DEFAULT 0,' +
     '  updated_at TEXT NOT NULL' +
     ');' +
-    'CREATE INDEX IF NOT EXISTS idx_offline_packs_ride ON offline_packs (ride_id);'
+    'CREATE INDEX IF NOT EXISTS idx_offline_packs_ride ON offline_packs (ride_id);' +
+    // F6: small per-ride values that must survive with no signal (SOS recipients).
+    'CREATE TABLE IF NOT EXISTS ride_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);'
   );
   return db;
 }
@@ -166,5 +168,22 @@ export async function saveCachedRoute(rideId: string, userId: string | null | un
   const cached = await getCachedTrip(rideId, userId);
   if (cached) {
     await saveCachedTrip(rideId, { ...cached, trip: { ...cached.trip, route_geometry: geometry } }, userId);
+  }
+}
+
+export async function saveRideValue(key: string, value: unknown): Promise<void> {
+  try {
+    const db = await getDatabase();
+    await db.runAsync('INSERT OR REPLACE INTO ride_kv (key, value, updated_at) VALUES (?, ?, ?)', key, JSON.stringify(value), new Date().toISOString());
+  } catch { /* best effort */ }
+}
+
+export async function getRideValue<T>(key: string): Promise<T | null> {
+  try {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM ride_kv WHERE key = ?', key);
+    return row ? (JSON.parse(row.value) as T) : null;
+  } catch {
+    return null;
   }
 }

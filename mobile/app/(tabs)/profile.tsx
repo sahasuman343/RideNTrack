@@ -18,6 +18,7 @@ import { useAuth } from '../../src/hooks/useAuth';
 import { BikeModelPicker } from '../../src/components/profile/BikeModelPicker';
 import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
+import { useFlag } from '../../src/hooks/useFeatureFlags';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { Icon, SheetModal } from '../../src/components/ui';
@@ -39,6 +40,8 @@ export default function ProfileScreen() {
   const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
   const [bloodGroup, setBloodGroup] = useState(profile?.blood_group || '');
   const [shareIceWithRide, setShareIceWithRide] = useState(Boolean(profile?.share_ice_with_ride));
+  const [sharePhoneWithRide, setSharePhoneWithRide] = useState(Boolean(profile?.share_phone_with_ride));
+  const phoneSharingFlag = useFlag('rider_phone_numbers');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
@@ -164,6 +167,7 @@ export default function ProfileScreen() {
     setEmergencyContact(profile?.emergency_contact || '');
     setBloodGroup(profile?.blood_group || '');
     setShareIceWithRide(Boolean(profile.share_ice_with_ride));
+    setSharePhoneWithRide(Boolean(profile.share_phone_with_ride));
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
@@ -222,6 +226,7 @@ export default function ProfileScreen() {
         emergency_contact: emergencyContact.trim() || null,
         blood_group: bloodGroup.trim().toUpperCase() || null,
         share_ice_with_ride: shareIceWithRide,
+        ...(phoneSharingFlag ? { share_phone_with_ride: sharePhoneWithRide } : {}),
       } : {
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
@@ -648,6 +653,22 @@ export default function ProfileScreen() {
             <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholder="Your name" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Phone number</Text>
             <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91..." placeholderTextColor={theme.subtle} />
+            {phoneSharingFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Riders on my ride can text me in an SOS</Text>
+                  <Text style={styles.hint}>Your number goes only to people on the same live ride, and only when someone presses SOS. Off by default.</Text>
+                </View>
+                <Switch
+                  value={sharePhoneWithRide}
+                  onValueChange={setSharePhoneWithRide}
+                  disabled={!phone.trim()}
+                  accessibilityLabel="Share my phone number with riders on my ride for SOS texts"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
             <Text style={styles.fieldLabel}>Profile photo URL</Text>
             <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
             </>}

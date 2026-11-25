@@ -958,12 +958,16 @@ test('emergency SOS workflow supports group broadcast, SMS with GPS, and selecte
   assert.match(rideSource, /sosTopButton/);
   assert.match(rideSource, /triggerSosWorkflow/);
   assert.match(rideSource, /broadcastSosToGroup/);
-  assert.match(rideSource, /sendEmergencySms/);
+  assert.match(rideSource, /sendSos/);
+  assert.match(rideSource, /openComposer/);
   assert.match(rideSource, /dialEmergencyContact/);
   assert.match(rideSource, /shareLiveLocation/);
   assert.match(rideSource, /maps\.google\.com\/\?q=/);
-  assert.match(rideSource, /Emergency alert sent to the group/);
-  assert.match(rideSource, /It includes your last known location from/);
+  // Progress lives in the SOS sheet as steps (shared/sos.ts), not in toasts.
+  assert.match(rideSource, /steps=\{sos\.steps\}/);
+  const sosSource = fs.readFileSync(path.resolve('shared/sos.ts'), 'utf8');
+  assert.match(sosSource, /Alert to your pack/);
+  assert.match(sosSource, /Tap Send in Messages/);
 });
 
 test('motorcycle profile migration defines fuel tank, mileage, reserve, and category columns', () => {
@@ -2016,7 +2020,7 @@ test('Live Tracker Ride Mode delivers cockpit HUD, 64dp+ glove targets, calm off
   assert.match(rideSource, /HoldToConfirmButton/);
   assert.match(rideSource, /durationMs=\{2000\}/);
   // One SMS builder everywhere (no hand-written SOS text).
-  assert.match(rideSource, /const body = formatEmergencySms\(/);
+  assert.match(rideSource, /return formatEmergencySms\(/);
   assert.doesNotMatch(rideSource, /EMERGENCY SOS: I need help/);
 
   // Screen keep-awake while tracking

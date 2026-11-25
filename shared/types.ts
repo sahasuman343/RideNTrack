@@ -16,6 +16,8 @@ export interface User {
   motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
   blood_group?: string | null;
   share_ice_with_ride?: boolean;
+  /** Opt-in: riders on the same live ride may receive this number for SOS texts. */
+  share_phone_with_ride?: boolean;
   ice_consent_at?: string | null;
   subscription_tier?: 'free' | 'pro_tourer';
 }
@@ -433,3 +435,4 @@ export * from './family';
 export * from './spectator';
 export * from './battery';
 export * from './corridor';
+export * from './sos';

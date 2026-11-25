@@ -1,85 +1,176 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, Share } from 'react-native';
-import { formatEmergencySms, isStale, type LocationUpdate, type Profile, type Ride } from '@ridentrack/shared';
+import {
+  formatEmergencySms,
+  isStale,
+  mergeSosRecipients,
+  smsComposerUrl,
+  sosPrimaryLabel,
+  sosSteps,
+  type LocationUpdate,
+  type Profile,
+  type Ride,
+  type SosRecipient,
+} from '@ridentrack/shared';
 import type { AlertOutcome } from './useRideAlerts';
+import { supabase } from '../../lib/supabase';
+import { getRideValue, saveRideValue } from '../../lib/tripCache';
+import { newQueueId } from '../../lib/offlineQueue';
 import { track } from '../../services/analytics';
 
-/**
- * SOS steps for the rider who needs help: group alert first (queued when
- * offline), then their own text and call options. Every message uses the one
- * builder, formatEmergencySms.
+/*
+ * F6 SOS. One press does everything that can be done: the pack alert (queued
+ * with no signal), server SMS when there is some data and it is switched on,
+ * and one Messages composer to everyone on the cached list. The sheet then
+ * shows each step in the shared status words, so the rider knows exactly
+ * what happened and what is left to do.
  */
+
+type PackState = 'pending' | 'sent' | 'queued' | 'failed';
+type ComposerState = 'pending' | 'opened' | 'unavailable' | 'no_recipients';
+type ServerState = 'off' | 'pending' | 'queued' | 'sent' | 'failed';
+
 export function useSosWorkflow(params: {
   ride: Ride | null;
   profile: Profile | null;
   riderName: string;
   position: LocationUpdate | null;
-  sendAlert: (type: 'emergency') => Promise<AlertOutcome>;
+  online: boolean;
+  serverSms: boolean;
+  sendAlert: (type: 'emergency', message?: string, alertId?: string) => Promise<AlertOutcome>;
   setMessage: (m: string | null) => void;
   onMissingContact: () => void;
 }) {
   const [sosModal, setSosModal] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [pack, setPack] = useState<PackState>('pending');
+  const [composer, setComposer] = useState<ComposerState>('pending');
+  const [server, setServer] = useState<ServerState>('off');
+  const [recipients, setRecipients] = useState<SosRecipient[]>([]);
+  const alertIdRef = useRef<string | null>(null);
   const latest = useRef(params);
   latest.current = params;
+  const rideId = params.ride?.id;
+  const rideStatus = params.ride?.status;
 
-  const triggerSosWorkflow = useCallback(() => setSosModal(true), []);
-  const closeSos = useCallback(() => setSosModal(false), []);
+  // Cache the recipient list when the ride is open with signal; read it back with none.
+  useEffect(() => {
+    if (!rideId) return;
+    const key = `sos-recipients:${rideId}`;
+    let cancelled = false;
+    void getRideValue<SosRecipient[]>(key).then(cached => { if (!cancelled && cached) setRecipients(cached); });
+    if (!params.online || (rideStatus !== 'planned' && rideStatus !== 'active')) return () => { cancelled = true; };
+    void supabase.rpc('get_ride_sos_recipients', { p_ride_id: rideId }).then(({ data, error }) => {
+      if (cancelled || error || !Array.isArray(data)) return;
+      const merged = mergeSosRecipients(data as Array<{ name: string; phone: string; role: string }>, latest.current.profile?.phone);
+      setRecipients(merged);
+      void saveRideValue(key, merged);
+    });
+    return () => { cancelled = true; };
+  }, [rideId, rideStatus, params.online]);
 
-  const broadcastSosToGroup = useCallback(async () => {
-    const { sendAlert, position, setMessage } = latest.current;
-    setSosModal(false);
-    const outcome = await sendAlert('emergency');
-    track('sos_state', { step: 'group', state: outcome === 'sent' ? 'sent' : outcome === 'queued' ? 'waiting_for_signal' : 'failed' });
-    if (outcome === 'failed') return;
-    const fixAgeMin = position ? Math.floor((Date.now() - Date.parse(position.timestamp)) / 60000) : null;
-    const where = !position
-      ? 'GPS has no fix yet, so the alert has no location.'
-      : isStale(position.timestamp)
-        ? `It includes your last known location from ${Math.max(1, fixAgeMin ?? 1)} min ago.`
-        : 'It includes your live location.';
-    setMessage((outcome === 'sent' ? 'Emergency alert sent to the group. ' : 'No signal: emergency alert saved and will send as soon as you are back online. ') + where);
-  }, []);
+  // Follow the server SMS until it reports sent.
+  useEffect(() => {
+    if (server !== 'queued' || !rideId) return;
+    const t = setInterval(() => {
+      void supabase.rpc('get_outbound_status', { p_ride_id: rideId }).then(({ data }) => {
+        const rows = (Array.isArray(data) ? data : []) as Array<{ template: string; status: string; created_at: string }>;
+        const mine = rows.filter(r => r.template === 'sos_alert' && Date.now() - Date.parse(r.created_at) < 15 * 60_000);
+        if (mine.some(r => r.status === 'sent')) { setServer('sent'); track('sos_state', { step: 'server', state: 'sent_by_sms' }); }
+        else if (mine.length && mine.every(r => r.status === 'failed')) setServer('failed');
+      });
+    }, 5000);
+    return () => clearInterval(t);
+  }, [server, rideId]);
 
-  const dialEmergencyContact = useCallback(async () => {
-    setSosModal(false);
-    const phone = latest.current.profile?.emergency_contact || '112';
-    try {
-      await Linking.openURL('tel:' + phone);
-    } catch {
-      latest.current.setMessage('Could not launch phone dialer.');
-    }
-  }, []);
-
-  const sendEmergencySms = useCallback(async () => {
-    const { position, profile, ride, riderName, setMessage, sendAlert, onMissingContact } = latest.current;
-    setSosModal(false);
-    if (!position) {
-      setMessage('No GPS fix available.');
-      return;
-    }
-    const phone = profile?.emergency_contact || '';
-    if (!phone) {
-      onMissingContact();
-      return;
-    }
-    if (!isStale(position.timestamp)) void sendAlert('emergency');
-    const body = formatEmergencySms({
+  const smsBody = useCallback(() => {
+    const { position, profile, ride, riderName } = latest.current;
+    const age = position ? (Date.now() - Date.parse(position.timestamp)) / 60000 : null;
+    return formatEmergencySms({
       riderName,
       motorcycleModel: profile?.motorcycle_model,
       rideName: ride?.name || 'Ride',
-      latitude: position.lat,
-      longitude: position.lng,
+      latitude: position?.lat ?? null,
+      longitude: position?.lng ?? null,
+      locationAgeMinutes: position && isStale(position.timestamp) ? age : null,
     });
-    const sep = Platform.OS === 'ios' ? '&' : '?';
-    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(body)}`;
+  }, []);
+
+  const openComposer = useCallback(async () => {
+    if (!recipients.length) {
+      setComposer('no_recipients');
+      latest.current.onMissingContact();
+      return;
+    }
+    const body = smsBody();
+    const url = smsComposerUrl(recipients.map(r => r.phone), body, Platform.OS);
     try {
-      if (await Linking.canOpenURL(smsUrl)) await Linking.openURL(smsUrl);
+      if (await Linking.canOpenURL(url)) await Linking.openURL(url);
       else await Share.share({ message: body });
-      setMessage('Emergency SOS initiated.');
+      setComposer('opened');
+      track('sos_state', { step: 'texts', state: 'composer_opened', recipients: recipients.length });
     } catch {
-      setMessage('Could not launch SMS.');
+      setComposer('unavailable');
+    }
+  }, [recipients, smsBody]);
+
+  /** The pack alert and server SMS. Safe to call twice; the alert id is reused. */
+  const alertPack = useCallback(async () => {
+    const { sendAlert, online, serverSms } = latest.current;
+    setStarted(true);
+    alertIdRef.current ??= await newQueueId();
+    const id = alertIdRef.current;
+    const outcome = await sendAlert('emergency', undefined, id);
+    const state: PackState = outcome === 'sent' ? 'sent' : outcome === 'queued' ? 'queued' : 'failed';
+    setPack(state);
+    track('sos_state', { step: 'group', state: state === 'queued' ? 'waiting_for_signal' : state });
+    if (outcome === 'sent' && online && serverSms) {
+      setServer('pending');
+      const { data, error } = await supabase.rpc('request_sos_sms', { p_alert_id: id });
+      setServer(error ? 'failed' : (data as number) > 0 ? 'queued' : 'off');
+    }
+    return state;
+  }, []);
+
+  /** From the hold-to-confirm button: alert the pack, then show the next step. */
+  const broadcastSosToGroup = useCallback(async () => {
+    setSosModal(true);
+    await alertPack();
+  }, [alertPack]);
+
+  /** From the sheet: everything at once, including the composer. */
+  const sendSos = useCallback(async () => {
+    const packPromise = alertPack();
+    await openComposer();
+    await packPromise;
+  }, [alertPack, openComposer]);
+
+  const triggerSosWorkflow = useCallback(() => setSosModal(true), []);
+  const closeSos = useCallback(() => {
+    setSosModal(false);
+    // A finished SOS resets so the next one starts clean.
+    if (started) {
+      setStarted(false); setPack('pending'); setComposer('pending'); setServer('off'); alertIdRef.current = null;
+    }
+  }, [started]);
+
+  const dial = useCallback(async (number: string) => {
+    try {
+      await Linking.openURL('tel:' + number);
+    } catch {
+      latest.current.setMessage('Could not open the phone dialer.');
     }
   }, []);
 
-  return { sosModal, triggerSosWorkflow, closeSos, broadcastSosToGroup, dialEmergencyContact, sendEmergencySms };
+  const steps = started ? sosSteps({ pack, composer, server, recipients }) : [];
+  const primaryLabel = !started
+    ? sosPrimaryLabel({ online: params.online, recipients: recipients.length })
+    : composer === 'opened' ? 'Open Messages again' : recipients.length ? `Text ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'}` : 'Add an emergency contact';
+
+  return {
+    sosModal, started, steps, recipients, primaryLabel,
+    triggerSosWorkflow, closeSos, broadcastSosToGroup, sendSos, openComposer,
+    dialEmergencyContact: () => dial(latest.current.profile?.emergency_contact || '112'),
+    dial112: () => dial('112'),
+  };
 }

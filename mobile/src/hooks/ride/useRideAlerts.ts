@@ -27,7 +27,7 @@ export function useRideAlerts(params: {
   const latest = useRef(params);
   latest.current = params;
 
-  const sendAlert = useCallback(async (type: AlertType, customMessage?: string): Promise<'sent' | 'queued' | 'failed'> => {
+  const sendAlert = useCallback(async (type: AlertType, customMessage?: string, alertId?: string): Promise<'sent' | 'queued' | 'failed'> => {
     const { setMessage, refresh, updateCounts } = latest.current;
     if (!userId) return 'failed';
     const hasFreshFix = Boolean(position && !isStale(position.timestamp));
@@ -42,7 +42,7 @@ export function useRideAlerts(params: {
     setBusy(true);
     try {
       const alert = {
-        id: await newQueueId(), ride_id: rideId, user_id: userId, type, message: customMessage,
+        id: alertId ?? await newQueueId(), ride_id: rideId, user_id: userId, type, message: customMessage,
         lat: fix ? fix.lat : null, lng: fix ? fix.lng : null,
         location_recorded_at: fix ? fix.timestamp : null,
         created_at: new Date().toISOString(),
