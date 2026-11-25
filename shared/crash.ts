@@ -14,6 +14,7 @@
  * A speed breaker or a pothole fails step 3: the rider keeps moving.
  */
 
+import { tEn, type Translate } from './i18n';
 import type { AttentionItem } from './attention';
 
 export interface MotionSample {
@@ -199,18 +200,18 @@ export const CRASH_SPOKEN_PROMPT = 'Are you OK? Tap anywhere on your phone to ca
 /** What the pack sees while the countdown runs. Family hears nothing yet. */
 export const POSSIBLE_CRASH_MESSAGE = 'Possible crash, confirming. Do not call yet.';
 
-export function crashCountdownAttention(secondsLeft: number, nowIso: string): AttentionItem {
+export function crashCountdownAttention(secondsLeft: number, nowIso: string, t: Translate = tEn): AttentionItem {
   return {
     id: 'crash:countdown',
     kind: 'crash_countdown',
-    title: 'Are you OK?',
-    body: 'It looks like you may have crashed. At zero your pack is alerted and your contacts get a text.',
+    title: t('crash.title'),
+    body: t('crash.body'),
     createdAt: nowIso,
     sticky: true,
     countdownSeconds: Math.max(0, Math.ceil(secondsLeft)),
     actions: [
-      { id: 'crash_ok', label: "I'm OK", emphasis: 'primary' },
-      { id: 'crash_help', label: 'Get help now', emphasis: 'danger' },
+      { id: 'crash_ok', label: t('crash.ok'), emphasis: 'primary' },
+      { id: 'crash_help', label: t('crash.help'), emphasis: 'danger' },
     ],
   };
 }

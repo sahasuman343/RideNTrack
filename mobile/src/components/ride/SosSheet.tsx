@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import type { SosRecipient, SosStep } from '@ridentrack/shared';
 import { Icon, SheetModal } from '../ui';
+import { useT } from '../../hooks/useLocale';
 import type { RidePalette } from '../../theme';
 import type { RideStyles } from './rideStyles';
 
@@ -42,15 +43,15 @@ const STEP_ICON: Record<SosStep['state'], { name: string; tone: 'ok' | 'wait' | 
 
 export function SosSheet(props: SosSheetProps) {
   const { s, theme, busy } = props;
+  const t = useT();
   const toneColor = { ok: theme.green, wait: theme.warning, act: theme.accent, bad: theme.danger, muted: theme.subtle };
   return (
     <SheetModal visible={props.visible} onRequestClose={props.onClose} dismissOnScrimPress={!props.started}>
       <View style={[s.modal, { paddingBottom: Math.max(props.bottomInset, 24), gap: 12 }]}>
-        <Text style={[s.heading, { color: theme.danger }]}>{props.started ? 'SOS sent' : 'Emergency'}</Text>
+        <Text style={[s.heading, { color: theme.danger }]}>{props.started ? t('sos.title_sent') : t('sos.title')}</Text>
         {!props.started ? (
           <Text style={s.muted}>
-            Alerts your pack with your location and opens one text to{' '}
-            {props.recipients.length ? props.recipients.map(r => r.name).join(', ') : 'your emergency contact'}.
+            {t('sos.intro', { who: props.recipients.length ? props.recipients.map(r => r.name).join(', ') : t('sos.intro_nobody') })}
           </Text>
         ) : null}
 
@@ -77,23 +78,23 @@ export function SosSheet(props: SosSheetProps) {
         </TouchableOpacity>
 
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={[s.alertOption, { flex: 1, justifyContent: 'center' }]} onPress={props.onCall112} accessibilityLabel="Call 112">
+          <TouchableOpacity style={[s.alertOption, { flex: 1, justifyContent: 'center' }]} onPress={props.onCall112} accessibilityLabel={t('sos.call_112')}>
             <Icon name="call" size="md" color={theme.danger} />
-            <Text style={[s.text, { fontWeight: '800' }]}>Call 112</Text>
+            <Text style={[s.text, { fontWeight: '800' }]}>{t('sos.call_112')}</Text>
           </TouchableOpacity>
           {props.emergencyContact ? (
-            <TouchableOpacity style={[s.alertOption, { flex: 1, justifyContent: 'center' }]} onPress={props.onCallContact} accessibilityLabel="Call emergency contact">
+            <TouchableOpacity style={[s.alertOption, { flex: 1, justifyContent: 'center' }]} onPress={props.onCallContact} accessibilityLabel={t('sos.call_contact_a11y')}>
               <Icon name="call-outline" size="md" color={theme.textMuted} />
-              <Text style={[s.text, { fontWeight: '700' }]} numberOfLines={1}>Call contact</Text>
+              <Text style={[s.text, { fontWeight: '700' }]} numberOfLines={1}>{t('sos.call_contact')}</Text>
             </TouchableOpacity>
           ) : null}
         </View>
         <TouchableOpacity style={[s.alertOption, { borderColor: theme.accent, borderWidth: 1 }]} onPress={props.onHighwayHelp}>
           <Icon name="car-outline" size="md" color={theme.accent} />
-          <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>Highway help and nearby mechanics (1033)</Text>
+          <Text style={[s.text, { color: theme.accent, flexShrink: 1 }]}>{t('sos.highway_help')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.secondary} onPress={props.onClose}>
-          <Text style={s.text}>{props.started ? 'Close' : 'Cancel'}</Text>
+          <Text style={s.text}>{props.started ? t('common.close') : t('common.cancel')}</Text>
         </TouchableOpacity>
       </View>
     </SheetModal>

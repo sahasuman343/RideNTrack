@@ -15,6 +15,8 @@ export interface FamilyContactsSheetProps {
   onClose: () => void;
   bottomInset: number;
   contacts: FamilyContact[];
+  /** F13: shown only with the languages flag on. */
+  onSetLanguage?: (id: string, language: 'en' | 'hi') => Promise<void>;
   onSave: (input: { id?: string | null; name: string; phone: string; relation?: string | null }) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
   onPause: (paused: boolean) => Promise<void>;
@@ -62,6 +64,15 @@ export function FamilyContactsSheet(props: FamilyContactsSheetProps) {
                 <Text style={cs.riderName}>{c.name}{c.relation ? ` · ${c.relation}` : ''}</Text>
                 <Text style={cs.riderMeta}>{formatPhoneForDisplay(c.phone)}{c.paused ? ' · paused' : ''}</Text>
               </View>
+              {props.onSetLanguage && (
+                <TouchableOpacity
+                  style={[cs.pill, { borderColor: theme.borderStrong }]}
+                  onPress={() => void props.onSetLanguage?.(c.id, c.language === 'hi' ? 'en' : 'hi').catch(e => setError(e instanceof Error ? e.message : 'Could not save.'))}
+                  accessibilityLabel={`Texts to ${c.name} in ${c.language === 'hi' ? 'Hindi' : 'English'}. Tap to switch.`}
+                >
+                  <Text style={[cs.pillText, { color: theme.text }]}>{c.language === 'hi' ? 'हिन्दी' : 'English'}</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={[cs.pill, { borderColor: theme.borderStrong }]}
                 onPress={() => void props.onRemove(c.id).catch(e => setError(e instanceof Error ? e.message : 'Could not remove.'))}

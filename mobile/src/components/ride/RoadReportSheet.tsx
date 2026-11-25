@@ -3,6 +3,8 @@ import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-nativ
 import { ROAD_REPORT_TYPES, reportTrust, roadReportLabel, type RoadReport, type RoadReportType } from '@ridentrack/shared';
 import { useRideTheme, radius, spacing, type RidePalette } from '../../theme';
 import { Icon, SheetModal } from '../ui';
+import { useT } from '../../hooks/useLocale';
+import type { MessageKey } from '@ridentrack/shared';
 
 /*
  * F11: report the road for everyone who rides here in the next two days.
@@ -30,6 +32,7 @@ export function RoadReportSheet(props: {
   onHide: (id: string) => void;
 }) {
   const theme = useRideTheme();
+  const tr = useT();
   const s = useMemo(() => makeStyles(theme), [theme]);
   const [type, setType] = useState<RoadReportType | null>(null);
   const [note, setNote] = useState('');
@@ -42,30 +45,30 @@ export function RoadReportSheet(props: {
       <View style={[s.sheet, { paddingBottom: Math.max(props.bottomInset, 24) }]}>
         {selected ? (
           <>
-            <Text style={s.kicker}>ROAD REPORT</Text>
-            <Text style={s.title}>{roadReportLabel(selected.type)}</Text>
+            <Text style={s.kicker}>{tr('road.kicker_view')}</Text>
+            <Text style={s.title}>{tr(`road.type.${selected.type}` as MessageKey)}</Text>
             {selected.note ? <Text style={s.body}>{selected.note}</Text> : null}
             <Text style={s.meta}>{reportTrust(selected)}</Text>
             <View style={s.row}>
               {!selected.mine && !selected.confirmed_by_me && !selected.pending && (
                 <TouchableOpacity style={[s.primary, !props.online && s.disabled]} disabled={!props.online} onPress={() => { props.onConfirm(selected.id); close(); }}>
-                  <Text style={s.primaryText}>Still there</Text>
+                  <Text style={s.primaryText}>{tr('road.still_there')}</Text>
                 </TouchableOpacity>
               )}
               {props.canHide && !selected.pending && (
                 <TouchableOpacity style={s.secondary} onPress={() => { props.onHide(selected.id); close(); }}>
-                  <Text style={s.secondaryText}>Hide for this ride</Text>
+                  <Text style={s.secondaryText}>{tr('road.hide')}</Text>
                 </TouchableOpacity>
               )}
             </View>
           </>
         ) : (
           <>
-            <Text style={s.kicker}>REPORT THE ROAD</Text>
-            <Text style={s.title}>What is here?</Text>
+            <Text style={s.kicker}>{tr('road.kicker')}</Text>
+            <Text style={s.title}>{tr('road.title')}</Text>
             <Text style={s.meta}>
-              {props.hasFix ? 'Pinned to where you are now. Riders passing in the next 48 hours see it.' : 'Waiting for a GPS fix to pin the report.'}
-              {props.online ? '' : ' No signal: it is shared when signal returns.'}
+              {props.hasFix ? tr('road.pinned') : tr('road.no_fix')}
+              {props.online ? '' : ` ${tr('road.offline')}`}
             </Text>
             <View style={s.grid}>
               {ROAD_REPORT_TYPES.map(t => {
@@ -80,7 +83,7 @@ export function RoadReportSheet(props: {
                     accessibilityState={{ selected: on }}
                   >
                     <Icon name={ICONS[t.type] as never} size="md" color={on ? tone : theme.textMuted} />
-                    <Text style={[s.tileText, on && { color: theme.text }]} numberOfLines={2}>{t.label}</Text>
+                    <Text style={[s.tileText, on && { color: theme.text }]} numberOfLines={2}>{tr(`road.type.${t.type}` as MessageKey)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -89,7 +92,7 @@ export function RoadReportSheet(props: {
               style={s.input}
               value={note}
               onChangeText={setNote}
-              placeholder="Optional: e.g. left lane blocked, passable slowly"
+              placeholder={tr('road.note_placeholder')}
               placeholderTextColor={theme.subtle}
               maxLength={140}
             />
@@ -103,12 +106,12 @@ export function RoadReportSheet(props: {
                 if (ok) close();
               }}
             >
-              <Text style={s.primaryText}>{type ? `Report ${roadReportLabel(type).toLowerCase()}` : 'Pick what it is'}</Text>
+              <Text style={s.primaryText}>{type ? tr('road.report_type', { type: tr(`road.type.${type}` as MessageKey) }) : tr('road.pick')}</Text>
             </TouchableOpacity>
           </>
         )}
         <TouchableOpacity style={s.cancel} onPress={close}>
-          <Text style={s.secondaryText}>Close</Text>
+          <Text style={s.secondaryText}>{tr('common.close')}</Text>
         </TouchableOpacity>
       </View>
     </SheetModal>

@@ -454,3 +454,4 @@ export * from './lockScreen';
 export * from './touringKnowledge';
 export * from './roadReports';
 export * from './voice';
+export * from './i18n';

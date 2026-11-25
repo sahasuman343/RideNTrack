@@ -3,6 +3,7 @@ import { buildChatLines, chatQueueSummary, normaliseChatBody, type QueuedChatMes
 import { enqueueMessage, getQueuedMessagesForRide, newQueueId } from '../../lib/offlineQueue';
 import { rejectedMessageIds } from '../../services/syncQueue';
 import * as FileSystem from 'expo-file-system/legacy';
+import { useT } from '../useLocale';
 
 /*
  * F8: trip chat that works in a dead zone. Every message goes through the
@@ -19,6 +20,7 @@ export function useRideChat(params: {
   flushQueue: () => Promise<void>;
 }) {
   const { rideId, userId, online, messages, pendingMessagesCount, flushQueue } = params;
+  const t = useT();
   const [queued, setQueued] = useState<QueuedChatMessage[]>([]);
   const [failedIds, setFailedIds] = useState<string[]>([]);
   const [sentIds, setSentIds] = useState<string[]>([]);
@@ -104,5 +106,5 @@ export function useRideChat(params: {
     server: messages, queued, failedIds, sentIds, myUserId: userId, online,
   }), [messages, queued, failedIds, sentIds, userId, online]);
 
-  return { lines, summary: chatQueueSummary(lines, online), send, sendVoice, retry };
+  return { lines, summary: chatQueueSummary(lines, online, t), send, sendVoice, retry };
 }

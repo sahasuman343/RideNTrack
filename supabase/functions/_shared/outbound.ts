@@ -64,6 +64,40 @@ export const TEMPLATES: Record<OutboundTemplate, TemplateSpec> = {
   },
 };
 
+/**
+ * F13: Hindi versions of the family texts. Family texts follow the contact's
+ * language (payload.lang). A Hindi text is only sent once its own DLT template
+ * id is configured; until then the contact gets the English text.
+ */
+export const HINDI_TEMPLATES: Partial<Record<OutboundTemplate, TemplateSpec>> = {
+  family_ride_started: {
+    vars: ['rider', 'ride', 'link'],
+    text: '{#rider#} ने {#ride#} पर राइड शुरू कर दी है। लाइव देखें: {#link#} - RideNTrack',
+    dltEnv: 'DLT_TEMPLATE_FAMILY_RIDE_STARTED_HI',
+  },
+  family_reached_stay: {
+    vars: ['rider', 'stay', 'link'],
+    text: '{#rider#} रात के लिए {#stay#} पहुँच गए हैं। ट्रिप: {#link#} - RideNTrack',
+    dltEnv: 'DLT_TEMPLATE_FAMILY_REACHED_STAY_HI',
+  },
+  family_check_in_missed: {
+    vars: ['rider', 'minutes', 'link'],
+    text: '{#rider#} रुके हैं और {#minutes#} मिनट से सेफ़्टी चेक का जवाब नहीं दिया है। उनके ग्रुप को बता दिया गया है। आख़िरी लोकेशन: {#link#} - RideNTrack',
+    dltEnv: 'DLT_TEMPLATE_FAMILY_CHECK_IN_MISSED_HI',
+  },
+  family_crash: {
+    vars: ['rider', 'link'],
+    text: 'शायद {#rider#} गिर गए हैं और उन्होंने सेफ़्टी चेक का जवाब नहीं दिया। उनका ग्रुप देख रहा है। लाइव लोकेशन: {#link#} - RideNTrack',
+    dltEnv: 'DLT_TEMPLATE_FAMILY_CRASH_HI',
+  },
+};
+
+/** The template spec to send: Hindi when asked for and registered, otherwise English. */
+export function templateSpecFor(template: OutboundTemplate, payload: Record<string, unknown>, env: ProviderEnv = {}): TemplateSpec {
+  const hi = payload.lang === 'hi' ? HINDI_TEMPLATES[template] : undefined;
+  return hi && env[hi.dltEnv] ? hi : TEMPLATES[template];
+}
+
 export function isOutboundTemplate(t: string): t is OutboundTemplate {
   return Object.prototype.hasOwnProperty.call(TEMPLATES, t);
 }
@@ -74,15 +108,14 @@ export function clipVar(value: unknown, max = 30): string {
   return s.length <= max ? s : s.slice(0, max - 1) + '…';
 }
 
-export function templateVars(template: OutboundTemplate, payload: Record<string, unknown>): string[] {
-  const spec = TEMPLATES[template];
+export function templateVars(template: OutboundTemplate, payload: Record<string, unknown>, spec: TemplateSpec = TEMPLATES[template]): string[] {
   return spec.vars.map(v => clipVar(payload[v], v === 'link' || v === 'maps' ? 80 : spec.maxVarLength ?? 30));
 }
 
-export function renderTemplate(template: OutboundTemplate, payload: Record<string, unknown>): string {
-  const values = templateVars(template, payload);
+export function renderTemplate(template: OutboundTemplate, payload: Record<string, unknown>, spec: TemplateSpec = TEMPLATES[template]): string {
+  const values = templateVars(template, payload, spec);
   let i = 0;
-  return TEMPLATES[template].text.replace(/\{#[a-z]+#\}/g, () => values[i++] ?? '');
+  return spec.text.replace(/\{#[a-z]+#\}/g, () => values[i++] ?? '');
 }
 
 /**
@@ -214,11 +247,12 @@ export function providerFromEnv(env: ProviderEnv): SmsProvider {
 }
 
 export function buildSendRequest(template: OutboundTemplate, to: string, payload: Record<string, unknown>, env: ProviderEnv): SendRequest {
+  const spec = templateSpecFor(template, payload, env);
   return {
     to,
     template,
-    vars: templateVars(template, payload),
-    text: renderTemplate(template, payload),
-    dltTemplateId: env[TEMPLATES[template].dltEnv] || null,
+    vars: templateVars(template, payload, spec),
+    text: renderTemplate(template, payload, spec),
+    dltTemplateId: env[spec.dltEnv] || null,
   };
 }

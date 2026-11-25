@@ -9,6 +9,7 @@
 
 import type { RideMessage, RideMessageType } from './types';
 import { DELIVERY_LABELS, type DeliveryState } from './status';
+import { tEn, type MessageKey, type Translate } from './i18n';
 
 export interface QueuedChatMessage {
   /** Client id; becomes ride_messages.client_id. */
@@ -128,17 +129,17 @@ export function buildChatLines(input: {
 }
 
 /** Footer text under one of my messages. */
-export function chatDeliveryText(line: Pick<ChatLine, 'delivery'>): string | null {
-  return line.delivery ? DELIVERY_LABELS[line.delivery] : null;
+export function chatDeliveryText(line: Pick<ChatLine, 'delivery'>, t?: Translate): string | null {
+  if (!line.delivery) return null;
+  return t ? t(`status.${line.delivery}` as MessageKey) : DELIVERY_LABELS[line.delivery];
 }
 
 /** One line above the composer when anything is waiting. */
-export function chatQueueSummary(lines: ChatLine[], online: boolean): string | null {
+export function chatQueueSummary(lines: ChatLine[], online: boolean, t: Translate = tEn): string | null {
   const waiting = lines.filter(l => l.delivery === 'waiting_for_signal' || l.delivery === 'sending').length;
   const failed = lines.filter(l => l.delivery === 'failed').length;
-  if (failed) return `${failed} message${failed === 1 ? '' : 's'} could not be sent. Tap to try again.`;
-  if (!waiting) return online ? null : 'No signal. Messages you write now go when signal returns.';
-  return online
-    ? `Sending ${waiting} message${waiting === 1 ? '' : 's'}…`
-    : `${waiting} message${waiting === 1 ? '' : 's'} waiting for signal. They go on their own.`;
+  if (failed) return failed === 1 ? t('chat.summary_failed_one') : t('chat.summary_failed', { count: failed });
+  if (!waiting) return online ? null : t('chat.summary_no_signal');
+  if (online) return waiting === 1 ? t('chat.summary_sending_one') : t('chat.summary_sending', { count: waiting });
+  return waiting === 1 ? t('chat.summary_waiting_one') : t('chat.summary_waiting', { count: waiting });
 }

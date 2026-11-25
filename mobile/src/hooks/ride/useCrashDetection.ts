@@ -20,6 +20,7 @@ import { crashSensorSource, startCrashSensors } from '../../services/crashSensor
 import { playHaptic } from '../../services/haptics';
 import { playAlertSound } from '../../services/alertSound';
 import { track } from '../../services/analytics';
+import { useLocale } from '../useLocale';
 
 /*
  * F7 crash detection on the ride screen.
@@ -42,10 +43,10 @@ try {
   speech = null;
 }
 
-function speak(text: string) {
+function speak(text: string, language = 'en-IN') {
   try {
     speech?.stop();
-    speech?.speak(text, { language: 'en-IN', rate: 0.95 });
+    speech?.speak(text, { language, rate: 0.95 });
   } catch {
     /* no speech engine: haptics and the screen still carry it */
   }
@@ -67,6 +68,7 @@ export function useCrashDetection(params: {
   escalate: () => Promise<void> | void;
 }) {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const { locale, t } = useLocale();
   const deadline = useRef<number | null>(null);
   const lastCandidate = useRef<CrashWindowSummary | null>(null);
   const latest = useRef(params);
@@ -151,8 +153,8 @@ export function useCrashDetection(params: {
   useEffect(() => {
     if (secondsLeft == null || secondsLeft <= 0) return;
     void playHaptic(HAPTIC_FOR_STRENGTH[crashHapticStrength(secondsLeft)]);
-    if (shouldSpeakCrashPrompt(secondsLeft)) speak(CRASH_SPOKEN_PROMPT);
-  }, [secondsLeft]);
+    if (shouldSpeakCrashPrompt(secondsLeft)) speak(locale === 'en' ? CRASH_SPOKEN_PROMPT : t('crash.spoken'), locale === 'hi' ? 'hi-IN' : 'en-IN');
+  }, [secondsLeft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving the ride never leaves a countdown running in the background.
   useEffect(() => {

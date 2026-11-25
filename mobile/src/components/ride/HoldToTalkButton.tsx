@@ -11,6 +11,7 @@ import { VOICE_MAX_MS, formatClipDuration, voiceClipUsable } from '@ridentrack/s
 import { useRideTheme, radius, spacing, type RidePalette } from '../../theme';
 import { Icon } from '../ui';
 import { playHaptic } from '../../services/haptics';
+import { useT } from '../../hooks/useLocale';
 
 /*
  * F12: push to talk. Hold anywhere on the big button, talk, let go to send.
@@ -31,6 +32,7 @@ export function HoldToTalkButton(props: {
   compact?: boolean;
 }) {
   const theme = useRideTheme();
+  const t = useT();
   const s = useMemo(() => makeStyles(theme), [theme]);
   const recorder = useAudioRecorder(VOICE_OPTIONS);
   const [elapsed, setElapsed] = useState<number | null>(null);
@@ -40,7 +42,7 @@ export function HoldToTalkButton(props: {
   async function start() {
     stopping.current = false;
     const perm = await requestRecordingPermissionsAsync();
-    if (!perm.granted) { props.onError('Allow the microphone to send voice notes.'); return; }
+    if (!perm.granted) { props.onError(t('voice.mic_permission')); return; }
     await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
     await recorder.prepareToRecordAsync();
     if (stopping.current) return; // let go before the mic was ready
@@ -62,7 +64,7 @@ export function HoldToTalkButton(props: {
     } finally {
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     }
-    if (!voiceClipUsable(duration)) { props.onError('Hold the button while you talk.'); return; }
+    if (!voiceClipUsable(duration)) { props.onError(t('voice.too_short')); return; }
     if (recorder.uri) { void playHaptic('success'); props.onRecorded(recorder.uri, duration); }
   }
 
@@ -81,8 +83,8 @@ export function HoldToTalkButton(props: {
   const fill = recording ? Math.min(1, elapsed / VOICE_MAX_MS) : 0;
   return (
     <Pressable
-      onPressIn={() => void start().catch(() => props.onError('Could not start the microphone.'))}
-      onPressOut={() => void finish().catch(() => props.onError('Could not save the voice note.'))}
+      onPressIn={() => void start().catch(() => props.onError(t('voice.mic_failed')))}
+      onPressOut={() => void finish().catch(() => props.onError(t('voice.save_failed')))}
       style={[s.button, props.compact && s.compact, recording && { backgroundColor: theme.danger, borderColor: theme.danger }]}
       accessibilityRole="button"
       accessibilityLabel="Hold to record a voice note for your pack, release to send"
@@ -91,7 +93,7 @@ export function HoldToTalkButton(props: {
       <Icon name={recording ? 'mic' : 'mic-outline'} size="md" color={recording ? theme.onDanger : theme.accent} />
       {!props.compact && (
         <Text style={[s.label, recording && { color: theme.onDanger }]}>
-          {recording ? `Release to send · ${formatClipDuration(elapsed)}` : 'Hold to talk'}
+          {recording ? t('chat.release_to_send', { time: formatClipDuration(elapsed) }) : t('chat.hold_to_talk')}
         </Text>
       )}
     </Pressable>

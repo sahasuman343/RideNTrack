@@ -30,8 +30,8 @@ export const FLAG_DEFAULTS = {
   road_reports: true,
   /** F12: push-to-talk voice notes. */
   voice_notes: true,
-  /** F13/F18: language picker. */
-  languages: true,
+  /** F13/F18: language picker and following the phone language. Off until a native speaker has reviewed hi.ts. */
+  languages: false,
   /** F15: clubs. */
   clubs: true,
   /** F17: referral prompts on the spectator page and recap card. */

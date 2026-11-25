@@ -17,6 +17,7 @@ import { supabase } from '../../lib/supabase';
 import { getRideValue, saveRideValue } from '../../lib/tripCache';
 import { newQueueId } from '../../lib/offlineQueue';
 import { track } from '../../services/analytics';
+import { useT } from '../useLocale';
 
 /*
  * F6 SOS. One press does everything that can be done: the pack alert (queued
@@ -41,6 +42,7 @@ export function useSosWorkflow(params: {
   setMessage: (m: string | null) => void;
   onMissingContact: () => void;
 }) {
+  const t = useT();
   const [sosModal, setSosModal] = useState(false);
   const [started, setStarted] = useState(false);
   const [pack, setPack] = useState<PackState>('pending');
@@ -172,10 +174,10 @@ export function useSosWorkflow(params: {
     }
   }, []);
 
-  const steps = started ? sosSteps({ pack, composer, server, recipients }) : [];
+  const steps = started ? sosSteps({ pack, composer, server, recipients }, t) : [];
   const primaryLabel = !started
-    ? sosPrimaryLabel({ online: params.online, recipients: recipients.length })
-    : composer === 'opened' ? 'Open Messages again' : recipients.length ? `Text ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'}` : 'Add an emergency contact';
+    ? sosPrimaryLabel({ online: params.online, recipients: recipients.length }, t)
+    : composer === 'opened' ? t('sos.open_messages_again') : recipients.length === 1 ? t('sos.text_person') : recipients.length ? t('sos.text_people', { count: recipients.length }) : t('sos.add_contact');
 
   return {
     sosModal, started, steps, recipients, primaryLabel,

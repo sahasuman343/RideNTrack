@@ -1051,7 +1051,8 @@ test('emergency SOS workflow supports group broadcast, SMS with GPS, and selecte
   assert.match(rideSource, /maps\.google\.com\/\?q=/);
   // Progress lives in the SOS sheet as steps (shared/sos.ts), not in toasts.
   assert.match(rideSource, /steps=\{sos\.steps\}/);
-  const sosSource = fs.readFileSync(path.resolve('shared/sos.ts'), 'utf8');
+  const sosSource = fs.readFileSync(path.resolve('shared/sos.ts'), 'utf8') + fs.readFileSync(path.resolve('shared/locales/en.ts'), 'utf8');
+  assert.match(sosSource, /t\('sos\.step_pack'\)/);
   assert.match(sosSource, /Alert to your pack/);
   assert.match(sosSource, /Tap Send in Messages/);
 });
@@ -1992,9 +1993,9 @@ test('shared UI primitives provide Card, StatusBadge, LiveDot, SegmentedControl,
 test('navigation architecture defines exactly three bottom tabs with Home as default and preserved modal routes', () => {
   const tabsLayout = fs.readFileSync(path.resolve('mobile/app/(tabs)/_layout.tsx'), 'utf8');
   // Exactly 3 visible tabs
-  assert.match(tabsLayout, /name="index"[\s\S]*title:\s*'Home'/);
-  assert.match(tabsLayout, /name="trips"[\s\S]*title:\s*'Trips'/);
-  assert.match(tabsLayout, /name="profile"[\s\S]*title:\s*'Profile'/);
+  assert.match(tabsLayout, /name="index"[\s\S]*title:\s*t\('tabs\.home'\)/);
+  assert.match(tabsLayout, /name="trips"[\s\S]*title:\s*t\('tabs\.trips'\)/);
+  assert.match(tabsLayout, /name="profile"[\s\S]*title:\s*t\('tabs\.profile'\)/);
 
   // Hidden/preserved create & join routes with href: null
   assert.match(tabsLayout, /name="create"[\s\S]*href:\s*null/);

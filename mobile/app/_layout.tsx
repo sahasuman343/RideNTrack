@@ -8,6 +8,7 @@ import * as Sentry from '@sentry/react-native';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/hooks/useAuth';
 import { FeatureFlagsProvider } from '../src/hooks/useFeatureFlags';
+import { LocaleProvider } from '../src/hooks/useLocale';
 import { identifyAnalyticsUser, track } from '../src/services/analytics';
 import { startOtaUpdateChecks } from '../src/services/otaUpdates';
 import { OfflineSyncProvider } from '../src/hooks/useOfflineSync';
@@ -40,7 +41,11 @@ function SignedInServices({ children }: { children: React.ReactNode }) {
     startOtaUpdateChecks();
     track('app_opened');
   }, []);
-  return <FeatureFlagsProvider userId={userId}>{children}</FeatureFlagsProvider>;
+  return (
+    <FeatureFlagsProvider userId={userId}>
+      <LocaleProvider>{children}</LocaleProvider>
+    </FeatureFlagsProvider>
+  );
 }
 
 function AppNavigator() {

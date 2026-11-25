@@ -5,6 +5,7 @@
  * there may be no data at all.
  */
 import { normaliseFamilyPhone } from './family';
+import { tEn, type Translate } from './i18n';
 
 export type SosRecipientRole = 'emergency_contact' | 'sweep' | 'captain' | 'co-captain';
 
@@ -42,10 +43,11 @@ export type SosStepState = 'pending' | 'sending' | 'sent' | 'sent_by_sms' | 'wai
 
 export interface SosStep { id: 'pack' | 'texts' | 'server'; label: string; status: string; state: SosStepState }
 
-export function sosPrimaryLabel(input: { online: boolean; recipients: number }): string {
-  if (input.online) return 'Send SOS';
-  if (input.recipients > 0) return `No signal: tap Send to text ${input.recipients} ${input.recipients === 1 ? 'person' : 'people'}`;
-  return 'No signal: save SOS for the pack';
+export function sosPrimaryLabel(input: { online: boolean; recipients: number }, t: Translate = tEn): string {
+  if (input.online) return t('sos.send');
+  if (input.recipients === 1) return t('sos.offline_text_one');
+  if (input.recipients > 1) return t('sos.offline_text', { count: input.recipients });
+  return t('sos.offline_save');
 }
 
 export function sosSteps(input: {
@@ -53,29 +55,29 @@ export function sosSteps(input: {
   composer: 'pending' | 'opened' | 'unavailable' | 'no_recipients';
   server: 'off' | 'pending' | 'queued' | 'sent' | 'failed';
   recipients: SosRecipient[];
-}): SosStep[] {
+}, t: Translate = tEn): SosStep[] {
   const n = input.recipients.length;
-  const who = n ? input.recipients.map(r => r.name).slice(0, 3).join(', ') + (n > 3 ? ` +${n - 3}` : '') : 'nobody yet';
+  const who = n ? input.recipients.map(r => r.name).slice(0, 3).join(', ') + (n > 3 ? ` +${n - 3}` : '') : t('sos.nobody_yet');
   const steps: SosStep[] = [];
   steps.push({
     id: 'pack',
-    label: 'Alert to your pack',
+    label: t('sos.step_pack'),
     state: input.pack === 'sent' ? 'sent' : input.pack === 'queued' ? 'waiting_for_signal' : input.pack === 'failed' ? 'failed' : 'sending',
-    status: input.pack === 'sent' ? 'Sent' : input.pack === 'queued' ? 'Waiting for signal' : input.pack === 'failed' ? 'Failed' : 'Sending',
+    status: t(input.pack === 'sent' ? 'status.sent' : input.pack === 'queued' ? 'status.waiting_for_signal' : input.pack === 'failed' ? 'status.failed' : 'status.sending'),
   });
   if (input.server !== 'off' && input.server !== 'failed') {
     steps.push({
       id: 'server',
-      label: `Text from RideNTrack to ${who}`,
+      label: t('sos.step_server', { who }),
       state: input.server === 'sent' ? 'sent_by_sms' : input.server === 'queued' ? 'sending' : 'pending',
-      status: input.server === 'sent' ? 'Sent by SMS' : input.server === 'queued' ? 'Sending' : 'Waiting for signal',
+      status: t(input.server === 'sent' ? 'status.sent_by_sms' : input.server === 'queued' ? 'status.sending' : 'status.waiting_for_signal'),
     });
   }
   steps.push({
     id: 'texts',
-    label: n ? `Text from your phone to ${who}` : 'Text from your phone',
+    label: n ? t('sos.step_texts', { who }) : t('sos.step_texts_nobody'),
     state: input.composer === 'opened' ? 'action_needed' : input.composer === 'no_recipients' ? 'skipped' : input.composer === 'unavailable' ? 'failed' : 'pending',
-    status: input.composer === 'opened' ? 'Tap Send in Messages' : input.composer === 'no_recipients' ? 'Add an emergency contact' : input.composer === 'unavailable' ? 'Could not open Messages' : 'Next',
+    status: t(input.composer === 'opened' ? 'sos.status_tap_send' : input.composer === 'no_recipients' ? 'sos.status_add_contact' : input.composer === 'unavailable' ? 'sos.status_no_messages' : 'sos.status_next'),
   });
   return steps;
 }

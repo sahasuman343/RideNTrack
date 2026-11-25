@@ -24,6 +24,7 @@ import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { Icon, SheetModal } from '../../src/components/ui';
 import { SAVED_PLACE_ICONS } from '../../src/icons';
+import { LanguagePicker } from '../../src/components/profile/LanguagePicker';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -45,6 +46,7 @@ export default function ProfileScreen() {
   const phoneSharingFlag = useFlag('rider_phone_numbers');
   const sensorRecorderFlag = useFlag('sensor_recorder');
   const lockScreenFlag = useFlag('lock_screen_card');
+  const languagesFlag = useFlag('languages');
   const [lockCardOn, setLockCardOn] = useLockScreenCardSetting();
   const [researchBusy, setResearchBusy] = useState(false);
   const researchConsent = Boolean(profile?.crash_research_consent_at);
@@ -609,6 +611,8 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {languagesFlag && <LanguagePicker />}
 
         {/* Sign Out & Delete Account Actions */}
         <View style={styles.accountActionsContainer}>

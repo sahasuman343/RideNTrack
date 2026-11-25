@@ -1,12 +1,14 @@
 import React, { memo, useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import {
+  lineHeightFor,
   hapticForTransition,
   selectAttention,
   type AttentionItem,
   type AttentionTone,
 } from '@ridentrack/shared';
 import { playHaptic } from '../../services/haptics';
+import { useLocale } from '../../hooks/useLocale';
 import { useRideTheme, type RidePalette, radius, spacing } from '../../theme';
 import { Icon } from '../ui';
 import type { IconName } from '../ui/Icon';
@@ -51,6 +53,7 @@ export interface RideAttentionBarProps {
 
 export const RideAttentionBar = memo(function RideAttentionBar({ items, dismissedIds, now, top, onAction, onDismiss }: RideAttentionBarProps) {
   const theme = useRideTheme();
+  const { t, locale } = useLocale();
   const view = selectAttention(items, { now, dismissedIds });
   const previous = useRef<AttentionItem | null>(null);
 
@@ -69,7 +72,7 @@ export const RideAttentionBar = memo(function RideAttentionBar({ items, dismisse
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.title}. Tap anywhere to cancel.`}
+        accessibilityLabel={t('attention.tap_anywhere_a11y', { title: item.title })}
         onPress={() => cancel && onAction(item, cancel.id)}
         style={[styles.fullScreen, { backgroundColor: theme.danger }]}
       >
@@ -79,10 +82,10 @@ export const RideAttentionBar = memo(function RideAttentionBar({ items, dismisse
             {item.countdownSeconds}
           </Text>
         )}
-        {item.body ? <Text style={[styles.fullBody, { color: theme.onDanger }]}>{item.body}</Text> : null}
+        {item.body ? <Text style={[styles.fullBody, { color: theme.onDanger }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 17) }]}>{item.body}</Text> : null}
         <View style={[styles.fullCancel, { borderColor: theme.onDanger }]}>
           <Text style={[styles.fullCancelText, { color: theme.onDanger }]}>{cancel?.label ?? "I'm OK"}</Text>
-          <Text style={[styles.fullHint, { color: theme.onDanger }]}>Tap anywhere</Text>
+          <Text style={[styles.fullHint, { color: theme.onDanger }]}>{t('attention.tap_anywhere')}</Text>
         </View>
         {item.actions && item.actions.length > 1 && (
           <View style={styles.fullSecondaryRow}>
@@ -109,8 +112,8 @@ export const RideAttentionBar = memo(function RideAttentionBar({ items, dismisse
             <Icon name={KIND_ICON[item.kind]} size="md" color={c.ink} />
           </View>
           <View style={styles.titleCol}>
-            <Text style={[styles.title, { color: theme.text }]}>{item.title}</Text>
-            {item.body ? <Text style={[styles.body, { color: theme.textMuted }]}>{item.body}</Text> : null}
+            <Text style={[styles.title, { color: theme.text }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 17), letterSpacing: 0 }]}>{item.title}</Text>
+            {item.body ? <Text style={[styles.body, { color: theme.textMuted }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 14) }]}>{item.body}</Text> : null}
           </View>
           {item.countdownSeconds != null && (
             <Text style={[styles.countdown, { color: c.ink }]} accessibilityLabel={`${item.countdownSeconds} seconds left`}>

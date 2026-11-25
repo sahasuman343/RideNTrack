@@ -13,6 +13,8 @@ export interface FamilyContact {
   phone: string;
   relation: string | null;
   paused: boolean;
+  /** F13: the language their texts are in. */
+  language?: 'en' | 'hi';
 }
 
 export function normaliseFamilyPhone(raw: string | null | undefined, defaultCountry = '91'): string | null {

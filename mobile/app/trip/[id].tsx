@@ -88,6 +88,7 @@ import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
 import { useOfflineMaps } from '../../src/hooks/useOfflineMaps';
 import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
 import { useRideReadiness } from '../../src/hooks/useRideReadiness';
+import { useFlag } from '../../src/hooks/useFeatureFlags';
 
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
@@ -351,6 +352,7 @@ export default function TripWorkspaceScreen() {
   const isAdmin = !!user && trip?.admin_id === user.id;
   // R5: one Ride ready card replaces scattered setup prompts.
   const family = useFamilyContacts();
+  const languagesFlag = useFlag('languages');
   const { levelPercent: batteryLevel } = useBatteryLevel();
   // F4: one sentence, from the rider's role and the planned riding time.
   const batteryFootnote = useMemo(() => {
@@ -1602,6 +1604,7 @@ export default function TripWorkspaceScreen() {
               onSave={family.save}
               onRemove={family.remove}
               onPause={family.setPaused}
+              onSetLanguage={languagesFlag ? family.setLanguage : undefined}
             />
 
             {/* Participants & Formation Roster Section */}

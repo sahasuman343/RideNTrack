@@ -12,6 +12,7 @@ import { QUICK_REPLY_PRESETS, chatDeliveryText, formatClipDuration, type ChatLin
 import { useRideTheme, radius, spacing, typography } from '../../theme';
 import { Icon, SheetModal } from '../ui';
 import { HoldToTalkButton } from './HoldToTalkButton';
+import { useT } from '../../hooks/useLocale';
 
 interface Props {
   visible: boolean;
@@ -51,6 +52,7 @@ export function TripChatSheet({
   playingKey,
 }: Props) {
   const theme = useRideTheme();
+  const t = useT();
   const s = useMemo(() => makeStyles(theme), [theme]);
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function TripChatSheet({
       await onSend(trimmed, type);
     } catch (err) {
       if (type === 'text') setDraft(trimmed);
-      setSendError(err instanceof Error ? err.message : 'Could not save the message on this phone.');
+      setSendError(err instanceof Error ? err.message : t('chat.save_failed'));
     }
   }
 
@@ -83,9 +85,9 @@ export function TripChatSheet({
           <View style={s.header}>
             <View style={s.headerLeft}>
               <Icon name="chatbubbles-outline" size="md" color={theme.accent} />
-              <Text style={s.title}>Trip Chat</Text>
+              <Text style={s.title}>{t('chat.title')}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={s.closeBtn} accessibilityLabel="Close trip chat">
+            <TouchableOpacity onPress={onClose} style={s.closeBtn} accessibilityLabel={t('chat.close')}>
               <Icon name="close" size="md" color={theme.text} />
             </TouchableOpacity>
           </View>
@@ -114,7 +116,7 @@ export function TripChatSheet({
 
           {pinnedLines.length > 0 && (
             <View style={s.pinnedBox}>
-              <Text style={s.pinnedLabel}>PINNED INFO</Text>
+              <Text style={s.pinnedLabel}>{t('chat.pinned')}</Text>
               {pinnedLines.slice(-2).map(m => (
                 <Text key={m.key} style={s.pinnedBody} numberOfLines={2}>
                   {m.body}
@@ -130,11 +132,11 @@ export function TripChatSheet({
             contentContainerStyle={s.listContent}
             ListEmptyComponent={
               <Text style={s.emptyText}>
-                No messages yet. Quick replies below work with gloves on, and with no signal.
+                {t('chat.empty')}
               </Text>
             }
             renderItem={({ item }) => {
-              const delivery = chatDeliveryText(item);
+              const delivery = chatDeliveryText(item, t);
               const waiting = item.delivery === 'waiting_for_signal' || item.delivery === 'failed';
               return (
                 <View style={[s.msgRow, item.mine ? s.msgMine : s.msgOther, waiting && s.msgWaiting]}>
@@ -146,7 +148,7 @@ export function TripChatSheet({
                       style={s.voiceRow}
                       onPress={() => onPlayVoice?.(item)}
                       accessibilityRole="button"
-                      accessibilityLabel={`Play voice note, ${formatClipDuration(item.voice.durationMs)}`}
+                      accessibilityLabel={t('chat.play_voice', { time: formatClipDuration(item.voice.durationMs) })}
                     >
                       <View style={s.voicePlay}>
                         <Icon name={playingKey === (item.queued?.id ?? item.key) ? 'stop' : 'play'} size="sm" color={theme.onAccent} />
@@ -166,10 +168,10 @@ export function TripChatSheet({
                     <TouchableOpacity
                       disabled={item.delivery !== 'failed' || !item.queued}
                       onPress={() => item.queued && onRetry(item.queued)}
-                      accessibilityLabel={item.delivery === 'failed' ? 'Message failed. Tap to try again.' : `Message ${delivery}`}
+                      accessibilityLabel={item.delivery === 'failed' ? t('chat.failed_a11y') : t('chat.message_state', { state: delivery ?? '' })}
                     >
                       <Text style={[s.msgDelivery, { color: deliveryColor(item) }]}>
-                        {item.delivery === 'failed' ? `${delivery} · Tap to retry` : delivery}
+                        {item.delivery === 'failed' ? `${delivery} · ${t('chat.retry')}` : delivery}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -206,7 +208,7 @@ export function TripChatSheet({
               style={s.input}
               value={draft}
               onChangeText={setDraft}
-              placeholder={isOnline ? 'Message your pack…' : 'Message your pack (sends when signal returns)'}
+              placeholder={isOnline ? t('chat.placeholder') : t('chat.placeholder_offline')}
               placeholderTextColor={theme.subtle}
               maxLength={1000}
               returnKeyType="send"
@@ -216,7 +218,7 @@ export function TripChatSheet({
               style={[s.sendBtn, !draft.trim() && s.disabledChip]}
               disabled={!draft.trim()}
               onPress={() => void handleSend(draft, 'text')}
-              accessibilityLabel={isOnline ? 'Send message' : 'Queue message until signal returns'}
+              accessibilityLabel={isOnline ? t('chat.send') : t('chat.queue')}
             >
               <Icon name="send" size="sm" color={theme.onAccent} />
             </TouchableOpacity>

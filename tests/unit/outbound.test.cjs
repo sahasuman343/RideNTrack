@@ -73,3 +73,21 @@ test('Gupshup adapter posts the DLT template id and parses success', async () =>
   assert.equal(result.providerId, '123456');
   assert.match(body, /dltTemplateId=t/);
 });
+
+test('F13: family texts follow the contact language once the Hindi template is registered', () => {
+  const payload = { rider: 'Asha', ride: 'Spiti loop', link: 'https://x.test/t/abc', lang: 'hi' };
+  const english = outbound.buildSendRequest('family_ride_started', '+919800000000', payload, { DLT_TEMPLATE_FAMILY_RIDE_STARTED: 'en-id' });
+  assert.equal(english.dltTemplateId, 'en-id');
+  assert.match(english.text, /has started riding/);
+  const hindi = outbound.buildSendRequest('family_ride_started', '+919800000000', payload, { DLT_TEMPLATE_FAMILY_RIDE_STARTED: 'en-id', DLT_TEMPLATE_FAMILY_RIDE_STARTED_HI: 'hi-id' });
+  assert.equal(hindi.dltTemplateId, 'hi-id');
+  assert.match(hindi.text, /राइड शुरू/);
+  assert.deepEqual(hindi.vars, english.vars);
+  // Rider alerts to the pack stay English; only family templates have Hindi.
+  const sos = outbound.buildSendRequest('sos_alert', '+919800000000', { ...payload, maps: 'm' }, { DLT_TEMPLATE_SOS_ALERT: 's', DLT_TEMPLATE_SOS_ALERT_HI: 'x' });
+  assert.equal(sos.dltTemplateId, 's');
+  for (const [key, spec] of Object.entries(outbound.HINDI_TEMPLATES)) {
+    assert.deepEqual(spec.vars, outbound.TEMPLATES[key].vars, key);
+    assert.equal((spec.text.match(/\{#[a-z]+#\}/g) || []).length, spec.vars.length, key);
+  }
+});

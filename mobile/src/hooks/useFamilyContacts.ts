@@ -11,7 +11,7 @@ export function useFamilyContacts() {
 
   const refresh = useCallback(async () => {
     if (!user) return;
-    const { data, error } = await supabase.from('family_contacts').select('id,name,phone,relation,paused').order('created_at');
+    const { data, error } = await supabase.from('family_contacts').select('id,name,phone,relation,paused,language').order('created_at');
     if (!error && Array.isArray(data)) setContacts(data as FamilyContact[]);
     setLoaded(true);
   }, [user]);
@@ -41,5 +41,11 @@ export function useFamilyContacts() {
     if (error) { await refresh(); throw new Error(error.message); }
   }, [refresh]);
 
-  return { contacts, loaded, refresh, save, remove, setPaused };
+  const setLanguage = useCallback(async (id: string, language: 'en' | 'hi') => {
+    setContacts(list => list.map(c => (c.id === id ? { ...c, language } : c)));
+    const { error } = await supabase.rpc('set_family_contact_language', { p_id: id, p_language: language });
+    if (error) { await refresh(); throw new Error(error.message); }
+  }, [refresh]);
+
+  return { contacts, loaded, refresh, save, remove, setPaused, setLanguage };
 }

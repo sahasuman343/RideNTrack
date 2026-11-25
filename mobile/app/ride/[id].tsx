@@ -68,6 +68,7 @@ import { useRegroupPoints } from '../../src/hooks/ride/useRegroupPoints';
 import { useRideAlerts } from '../../src/hooks/ride/useRideAlerts';
 import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
 import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
+import { useT } from '../../src/hooks/useLocale';
 import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useRideChat } from '../../src/hooks/ride/useRideChat';
 import { useSpectatorLinks } from '../../src/hooks/ride/useSpectatorLinks';
@@ -149,6 +150,7 @@ export default function LiveRideScreen() {
   useKeepAwake();
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
+  const t = useT();
   const userId = user?.id;
   const name = profile?.display_name || 'Rider';
   const nameRef = useRef(name);
@@ -995,7 +997,7 @@ export default function LiveRideScreen() {
   const deviationLimit = ride?.route_deviation_threshold_meters || 500;
   const attentionItems = useMemo<AttentionItem[]>(() => {
     const items: AttentionItem[] = attentionFromAlerts(alerts, { myUserId: userId, now, acknowledgedIds: acknowledgedAlertIds });
-    if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso));
+    if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso, t));
     if (lastFuel.item) items.push(lastFuel.item);
     if (roadAhead) items.push(roadAhead);
     if (voice.attention) items.push(voice.attention);
@@ -1018,7 +1020,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, roadAhead, voice.attention, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, roadAhead, voice.attention, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso, t]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
