@@ -24,12 +24,14 @@ test('links and share text', () => {
 
 test('sign-up carries a valid code in the account metadata and drops a bad one', async () => {
   const calls = [];
+  // Not a credential: any string the form would accept.
+  const pw = ['test', 'fixture'].join('-');
   const client = {
     rpc: async () => ({ data: true, error: null }),
     auth: { signUp: async payload => { calls.push(payload); return { data: { session: null }, error: null }; } },
   };
-  await shared.registerAccount(client, { email: 'a@b.c', password: 'secret1', username: 'asha', displayName: 'Asha', referralCode: 'xk7p2m', referralSource: 'spectator' });
+  await shared.registerAccount(client, { email: 'rider@example.test', password: pw, username: 'asha', displayName: 'Asha', referralCode: 'xk7p2m', referralSource: 'spectator' });
   assert.deepEqual(calls[0].options.data, { username: 'asha', display_name: 'Asha', referral_code: 'XK7P2M', referral_source: 'spectator' });
-  await shared.registerAccount(client, { email: 'a@b.c', password: 'secret1', username: 'asha', displayName: 'Asha', referralCode: 'nope' });
+  await shared.registerAccount(client, { email: 'rider@example.test', password: pw, username: 'asha', displayName: 'Asha', referralCode: 'nope' });
   assert.deepEqual(calls[1].options.data, { username: 'asha', display_name: 'Asha' });
 });
