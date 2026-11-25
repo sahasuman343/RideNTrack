@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import {
   CRASH_COUNTDOWN_SECONDS,
   CRASH_SPOKEN_PROMPT,
+  speechLanguage,
   POSSIBLE_CRASH_MESSAGE,
   createCrashDetector,
   crashHapticStrength,
@@ -153,7 +154,7 @@ export function useCrashDetection(params: {
   useEffect(() => {
     if (secondsLeft == null || secondsLeft <= 0) return;
     void playHaptic(HAPTIC_FOR_STRENGTH[crashHapticStrength(secondsLeft)]);
-    if (shouldSpeakCrashPrompt(secondsLeft)) speak(locale === 'en' ? CRASH_SPOKEN_PROMPT : t('crash.spoken'), locale === 'hi' ? 'hi-IN' : 'en-IN');
+    if (shouldSpeakCrashPrompt(secondsLeft)) speak(locale === 'en' ? CRASH_SPOKEN_PROMPT : t('crash.spoken'), speechLanguage(locale));
   }, [secondsLeft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving the ride never leaves a countdown running in the background.

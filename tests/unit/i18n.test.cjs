@@ -24,7 +24,7 @@ test('translator falls back to English and fills placeholders', () => {
 });
 
 test('phone language picks the first supported locale', () => {
-  assert.equal(shared.pickLocale(['ta-IN', 'hi-IN', 'en-IN']), 'hi');
+  assert.equal(shared.pickLocale(['fr-FR', 'hi-IN', 'en-IN']), 'hi');
   assert.equal(shared.pickLocale(['fr-FR']), 'en');
   assert.equal(shared.pickLocale([]), 'en');
   assert.ok(shared.lineHeightFor('hi', 16) > shared.lineHeightFor('en', 16));
@@ -54,4 +54,28 @@ test('chat queue summary and delivery text follow the language', () => {
 
 test('road report type keys cover every report type', () => {
   for (const r of shared.ROAD_REPORT_TYPES) assert.ok(`road.type.${r.type}` in shared.EN_MESSAGES, r.type);
+});
+
+test('F18: regional languages cover every safety string with the same placeholders', () => {
+  const en = shared.EN_MESSAGES;
+  const safety = Object.keys(en).filter(k => shared.SAFETY_KEY_PREFIXES.some(p => k.startsWith(p)));
+  assert.ok(safety.length >= 30);
+  for (const [code, catalog] of Object.entries(shared.REGIONAL_MESSAGES)) {
+    const missing = safety.filter(k => !catalog[k] || !String(catalog[k]).trim());
+    assert.deepEqual(missing, [], `${code} is missing safety strings: ${missing.join(', ')}`);
+    for (const k of Object.keys(catalog)) {
+      assert.ok(k in en, `${code} has unknown key ${k}`);
+      assert.deepEqual(placeholders(catalog[k]), placeholders(en[k]), `${code} placeholders differ for ${k}`);
+    }
+    assert.ok(shared.LOCALES.some(l => l.code === code), `${code} not offered in the picker`);
+  }
+});
+
+test('F18: regional translator falls back to English for untranslated keys', () => {
+  const t = shared.translator('ta');
+  assert.notEqual(t('sos.send'), 'Send SOS');
+  assert.equal(t('road.title'), shared.EN_MESSAGES['road.title']);
+  assert.equal(shared.pickLocale(['kn-IN', 'en-IN']), 'kn');
+  assert.equal(shared.speechLanguage('ml'), 'ml-IN');
+  assert.equal(shared.lineHeightFor('te', 20), 30);
 });

@@ -22,6 +22,15 @@ speaker has reviewed the Hindi).
   the spoken prompt, in `hi-IN`), attention bar, trip chat, hold-to-talk,
   road reports. Other screens are still English (F13-b).
 
+## Regional languages (F18)
+
+Tamil, Kannada, Malayalam, Telugu and Marathi live in
+`shared/locales/regional.ts`. Every safety string (status words, SOS, crash
+countdown, attention bar), the tab bar and the language picker are translated;
+other screens fall back to English per key. The unit test fails if a language
+is missing a safety string or a placeholder differs. The crash prompt is
+spoken in `<code>-IN`; if the phone has no voice for it, it speaks the default.
+
 ## Family texts
 
 Family texts follow the contact's language, not the rider's. Each family
@@ -32,8 +41,10 @@ Hindi DLT template id is set; until then the contact gets the English text.
 
 ## Needs Suman
 
-- Native-speaker review of `shared/locales/hi.ts` and the four Hindi SMS
-  texts, then turn on `languages`.
+- Native-speaker review of `shared/locales/hi.ts`, the four Hindi SMS texts,
+  and each language in `shared/locales/regional.ts`, then turn on `languages`.
+- Check that Android phones in the pilot have a text-to-speech voice for each
+  language (Settings → Text-to-speech).
 - Register the Hindi DLT templates and set
   `DLT_TEMPLATE_FAMILY_RIDE_STARTED_HI`, `DLT_TEMPLATE_FAMILY_REACHED_STAY_HI`,
   `DLT_TEMPLATE_FAMILY_CHECK_IN_MISSED_HI`, `DLT_TEMPLATE_FAMILY_CRASH_HI`.

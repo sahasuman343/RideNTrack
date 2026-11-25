@@ -82,7 +82,7 @@ export const RideAttentionBar = memo(function RideAttentionBar({ items, dismisse
             {item.countdownSeconds}
           </Text>
         )}
-        {item.body ? <Text style={[styles.fullBody, { color: theme.onDanger }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 17) }]}>{item.body}</Text> : null}
+        {item.body ? <Text style={[styles.fullBody, { color: theme.onDanger }, locale !== 'en' && { lineHeight: lineHeightFor(locale, 17) }]}>{item.body}</Text> : null}
         <View style={[styles.fullCancel, { borderColor: theme.onDanger }]}>
           <Text style={[styles.fullCancelText, { color: theme.onDanger }]}>{cancel?.label ?? "I'm OK"}</Text>
           <Text style={[styles.fullHint, { color: theme.onDanger }]}>{t('attention.tap_anywhere')}</Text>
@@ -112,8 +112,8 @@ export const RideAttentionBar = memo(function RideAttentionBar({ items, dismisse
             <Icon name={KIND_ICON[item.kind]} size="md" color={c.ink} />
           </View>
           <View style={styles.titleCol}>
-            <Text style={[styles.title, { color: theme.text }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 17), letterSpacing: 0 }]}>{item.title}</Text>
-            {item.body ? <Text style={[styles.body, { color: theme.textMuted }, locale === 'hi' && { lineHeight: lineHeightFor('hi', 14) }]}>{item.body}</Text> : null}
+            <Text style={[styles.title, { color: theme.text }, locale !== 'en' && { lineHeight: lineHeightFor(locale, 17), letterSpacing: 0 }]}>{item.title}</Text>
+            {item.body ? <Text style={[styles.body, { color: theme.textMuted }, locale !== 'en' && { lineHeight: lineHeightFor(locale, 14) }]}>{item.body}</Text> : null}
           </View>
           {item.countdownSeconds != null && (
             <Text style={[styles.countdown, { color: c.ink }]} accessibilityLabel={`${item.countdownSeconds} seconds left`}>

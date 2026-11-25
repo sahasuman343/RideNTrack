@@ -31,7 +31,7 @@ export function LanguagePicker() {
               accessibilityRole="radio"
               accessibilityState={{ selected: on }}
             >
-              <Text style={[s.chipText, on && s.chipTextOn, o.code === 'hi' && { lineHeight: lineHeightFor('hi', 15) }]}>{o.label}</Text>
+              <Text style={[s.chipText, on && s.chipTextOn, o.code && o.code !== 'en' && { lineHeight: lineHeightFor(o.code, 15) }]}>{o.label}</Text>
             </TouchableOpacity>
           );
         })}
