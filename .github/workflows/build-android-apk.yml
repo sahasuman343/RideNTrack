@@ -1,6 +1,11 @@
 name: Build RideNTrack beta APK
 
+# Two ways to build:
+#   - Test build from any branch: Actions → this workflow → Run workflow →
+#     pick the branch. Use it to try a pull request on a phone before merging.
+#   - Beta release: push a tag like v1.0.0-beta.1 that points at main.
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*-beta.*'
@@ -15,6 +20,7 @@ concurrency:
 jobs:
   check_tag:
     name: Check beta version tag and main-branch ancestry
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository history
@@ -39,11 +45,14 @@ jobs:
   validate:
     name: Run complete RideNTrack validation suite
     needs: check_tag
+    # Tag builds must pass the tag check; branch test builds skip it.
+    if: ${{ !cancelled() && (needs.check_tag.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.check_tag.result == 'skipped')) }}
     uses: ./.github/workflows/verify.yml
 
   build:
-    name: Approved EAS beta APK build
+    name: Approved EAS APK build
     needs: validate
+    if: ${{ !cancelled() && needs.validate.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment:
@@ -52,7 +61,13 @@ jobs:
       - name: Check out the exact tagged commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
+      - name: Name this build
+        run: |
+          # Tags name beta releases; branch builds get "<branch>-<commit>".
+          # Slashes are not allowed in artifact names (feat/x -> feat-x).
+          if [ "$GITHUB_REF_TYPE" = tag ]; then LABEL="$GITHUB_REF_NAME"; else LABEL="${GITHUB_REF_NAME}-${GITHUB_SHA::7}"; fi
+          echo "BUILD_LABEL=$(echo "$LABEL" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')" >> "$GITHUB_ENV"
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -92,21 +107,21 @@ jobs:
             if (!result.path) throw new Error('EAS CLI did not return the downloaded APK path');
             process.stdout.write(result.path);
           ")"
-          cp "$APK_PATH" "$GITHUB_WORKSPACE/RideNTrack-${GITHUB_REF_NAME}.apk"
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/RideNTrack-${BUILD_LABEL}.apk"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RideNTrack-${{ github.ref_name }}-APK
-          path: RideNTrack-${{ github.ref_name }}.apk
+          name: RideNTrack-${{ env.BUILD_LABEL }}-APK
+          path: RideNTrack-${{ env.BUILD_LABEL }}.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Publish beta build details
+      - name: Publish build details
         if: always()
         run: |
           {
-            echo "## RideNTrack beta APK"
+            echo "## RideNTrack APK"
             echo
-            echo "- **Version tag:** \`${GITHUB_REF_NAME}\`"
+            echo "- **${GITHUB_REF_TYPE^}:** \`${GITHUB_REF_NAME}\`"
             echo "- **Commit:** \`${GITHUB_SHA}\`"
             echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
             echo "- **EAS profile:** \`preview\` (internal APK)"
