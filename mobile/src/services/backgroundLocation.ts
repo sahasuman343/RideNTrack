@@ -2,7 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GPS_PROFILES, profileForRole, shouldSwitchProfile, validCoordinates, type GpsProfile, type LocationUpdate } from '@ridentrack/shared';
+import { GPS_PROFILES, profileForRole, shouldSwitchProfile, validCoordinates, liveRideNotification, type GpsProfile, type LocationUpdate, type LockScreenCard } from '@ridentrack/shared';
 import { enqueueLocation } from '../lib/offlineQueue';
 import { supabase } from '../lib/supabase';
 import { syncQueue } from './syncQueue';
@@ -25,6 +25,8 @@ interface Params extends Context {
   role?: string | null;
   activeRidersCount?: number;
   maxRideDurationMs?: number;
+  /** F9: opt-in emergency card shown in the ongoing notification (Android lock screen). */
+  lockScreenCard?: LockScreenCard | null;
 }
 let context: Params | null = null;
 let fallback: Location.LocationSubscription | null = null;
@@ -151,10 +153,8 @@ async function startNativeUpdates(params: Params, restart = false) {
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'RideNTrack · Sharing location',
-      notificationBody: params.activeRidersCount && params.activeRidersCount > 0
-        ? `Live pack: ${params.activeRidersCount} rider${params.activeRidersCount === 1 ? '' : 's'} active`
-        : 'Your group can see your position.',
+      notificationTitle: (params.lockScreenCard ?? liveRideNotification(params.activeRidersCount)).title,
+      notificationBody: (params.lockScreenCard ?? liveRideNotification(params.activeRidersCount)).body,
       notificationColor: '#FF6B00',
     },
   });

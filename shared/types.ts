@@ -447,3 +447,4 @@ export * from './corridor';
 export * from './sos';
 export * from './crash';
 export * from './chat';
+export * from './lockScreen';

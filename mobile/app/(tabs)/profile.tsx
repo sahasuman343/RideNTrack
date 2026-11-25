@@ -19,6 +19,7 @@ import { BikeModelPicker } from '../../src/components/profile/BikeModelPicker';
 import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
 import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { openMedicalIdSetup, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { Icon, SheetModal } from '../../src/components/ui';
@@ -43,6 +44,8 @@ export default function ProfileScreen() {
   const [sharePhoneWithRide, setSharePhoneWithRide] = useState(Boolean(profile?.share_phone_with_ride));
   const phoneSharingFlag = useFlag('rider_phone_numbers');
   const sensorRecorderFlag = useFlag('sensor_recorder');
+  const lockScreenFlag = useFlag('lock_screen_card');
+  const [lockCardOn, setLockCardOn] = useLockScreenCardSetting();
   const [researchBusy, setResearchBusy] = useState(false);
   const researchConsent = Boolean(profile?.crash_research_consent_at);
   const setResearchConsent = useCallback(async (on: boolean) => {
@@ -694,6 +697,28 @@ export default function ProfileScreen() {
               </View>
               <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor={theme.onAccent} />
             </View>
+            {lockScreenFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Show on my lock screen while riding</Text>
+                  <Text style={styles.hint}>
+                    Anyone holding this phone can read your blood group, emergency contact and the ride captain's number, without unlocking it. Only while you share your location on a ride.
+                  </Text>
+                  {Platform.OS === 'ios' && (
+                    <TouchableOpacity onPress={openMedicalIdSetup} accessibilityRole="link">
+                      <Text style={[styles.hint, { color: theme.accent, fontWeight: '700' }]}>Also set up Medical ID in the Health app</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Switch
+                  value={lockCardOn}
+                  onValueChange={on => void setLockCardOn(on)}
+                  accessibilityLabel="Show emergency details on the lock screen while riding"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
             {sensorRecorderFlag && (
               <View style={styles.iceConsentRow}>
                 <View style={{ flex: 1 }}>

@@ -54,6 +54,7 @@ import {
   profileForRole,
   LOW_BATTERY_PERCENT,
   riderPresence,
+  lockScreenCard,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -67,6 +68,7 @@ import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
 import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
 import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useRideChat } from '../../src/hooks/ride/useRideChat';
+import { postRideStartCard, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
 import {
@@ -308,6 +310,22 @@ export default function LiveRideScreen() {
       ]),
   });
   const { triggerSosWorkflow, broadcastSosToGroup } = sos;
+  // F9: opt-in emergency card in the live-ride notification (lock screen).
+  const lockScreenFlag = useFlag('lock_screen_card');
+  const [lockCardOn] = useLockScreenCardSetting();
+  const captainContact = sos.recipients.find(r => r.role === 'captain') ?? null;
+  const emergencyCard = useMemo(() => (lockScreenFlag && lockCardOn
+    ? lockScreenCard({ riderName: name, bloodGroup: profile?.blood_group, emergencyContact: profile?.emergency_contact, captain: captainContact })
+    : null), [lockScreenFlag, lockCardOn, name, profile?.blood_group, profile?.emergency_contact, captainContact?.name, captainContact?.phone]); // eslint-disable-line react-hooks/exhaustive-deps
+  const emergencyCardRef = useRef(emergencyCard);
+  emergencyCardRef.current = emergencyCard;
+  const emergencyCardKey = emergencyCard ? emergencyCard.title + emergencyCard.body : '';
+  const postedCardFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!emergencyCard || !active || !sharing || postedCardFor.current === id) return;
+    postedCardFor.current = id;
+    void postRideStartCard(emergencyCard, id);
+  }, [emergencyCard, active, sharing, id]);
   // F8: chat goes through the offline queue, so it works in dead zones.
   const chat = useRideChat({
     rideId: id, userId, online: sync.isOnline, messages,
@@ -527,6 +545,7 @@ export default function LiveRideScreen() {
       displayName: nameRef.current,
       publish,
       role: gpsRole,
+      lockScreenCard: emergencyCardRef.current,
       destination: destinationRef.current,
       onLocationUpdate: p => {
         if (!cancelled) { setNow(Date.now()); setPosition(p); }
@@ -575,7 +594,7 @@ export default function LiveRideScreen() {
       // Leaving the screen keeps sharing; only explicit actions stop it.
       detachBackgroundLocationCallbacks(id);
     };
-  }, [id, userId, rideLoaded, active, sharing, publish, gpsRetry, gpsRole]);
+  }, [id, userId, rideLoaded, active, sharing, publish, gpsRetry, gpsRole, emergencyCardKey]);
 
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
@@ -803,6 +822,7 @@ export default function LiveRideScreen() {
         displayName: name,
         publish,
         role: gpsRole,
+        lockScreenCard: emergencyCardRef.current,
         destination: destinationRef.current,
         onAutoStop: reason => {
           if (session !== gpsSession.current) return;
