@@ -84,6 +84,7 @@ export const ALERT_ICONS: Record<AlertType, IconName> = {
   rider_behind: 'speedometer-outline',
   regroup: 'people-outline',
   announcement: 'megaphone-outline',
+  check_in_missed: 'time-outline',
 };
 
 export const MECHANICAL_ICONS: Record<MechanicalIssueType, IconName> = {

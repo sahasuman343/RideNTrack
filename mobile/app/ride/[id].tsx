@@ -92,6 +92,8 @@ import { RollCallSheet } from '../../src/components/ride/RollCallSheet';
 import { DebriefSheet } from '../../src/components/ride/DebriefSheet';
 import { useCaptainFlow } from '../../src/hooks/ride/useCaptainFlow';
 import { CaptainStepCard } from '../../src/components/ride/CaptainStepCard';
+import { FamilyUpdatesRow } from '../../src/components/ride/FamilyUpdatesRow';
+import { useFlag } from '../../src/hooks/useFeatureFlags';
 import { SosSheet } from '../../src/components/ride/SosSheet';
 import {
   AlertPickerSheet,
@@ -295,7 +297,7 @@ export default function LiveRideScreen() {
     waypoints: upcomingWaypoints,
     routeCoordinates: route?.geometry?.coordinates,
     onUnanswered: () => {
-      if (userId && ride) void sendAlert('emergency', 'Stationary off-route check-in unanswered — please check on rider.');
+      if (userId && ride) void sendAlert('check_in_missed', 'Stopped off-route and did not answer the check-in. Please check on them.');
     },
   });
 
@@ -318,6 +320,7 @@ export default function LiveRideScreen() {
     return () => { cancelled = true; };
   }, [id, userId]);
 
+  const freeSafety = useFlag('free_safety_features');
   const entitlements = useMemo(
     () => resolveRideEntitlements({ userTier: profile?.subscription_tier ?? 'free', hasExpeditionPass: rideProAccess }),
     [profile?.subscription_tier, rideProAccess],
@@ -325,6 +328,21 @@ export default function LiveRideScreen() {
 
   async function shareFamilySpectatorLink(hours = 24) {
     if (!ride || !userId) return;
+    // Decision 3: during a ride, a rider's own family link is free.
+    if (freeSafety) {
+      const { data: token, error: linkErr } = await supabase.rpc('create_family_link', { p_ride_id: ride.id });
+      if (linkErr || typeof token !== 'string') {
+        Dialog.alert('Could not create the family link', linkErr?.message ?? 'Please try again.');
+        return;
+      }
+      setHasActiveSpectatorLink(true);
+      track('family_update_sent', { via: 'share_sheet' });
+      await Share.share({
+        title: `${ride.name} · Follow my ride`,
+        message: `Follow my ride live on RideNTrack: https://ridentrack.app/track/${token}`,
+      });
+      return;
+    }
     if (!entitlements.limits.supportsSpectatorLink) {
       setUpgradePromptVisible(true);
       return;
@@ -1456,6 +1474,10 @@ export default function LiveRideScreen() {
                 onCheckInSelf={() => { if (userId) void captainFlow.setRiderStatus(userId, 'checked_in').catch(() => {}); }}
                 onDebrief={() => setDebriefVisible(true)}
               />
+            )}
+
+            {(ride.status === 'active' || ride.status === 'planned') && (
+              <FamilyUpdatesRow rideId={id} live={active} onShareLink={() => void shareFamilySpectatorLink()} />
             )}
 
             <RiderRoster

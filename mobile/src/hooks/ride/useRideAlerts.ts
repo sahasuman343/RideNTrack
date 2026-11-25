@@ -34,7 +34,7 @@ export function useRideAlerts(params: {
     // An SOS must never be blocked by GPS: in a tunnel, a valley, or right
     // after unlocking a phone that only had foreground permission, the last
     // known position (with its age) is far better than nothing.
-    if (!hasFreshFix && type !== 'emergency') {
+    if (!hasFreshFix && type !== 'emergency' && type !== 'check_in_missed') {
       setMessage('Wait for a fresh GPS fix before sending an alert.');
       return 'failed';
     }

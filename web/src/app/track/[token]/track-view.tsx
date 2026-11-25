@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import {
-  formatLastSeenAgo,
-  classifyRiderFreshness,
+  riderPresence,
+  spectatorView,
   type LocationUpdate,
   type Ride,
+  type SpectatorStay,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import '../../ride/ride.css';
@@ -19,13 +20,17 @@ const RideMap = dynamic(() => import('@/components/ride-map'), {
 
 interface PublicSnapshot {
   expires_at: string;
-  ride: Ride;
+  kind?: 'share' | 'family';
+  subject?: { user_id: string; display_name: string } | null;
+  stays?: SpectatorStay[];
+  ride: Ride & { started_at?: string | null };
   waypoints: Array<{
     name: string;
     waypoint_type: string;
     latitude: number;
     longitude: number;
     sequence: number;
+    planned_arrival?: string | null;
   }>;
   participants: LocationUpdate[];
 }
@@ -98,10 +103,10 @@ export default function TrackView({ token }: { token: string }) {
         <Link className="wordmark" href="/">
           ride<span>n</span>track.
         </Link>
-        <h1>Link expired or revoked</h1>
+        <h1>This live link has ended</h1>
         <p>
-          This family spectator link is no longer active. Ask the ride organizer to
-          generate a fresh live tracking link.
+          Links stop working after the ride or when the rider turns sharing off. If the
+          ride is still on, ask them to send a fresh link from the app.
         </p>
         <Link href="/">Back to RideNTrack</Link>
       </main>
@@ -124,6 +129,16 @@ export default function TrackView({ token }: { token: string }) {
   }
 
   const { ride, participants, waypoints } = snapshot;
+  const view = spectatorView({
+    subject: snapshot.subject ?? null,
+    ride,
+    participants,
+    waypoints,
+    stays: snapshot.stays ?? [],
+    now,
+  });
+  const focusId = snapshot.subject?.user_id ?? null;
+  const presenceTone = view.presence?.state ?? 'unknown';
 
   return (
     <main className="ride-shell">
@@ -133,12 +148,12 @@ export default function TrackView({ token }: { token: string }) {
         </Link>
         <div className="topbar-divider" />
         <div className="topbar-ride">
-          <span className="eyebrow">FAMILY SPECTATOR VIEW · READ-ONLY</span>
+          <span className="eyebrow">{snapshot.subject ? `FOLLOWING ${view.followName.toUpperCase()}` : 'LIVE RIDE'}</span>
           <h1>{ride.name}</h1>
         </div>
         <div className={'connection-pill ' + (connectionError ? 'is-offline' : '')} role="status">
           <i />
-          {connectionError ? 'Stale · Retrying' : 'Auto-refresh 45s'}
+          {connectionError ? 'Reconnecting' : 'Updates every 45 s'}
         </div>
       </header>
 
@@ -191,20 +206,20 @@ export default function TrackView({ token }: { token: string }) {
             </div>
             <div className="rider-list">
               {participants.map(p => {
-                const freshness = classifyRiderFreshness(p.timestamp, now);
-                const lastSeen = formatLastSeenAgo(p.timestamp, now);
+                const presence = riderPresence(p.timestamp, now);
+                const lastSeen = presence.state === 'live' ? 'Live now' : presence.sentence;
                 return (
                   <button
                     key={p.user_id}
                     className={'rider-row ' + (selected === p.user_id ? 'selected' : '')}
                     onClick={() => setSelected(p.user_id)}
                   >
-                    <span className={'rider-avatar ' + (freshness !== 'live' ? 'is-stale' : '')}>
+                    <span className={'rider-avatar ' + (presence.state !== 'live' ? 'is-stale' : '')}>
                       {p.display_name.slice(0, 2).toUpperCase()}
                       <i />
                     </span>
                     <span className="rider-detail">
-                      <strong>{p.display_name}</strong>
+                      <strong>{p.display_name}{p.user_id === focusId ? ' · following' : ''}</strong>
                       <small>{lastSeen}</small>
                     </span>
                   </button>
@@ -222,17 +237,29 @@ export default function TrackView({ token }: { token: string }) {
             key={ride.id}
             ride={ride}
             riders={participants}
-            selected={selected}
+            selected={selected ?? focusId}
             fitRequest={fitRequest}
             onSelect={setSelected}
             bottomInset={0}
             now={now}
           />
+          <section className={'family-card is-' + presenceTone} aria-live="polite">
+            <span className="family-chip">
+              <i />
+              {view.rideState === 'live' ? view.presence?.label ?? 'Waiting' : view.rideState === 'ended' ? 'Finished' : 'Not started'}
+            </span>
+            <h2>{view.title}</h2>
+            <p>{view.sentence}</p>
+            {view.nextStop && (
+              <div className="family-next">
+                <small>NEXT</small>
+                <strong>{view.nextStop.name}</strong>
+                <span>{view.nextStop.distanceKm > 0 ? `${view.nextStop.distanceKm} km · ` : ''}{view.nextStop.etaText}</span>
+              </div>
+            )}
+          </section>
           <div className="map-top-controls">
-            <div className="map-label">
-              <span className="eyebrow">LIVE SPECTATOR</span>
-              <strong>{ride.name}</strong>
-            </div>
+            <span />
             <button
               className="map-action"
               onClick={() => {

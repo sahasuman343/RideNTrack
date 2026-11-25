@@ -18,6 +18,7 @@ const ALERT_KIND: Record<AlertType, AttentionKind> = {
   route_deviation: 'info',
   rider_behind: 'info',
   announcement: 'info',
+  check_in_missed: 'check_in',
 };
 
 const ALERT_TITLE: Record<AlertType, (name: string) => string> = {
@@ -29,6 +30,7 @@ const ALERT_TITLE: Record<AlertType, (name: string) => string> = {
   route_deviation: name => `${name} is off the route`,
   rider_behind: name => `${name}: rider behind`,
   announcement: () => 'Captain announcement',
+  check_in_missed: name => `${name} did not answer a check-in`,
 };
 
 function minutesBetween(laterIso: string, earlierIso: string): number {

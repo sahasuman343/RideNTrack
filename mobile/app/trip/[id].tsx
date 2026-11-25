@@ -79,6 +79,8 @@ import type { Trip, Waypoint, Day, Regroup, RiderFuelSpec, Rider, Stay } from '.
 import { makeTripStyles as makeStyles } from '../../src/components/trip/tripStyles';
 import { TripLiveRadar } from '../../src/components/trip/TripLiveRadar';
 import { PackReadinessList, RideReadyCard } from '../../src/components/trip/RideReadyCard';
+import { useFamilyContacts } from '../../src/hooks/useFamilyContacts';
+import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
 import { useRideReadiness } from '../../src/hooks/useRideReadiness';
 
 export default function TripWorkspaceScreen() {
@@ -332,12 +334,15 @@ export default function TripWorkspaceScreen() {
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   // R5: one Ride ready card replaces scattered setup prompts.
+  const family = useFamilyContacts();
+  const [familySheetVisible, setFamilySheetVisible] = useState(false);
   const readinessHandlers = useMemo(() => ({
     edit_emergency_contact: () => router.push('/(tabs)/profile'),
     edit_phone: () => router.push('/(tabs)/profile'),
     open_bike_picker: () => router.push('/(tabs)/profile'),
+    add_family_contact: () => setFamilySheetVisible(true),
   }), [router]);
-  const readiness = useRideReadiness(id, {}, readinessHandlers);
+  const readiness = useRideReadiness(id, { familyContactsCount: family.loaded ? family.contacts.length : null }, readinessHandlers);
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -1540,6 +1545,15 @@ export default function TripWorkspaceScreen() {
             {isAdmin && trip.status === 'planned' && roster.length > 1 && (
               <PackReadinessList rideId={trip.id} roster={roster} />
             )}
+            <FamilyContactsSheet
+              visible={familySheetVisible}
+              onClose={() => setFamilySheetVisible(false)}
+              bottomInset={insets.bottom}
+              contacts={family.contacts}
+              onSave={family.save}
+              onRemove={family.remove}
+              onPause={family.setPaused}
+            />
 
             {/* Participants & Formation Roster Section */}
             <Card style={styles.cardSection}>

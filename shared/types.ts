@@ -230,7 +230,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement' | 'check_in_missed';
   message?: string;
   /** Null when an SOS was sent before the phone ever got a GPS fix. */
   lat: number | null;
@@ -300,6 +300,7 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   rider_behind: '🏍️ Rider Behind',
   regroup: '📢 Regroup Now',
   announcement: '📢 Captain Announcement',
+  check_in_missed: '⏱️ Missed Check-in',
 };
 
 export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
@@ -428,3 +429,5 @@ export * from './flags';
 export * from './readiness';
 export * from './bikeModels';
 export * from './captainFlow';
+export * from './family';
+export * from './spectator';

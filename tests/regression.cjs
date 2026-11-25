@@ -1767,7 +1767,7 @@ test('live ride broadcast announcement strictly validates GPS fix and sendAlert 
 
   assert.match(rideSource, /Promise<'sent' \| 'queued' \| 'failed'>/);
   // Routine alerts need a fresh fix; an SOS is never blocked by GPS.
-  assert.match(rideSource, /!hasFreshFix && type !== 'emergency'\)\s*\{[^}]*return 'failed'/);
+  assert.match(rideSource, /!hasFreshFix && type !== 'emergency'[^)]*\)\s*\{[^}]*return 'failed'/);
   assert.match(rideSource, /location_recorded_at: fix \? fix\.timestamp : null/);
   assert.match(rideSource, /if \(outcome === 'sent'\) \{\s*setAnnouncementModal\(false\);\s*setCustomAnnouncement\(''\);/);
 });
@@ -2502,7 +2502,11 @@ test('Phase 6 spectator links migration enforces Pro gating and zero-PII public 
 
   const trackPage = fs.readFileSync(path.resolve('web/src/app/track/[token]/track-view.tsx'), 'utf8');
   assert.match(trackPage, /get_public_ride_snapshot/);
-  assert.match(trackPage, /Link expired or revoked/);
+  assert.match(trackPage, /This live link has ended/);
+  // F2 replaces the snapshot; it must stay free of personal data too.
+  const family = fs.readFileSync(path.resolve('supabase/migrations/20261201000700_family_updates.sql'), 'utf8');
+  const snapshot = family.slice(family.indexOf('FUNCTION public.get_public_ride_snapshot'));
+  assert.doesNotMatch(snapshot.slice(0, snapshot.indexOf('$$;')), /emergency_contact|blood_group|ride_messages|ride_code|phone/i);
 });
 
 test('a rider stopped on the planned road between sparse stops is not treated as off-route', () => {
