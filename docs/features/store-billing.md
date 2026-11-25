@@ -29,6 +29,15 @@ Entitlement id: `pro_tourer`.
 Cancellation keeps Pro until the paid period ends; expiration and refunds drop
 the rider to free. A refunded pass is marked `refunded`.
 
+## Prices per country (F19)
+
+The app no longer shows fixed rupee prices. `priceText()` in `shared/premium.ts`
+shows the store's localised price string (from RevenueCat, cached on the phone
+by `useStorePrices`). Before the store answers, riders in India see the
+reference price from `PAYMENT_CONFIG`; riders elsewhere see no price rather
+than rupees. Set the price for each country in Play Console and App Store
+Connect (price tiers / local prices), not in code.
+
 ## What Suman needs to do
 
 - Create the products above in Play Console and App Store Connect.

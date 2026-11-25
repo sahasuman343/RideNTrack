@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  canCreateMoreTrips, PLAN_LIMITS, PAYMENT_CONFIG,
+  canCreateMoreTrips, PLAN_LIMITS, priceText,
   fetchDrivingRoute, routeCoordinates,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
@@ -26,6 +26,7 @@ import { useRideTheme, RidePalette, radius, spacing, typography } from '../../sr
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
 import { Icon, Dialog } from '../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../src/icons';
+import { useStorePrices } from '../../src/hooks/useStorePrices';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
 type WaypointKind = 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'repair';
@@ -319,6 +320,8 @@ export default function CreateRideScreen() {
   const tier = profile?.subscription_tier ?? 'free';
   const routePointLimit = PLAN_LIMITS[tier].maxWaypointsPerTrip;
   const router = useRouter();
+  const storePrices = useStorePrices();
+  const proMonthly = priceText('pro_monthly', storePrices.prices, storePrices.region, '/month');
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -577,7 +580,7 @@ export default function CreateRideScreen() {
         Alert.alert(
           tier === 'free' ? 'RideNTrack Free Plan Limit' : 'RideNTrack Plan Limit',
           tier === 'free'
-            ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for more trips and route points.`
+            ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer${proMonthly ? ` (${proMonthly})` : ''} for more trips and route points.`
             : `Your Pro Tourer plan has reached its ${PLAN_LIMITS.pro_tourer.maxActiveTrips}-trip active limit. Complete or archive an existing trip first.`,
           [
             { text: 'Manage Trips', onPress: () => router.push('/(tabs)') },

@@ -97,6 +97,11 @@ export interface PaymentArchitectureConfig {
   merchantName: string;
 }
 
+/**
+ * Reference prices for India only. Since F19 the stores set the real price per
+ * country and the app shows the store's own localised string; these numbers
+ * are a fallback for Indian riders before the store answers.
+ */
 export const PAYMENT_CONFIG: PaymentArchitectureConfig = {
   provider: 'razorpay',
   currency: 'INR',
@@ -113,3 +118,41 @@ export function canCreateMoreTrips(currentActiveCount: number, tier: Subscriptio
 export function canAddMoreWaypoints(currentWaypointsCount: number, tier: SubscriptionTier = 'free'): boolean {
   return currentWaypointsCount < PLAN_LIMITS[tier].maxWaypointsPerTrip;
 }
+
+// ----- F19 localised pricing ------------------------------------------------
+
+export type PricedProduct = 'pro_monthly' | 'pro_annual' | 'expedition_pass' | 'club_monthly' | 'club_annual';
+
+const REFERENCE_INR: Partial<Record<PricedProduct, number>> = {
+  pro_monthly: PAYMENT_CONFIG.monthlyPlanPriceInr,
+  pro_annual: PAYMENT_CONFIG.annualPlanPriceInr,
+  expedition_pass: PAYMENT_CONFIG.expeditionPassPriceInr,
+};
+
+/**
+ * The price to show: the store's localised string when it has answered;
+ * otherwise the Indian reference price, but only for riders in India (or
+ * when the region is unknown). Elsewhere null: never show rupees to a rider
+ * the store will charge in another currency.
+ */
+export function priceText(
+  product: PricedProduct,
+  storePrices: Partial<Record<PricedProduct, string>> | null | undefined,
+  region: string | null | undefined,
+  suffix = '',
+): string | null {
+  const store = storePrices?.[product];
+  if (store) return `${store}${suffix}`;
+  const inIndia = !region || region.toUpperCase() === 'IN';
+  const ref = REFERENCE_INR[product];
+  return inIndia && ref != null ? `₹${ref}${suffix}` : null;
+}
+
+/** One sentence for places that mention Pro in passing; avoids a currency when it is unknown. */
+export function proPriceSentence(storePrices: Partial<Record<PricedProduct, string>> | null | undefined, region: string | null | undefined): string {
+  const monthly = priceText('pro_monthly', storePrices, region, '/month');
+  const pass = priceText('expedition_pass', storePrices, region, ' a trip');
+  if (monthly && pass) return `Pro Tourer ${monthly}, or an Expedition Pass for ${pass}.`;
+  return 'Pro Tourer or an Expedition Pass for one trip; prices are shown in your store.';
+}
+

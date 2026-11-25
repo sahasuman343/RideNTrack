@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { PAYMENT_CONFIG } from '@ridentrack/shared';
+import { priceText, proPriceSentence } from '@ridentrack/shared';
 import { useRideTheme, radius, spacing, typography } from '../../theme';
 import { Icon } from './Icon';
 import { useFlag } from '../../hooks/useFeatureFlags';
@@ -12,6 +12,7 @@ import {
   purchaseMessage,
   type BillingProduct,
 } from '../../services/billing';
+import { useStorePrices } from '../../hooks/useStorePrices';
 
 interface Props {
   visible: boolean;
@@ -34,7 +35,9 @@ export function UpgradePromptModal({
   const storeBilling = useFlag('store_billing');
   const { user, reloadProfile } = useAuth();
   const [provider, setProvider] = useState(getBillingProvider);
-  const [prices, setPrices] = useState<Partial<Record<BillingProduct, string>>>({});
+  const store = useStorePrices();
+  const [fresh, setPrices] = useState<Partial<Record<BillingProduct, string>>>({});
+  const prices = { ...store.prices, ...fresh };
   const [busy, setBusy] = useState<BillingProduct | 'restore' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const canBuy = storeBilling && !!provider && !!user;
@@ -69,8 +72,8 @@ export function UpgradePromptModal({
     }
   };
 
-  const priceLabel = (product: BillingProduct, fallbackInr: number, suffix: string) =>
-    `${prices[product] ?? `₹${fallbackInr}`}${suffix}`;
+  // F19: the store's price for the rider's country; rupees only as an Indian fallback.
+  const priceLabel = (product: BillingProduct, suffix: string) => priceText(product, prices, store.region, suffix);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -99,19 +102,19 @@ export function UpgradePromptModal({
                 onPress={() => void buy('pro_monthly')}
               >
                 {busy === 'pro_monthly' ? <ActivityIndicator color={theme.onAccent} /> : (
-                  <Text style={s.primaryBtnText}>Go Pro · {priceLabel('pro_monthly', PAYMENT_CONFIG.monthlyPlanPriceInr, '/mo')}</Text>
+                  <Text style={s.primaryBtnText}>{priceLabel('pro_monthly', '/mo') ? `Go Pro · ${priceLabel('pro_monthly', '/mo')}` : 'Go Pro'}</Text>
                 )}
               </TouchableOpacity>
               <View style={s.secondaryRow}>
                 <TouchableOpacity style={s.secondaryBtn} accessibilityRole="button" disabled={!!busy} onPress={() => void buy('pro_annual')}>
                   {busy === 'pro_annual' ? <ActivityIndicator color={theme.text} /> : (
-                    <Text style={s.secondaryBtnText}>{priceLabel('pro_annual', PAYMENT_CONFIG.annualPlanPriceInr, '/yr')}</Text>
+                    <Text style={s.secondaryBtnText}>{priceLabel('pro_annual', '/yr') ?? 'Yearly'}</Text>
                   )}
                 </TouchableOpacity>
                 {rideId ? (
                   <TouchableOpacity style={s.secondaryBtn} accessibilityRole="button" disabled={!!busy} onPress={() => void buy('expedition_pass')}>
                     {busy === 'expedition_pass' ? <ActivityIndicator color={theme.text} /> : (
-                      <Text style={s.secondaryBtnText}>This trip · {priceLabel('expedition_pass', PAYMENT_CONFIG.expeditionPassPriceInr, '')}</Text>
+                      <Text style={s.secondaryBtnText}>{priceLabel('expedition_pass', '') ? `This trip · ${priceLabel('expedition_pass', '')}` : 'This trip only'}</Text>
                     )}
                   </TouchableOpacity>
                 ) : null}
@@ -129,7 +132,7 @@ export function UpgradePromptModal({
           ) : (
             <>
               <Text style={s.priceNote}>
-                Pro Tourer ₹{PAYMENT_CONFIG.monthlyPlanPriceInr}/mo or Expedition Pass ₹{PAYMENT_CONFIG.expeditionPassPriceInr}/trip.
+                {proPriceSentence(prices, store.region)}
                 {storeBilling ? '' : ' In-app purchases open soon.'}
               </Text>
               <TouchableOpacity style={s.primaryBtn} onPress={onClose}>

@@ -62,3 +62,13 @@ test('money and registration words', () => {
   assert.equal(shared.riderRegistrationState({ ...base, my_status: 'pending' }).action, 'Finish paying ₹1,500');
   assert.equal(shared.captainRegistrationLine({ ...base, collected_paise: 2850000 }), '19 of 20 paid · ₹28,500 collected');
 });
+
+test('F19: store prices win; rupees only as an Indian fallback', () => {
+  assert.equal(shared.priceText('pro_monthly', { pro_monthly: '$2.99' }, 'US', '/mo'), '$2.99/mo');
+  assert.equal(shared.priceText('pro_monthly', {}, 'IN', '/mo'), '₹199/mo');
+  assert.equal(shared.priceText('pro_monthly', {}, null, '/mo'), '₹199/mo');
+  assert.equal(shared.priceText('pro_monthly', {}, 'GB', '/mo'), null);
+  assert.equal(shared.priceText('club_monthly', {}, 'IN'), null);
+  assert.match(shared.proPriceSentence({}, 'DE'), /prices are shown in your store/);
+  assert.equal(shared.proPriceSentence({ pro_monthly: '€2.49', expedition_pass: '€1.29' }, 'DE'), 'Pro Tourer €2.49/month, or an Expedition Pass for €1.29 a trip.');
+});
