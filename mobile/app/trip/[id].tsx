@@ -47,6 +47,9 @@ import {
   ATTENDANCE_STATUS_LABELS,
   estimateBattery,
 } from '@ridentrack/shared';
+import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { useTouringKnowledge } from '../../src/hooks/useTouringKnowledge';
+import { TouringKnowledgeCard } from '../../src/components/trip/TouringKnowledgeCard';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
@@ -334,6 +337,16 @@ export default function TripWorkspaceScreen() {
     }
     return base;
   }, [trip?.estimated_distance_meters, trip?.start_date, trip?.end_date, trip?.estimated_duration_seconds, trip?.trip_type, stages, days, fuelPlan, weatherPoints, packFuelPlan]);
+
+  // F10: curated fuel stops and advisories along this trip (cached for offline).
+  const tripOnline = useOfflineSync().isOnline;
+  const touring = useTouringKnowledge({
+    rideId: trip?.id,
+    routeCoords: (trip as { route_geometry?: { geometry?: { coordinates?: number[][] } } } | null)?.route_geometry?.geometry?.coordinates,
+    startDate: trip?.start_date,
+    packSafeRangeKm: packFuelPlan.limitingRider?.safeRangeKm ?? null,
+    online: tripOnline,
+  });
 
   const isAdmin = !!user && trip?.admin_id === user.id;
   // R5: one Ride ready card replaces scattered setup prompts.
@@ -1572,6 +1585,12 @@ export default function TripWorkspaceScreen() {
             {(trip.status === 'planned' || isTripOngoing) && (
               <RideReadyCard items={readiness.items} summary={readiness.summary} onFix={item => void readiness.fix(item)} footnote={batteryFootnote} />
             )}
+            <TouringKnowledgeCard
+              route={touring.route}
+              fuel={touring.fuel}
+              advisories={touring.advisories}
+              packSafeRangeKm={packFuelPlan.limitingRider?.safeRangeKm ?? null}
+            />
             {isAdmin && trip.status === 'planned' && roster.length > 1 && (
               <PackReadinessList rideId={trip.id} roster={roster} />
             )}

@@ -68,6 +68,8 @@ import { useSosWorkflow } from '../../src/hooks/ride/useSosWorkflow';
 import { useCrashDetection } from '../../src/hooks/ride/useCrashDetection';
 import { useSafetyWatch } from '../../src/hooks/ride/useSafetyWatch';
 import { useRideChat } from '../../src/hooks/ride/useRideChat';
+import { useSpectatorLinks } from '../../src/hooks/ride/useSpectatorLinks';
+import { useLastFuelWarning } from '../../src/hooks/ride/useLastFuelWarning';
 import { postRideStartCard, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { useThrottledValue } from '../../src/hooks/ride/useThrottledValue';
 import { enqueueAlert, newQueueId } from '../../src/lib/offlineQueue';
@@ -243,8 +245,6 @@ export default function LiveRideScreen() {
   const [breakdownDirectoryVisible, setBreakdownDirectoryVisible] = useState(false);
   const [chatVisible, setChatVisible] = useState(false);
   const [upgradePromptVisible, setUpgradePromptVisible] = useState(false);
-  const [hasActiveSpectatorLink, setHasActiveSpectatorLink] = useState(false);
-  const [rideProAccess, setRideProAccess] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [dismissedAttention, setDismissedAttention] = useState<string[]>([]);
   const [statsModalVisible, setStatsModalVisible] = useState(false);
@@ -359,86 +359,10 @@ export default function LiveRideScreen() {
     },
   });
 
-  useEffect(() => {
-    if (!id || !userId) return;
-    let cancelled = false;
-    void supabase.rpc('ride_has_pro_access', { p_ride_id: id }).then(({ data }) => {
-      if (!cancelled && typeof data === 'boolean') setRideProAccess(data);
-    });
-    void supabase
-      .from('ride_share_links')
-      .select('id')
-      .eq('ride_id', id)
-      .is('revoked_at', null)
-      .gt('expires_at', new Date().toISOString())
-      .limit(1)
-      .then(({ data }) => {
-        if (!cancelled) setHasActiveSpectatorLink(Boolean(data && data.length > 0));
-      });
-    return () => { cancelled = true; };
-  }, [id, userId]);
-
-  const freeSafety = useFlag('free_safety_features');
-  const entitlements = useMemo(
-    () => resolveRideEntitlements({ userTier: profile?.subscription_tier ?? 'free', hasExpeditionPass: rideProAccess }),
-    [profile?.subscription_tier, rideProAccess],
-  );
-
-  async function shareFamilySpectatorLink(hours = 24) {
-    if (!ride || !userId) return;
-    // Decision 3: during a ride, a rider's own family link is free.
-    if (freeSafety) {
-      const { data: token, error: linkErr } = await supabase.rpc('create_family_link', { p_ride_id: ride.id });
-      if (linkErr || typeof token !== 'string') {
-        Dialog.alert('Could not create the family link', linkErr?.message ?? 'Please try again.');
-        return;
-      }
-      setHasActiveSpectatorLink(true);
-      track('family_update_sent', { via: 'share_sheet' });
-      await Share.share({
-        title: `${ride.name} · Follow my ride`,
-        message: `Follow my ride live on RideNTrack: https://ridentrack.app/track/${token}`,
-      });
-      return;
-    }
-    if (!entitlements.limits.supportsSpectatorLink) {
-      setUpgradePromptVisible(true);
-      return;
-    }
-    try {
-      // The database generates the token (crypto-random); Math.random() on the
-      // phone is guessable and this link reveals live rider positions.
-      const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-      const { data: link, error: linkErr } = await supabase
-        .from('ride_share_links')
-        .insert({ ride_id: ride.id, created_by: userId, expires_at: expiresAt })
-        .select('token')
-        .single();
-      if (linkErr) throw linkErr;
-      const token = (link as { token: string }).token;
-      setHasActiveSpectatorLink(true);
-      await Share.share({
-        title: `${ride.name} · Live Family Link`,
-        message: `Track our ride live on RideNTrack: https://ridentrack.app/track/${token}`,
-      });
-    } catch (e: unknown) {
-      Dialog.alert('Could not create spectator link', e instanceof Error ? e.message : 'Pro Tourer or Expedition Pass required.');
-    }
-  }
-
-  async function revokeFamilySpectatorLink() {
-    if (!ride) return;
-    const { error: revErr } = await supabase
-      .from('ride_share_links')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('ride_id', ride.id)
-      .is('revoked_at', null);
-    if (!revErr) {
-      setHasActiveSpectatorLink(false);
-      setMessage('All active family spectator links revoked.');
-    }
-    else Dialog.alert('Could not turn off the family links', revErr.message);
-  }
+  // Family spectator links (free during a ride with decision 3, otherwise Pro).
+  const { hasActiveSpectatorLink, shareFamilySpectatorLink, revokeFamilySpectatorLink } = useSpectatorLinks({
+    ride, rideId: id, userId, subscriptionTier: profile?.subscription_tier, setMessage, onNeedsUpgrade: () => setUpgradePromptVisible(true),
+  });
   const [navProvider, setNavProvider] = useState<ExternalNavProvider>(getDefaultNavProvider);
 
   useEffect(() => {
@@ -1045,10 +969,12 @@ export default function LiveRideScreen() {
   }, [ride?.name, ride?.origin, ride?.start_date, ride?.estimated_distance_meters, captainFlow.riders, regroupPoints]);
 
   const nowIso = new Date(now).toISOString();
+  const lastFuel = useLastFuelWarning({ ride, route, profile, position, online: sync.isOnline, nowIso });
   const deviationLimit = ride?.route_deviation_threshold_meters || 500;
   const attentionItems = useMemo<AttentionItem[]>(() => {
     const items: AttentionItem[] = attentionFromAlerts(alerts, { myUserId: userId, now, acknowledgedIds: acknowledgedAlertIds });
     if (crash.secondsLeft != null) items.push(crashCountdownAttention(crash.secondsLeft, nowIso));
+    if (lastFuel.item) items.push(lastFuel.item);
     if (stationaryCountdown !== null) {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
@@ -1068,7 +994,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, crash.secondsLeft, lastFuel.item, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1091,6 +1017,14 @@ export default function LiveRideScreen() {
         return;
       case 'crash_help':
         crash.requestHelp();
+        return;
+      case 'fuel_directions': {
+        const station = lastFuel.stationFor(item.id);
+        if (station) void Linking.openURL(`https://maps.google.com/?q=${station.lat},${station.lng}`);
+        return;
+      }
+      case 'dismiss_fuel':
+        dismissAttention(item);
         return;
       case 'ok':
         confirmStationaryOk();
