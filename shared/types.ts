@@ -50,6 +50,8 @@ export interface Ride {
   start_date?: string | null;
   end_date?: string | null;
   estimated_distance_meters?: number | null;
+  /** F15: the club this ride belongs to. */
+  club_id?: string | null;
   estimated_duration_seconds?: number | null;
   route_deviation_threshold_meters?: number;
   rider_behind_threshold_meters?: number;
@@ -458,3 +460,4 @@ export * from './i18n';
 export * from './performance';
 export * from './crashTuning';
 export * from './referrals';
+export * from './clubs';

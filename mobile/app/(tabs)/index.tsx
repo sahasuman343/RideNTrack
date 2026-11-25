@@ -24,6 +24,7 @@ import {
   FallbackTripCover,
   Icon,
 } from '../../src/components/ui';
+import { ClubsStrip } from '../../src/components/club/ClubsStrip';
 
 export default function HomeScreen() {
   const { user, profile } = useAuth();
@@ -326,6 +327,7 @@ function HomeContent({ userId, profile }: { userId?: string; profile: ReturnType
 
           </View>
         )}
+        <ClubsStrip />
       </ScrollView>
     </View>
   );

@@ -10,6 +10,8 @@ export type Trip = {
   origin_coords?: [number, number] | null;
   destination_coords?: [number, number] | null;
   status: string;
+  /** F15 */
+  club_id?: string | null;
   trip_type?: string;
   start_date?: string | null;
   end_date?: string | null;

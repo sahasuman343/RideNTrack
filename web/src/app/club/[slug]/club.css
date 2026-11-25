@@ -1,0 +1,43 @@
+/* F15 public club page. Paper-and-ink, warm accent from the route line. */
+.club-page{
+  --c-bg:#f6f4ef; --c-ink:#1d2a2c; --c-muted:#62706d; --c-line:#e2ddd2; --c-card:#fffdf8; --c-accent:#de7136; --c-accent-soft:#f6e3d6; --c-ok:#2f6e53;
+  min-height:100vh; background:var(--c-bg); color:var(--c-ink); padding:0 20px 56px;
+  font-family:var(--font-geist-sans),system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  .club-page{--c-bg:#121716; --c-ink:#ecebe6; --c-muted:#9aa5a1; --c-line:#26302e; --c-card:#182020; --c-accent:#ff8a3d; --c-accent-soft:#ff8a3d24; --c-ok:#6cc69a}
+}
+.club-top{max-width:760px; margin:0 auto; padding:22px 0}
+.club-wordmark{font-weight:800; letter-spacing:-.3px; color:var(--c-ink); text-decoration:none}
+.club-hero{max-width:760px; margin:24px auto 0}
+.club-eyebrow{font-size:12px; letter-spacing:1.4px; text-transform:uppercase; color:var(--c-accent); font-weight:700}
+.club-hero h1{font-size:clamp(34px,7vw,56px); line-height:1.04; letter-spacing:-1.6px; font-weight:800; margin:10px 0 0; display:flex; flex-wrap:wrap; align-items:center; gap:12px}
+.club-verified{font-size:12px; letter-spacing:.4px; font-weight:700; color:var(--c-ok); border:1px solid currentColor; border-radius:6px; padding:3px 8px}
+.club-about{font-size:17px; line-height:1.6; color:var(--c-muted); margin-top:16px; max-width:58ch}
+.club-stats{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:32px; border-top:1px solid var(--c-line); border-bottom:1px solid var(--c-line)}
+.club-stats div{padding:16px 0}
+.club-stats div+div{border-left:1px solid var(--c-line); padding-left:18px}
+.club-stats dt{font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--c-muted)}
+.club-stats dd{font-size:28px; font-weight:750; letter-spacing:-.8px; margin-top:4px; font-variant-numeric:tabular-nums}
+.club-section{max-width:760px; margin:44px auto 0}
+.club-section h2,.club-join h2{font-size:20px; font-weight:750; letter-spacing:-.4px}
+.club-muted{color:var(--c-muted); margin-top:10px; line-height:1.6}
+.club-rides{list-style:none; padding:0; margin:14px 0 0}
+.club-rides li{display:flex; gap:16px; align-items:center; padding:14px 0; border-bottom:1px dashed var(--c-line)}
+.club-date{width:62px; flex:none; text-align:center; background:var(--c-accent-soft); border-radius:10px; padding:8px 0; display:flex; flex-direction:column}
+.club-date b{font-size:22px; line-height:1}
+.club-date small{font-size:11px; color:var(--c-muted); margin-top:3px}
+.club-ride{display:flex; flex-direction:column; gap:3px; min-width:0}
+.club-ride strong{font-size:16px}
+.club-ride small{font-size:13px; color:var(--c-muted); overflow:hidden; text-overflow:ellipsis}
+.club-join{max-width:760px; margin:48px auto 0; padding:24px; border-radius:16px; background:var(--c-card); border:1px solid var(--c-line); display:flex; gap:20px; align-items:center; justify-content:space-between; flex-wrap:wrap}
+.club-join p{color:var(--c-muted); margin-top:6px; line-height:1.55; max-width:46ch}
+.club-cta{background:var(--c-accent); color:#fff; font-weight:700; text-decoration:none; padding:13px 20px; border-radius:10px; white-space:nowrap}
+.club-cta:hover{filter:brightness(1.06)}
+.club-foot{max-width:760px; margin:40px auto 0; font-size:13px; color:var(--c-muted)}
+@media (max-width:560px){
+  .club-stats dd{font-size:22px}
+  .club-stats div+div{padding-left:12px}
+  .club-join{padding:20px}
+  .club-cta{width:100%; text-align:center}
+}

@@ -61,6 +61,7 @@ function AppNavigator() {
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="ride" options={{ headerShown: false }} />
+          <Stack.Screen name="club" options={{ headerShown: false }} />
         </Stack>
       </OfflineSyncProvider>
       </SignedInServices>
