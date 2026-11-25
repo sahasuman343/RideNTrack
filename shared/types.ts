@@ -432,3 +432,4 @@ export * from './captainFlow';
 export * from './family';
 export * from './spectator';
 export * from './battery';
+export * from './corridor';

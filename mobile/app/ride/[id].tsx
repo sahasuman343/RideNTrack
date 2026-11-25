@@ -100,6 +100,7 @@ import { CaptainStepCard } from '../../src/components/ride/CaptainStepCard';
 import { FamilyUpdatesRow } from '../../src/components/ride/FamilyUpdatesRow';
 import { useFlag } from '../../src/hooks/useFeatureFlags';
 import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
+import { getCachedTrip, saveCachedRoute } from '../../src/lib/tripCache';
 import { SosSheet } from '../../src/components/ride/SosSheet';
 import {
   AlertPickerSheet,
@@ -636,6 +637,23 @@ export default function LiveRideScreen() {
     }
   }, [mapReady, follow, position, cameraPadding]);
 
+  // F5 offline-first: with no signal, the ride, route and stops come from the
+  // trip cache saved when the trip was opened, so the map still works.
+  useEffect(() => {
+    if (!id || !userId) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void getCachedTrip(id, userId).then(cached => {
+        if (cancelled || !cached) return;
+        setRide(current => current ?? (cached.trip as Ride));
+        setUpcomingWaypoints(current => current.length ? current : cached.waypoints
+          .filter(w => w.waypoint_type !== 'origin')
+          .map(w => ({ name: w.name, latitude: w.latitude, longitude: w.longitude, provider_place_id: w.provider_place_id ?? null, sequence: w.sequence })));
+      });
+    }, sync.isOnline ? 4000 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [id, userId, sync.isOnline, setRide]);
+
   useEffect(() => {
     let cancelled = false;
     setUpcomingWaypoints([]);
@@ -772,6 +790,7 @@ export default function LiveRideScreen() {
       const geo: NonNullable<Ride['route_geometry']> = { type: 'Feature', geometry: data.routes[0].geometry, properties: {} };
       if (controller.signal.aborted) return;
       setRoute(geo);
+      void saveCachedRoute(id, userId, geo);
       if (admin) {
         const { error } = await supabase.from('rides').update({ route_geometry: geo }).eq('id', id);
         if (error) throw error;
@@ -1157,6 +1176,7 @@ export default function LiveRideScreen() {
   return (
     <View style={s.screen}>
       <RideMap
+        offline={!sync.isOnline}
         s={s}
         theme={theme}
         mapRetry={mapRetry}

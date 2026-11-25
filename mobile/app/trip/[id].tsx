@@ -82,6 +82,7 @@ import { TripLiveRadar } from '../../src/components/trip/TripLiveRadar';
 import { PackReadinessList, RideReadyCard } from '../../src/components/trip/RideReadyCard';
 import { useFamilyContacts } from '../../src/hooks/useFamilyContacts';
 import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
+import { useOfflineMaps } from '../../src/hooks/useOfflineMaps';
 import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
 import { useRideReadiness } from '../../src/hooks/useRideReadiness';
 
@@ -351,8 +352,16 @@ export default function TripWorkspaceScreen() {
     edit_phone: () => router.push('/(tabs)/profile'),
     open_bike_picker: () => router.push('/(tabs)/profile'),
     add_family_contact: () => setFamilySheetVisible(true),
+    download_offline_maps: () => void offlineMapsRef.current(),
   }), [router]);
-  const readiness = useRideReadiness(id, { familyContactsCount: family.loaded ? family.contacts.length : null }, readinessHandlers);
+  const offline = useOfflineMaps(trip);
+  const offlineMapsRef = useRef(offline.download);
+  offlineMapsRef.current = offline.download;
+  const readiness = useRideReadiness(id, {
+    familyContactsCount: family.loaded ? family.contacts.length : null,
+    offlineMaps: offline.state,
+    offlineMapsDetail: offline.error ?? offline.badge?.detail ?? null,
+  }, readinessHandlers);
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -1460,6 +1469,17 @@ export default function TripWorkspaceScreen() {
           <View style={styles.heroOverlayContent}>
             <View style={styles.heroTopRow}>
               <StatusBadge status={trip.status} />
+              {offline.badge && trip.status !== 'completed' ? (
+                <TouchableOpacity
+                  style={[styles.heroActionBtn, { marginLeft: 'auto', marginRight: 8, backgroundColor: offline.badge.tone === 'ok' ? theme.green : 'rgba(0,0,0,0.55)' }]}
+                  onPress={() => { if (offline.state !== 'ready' && offline.state !== 'downloading') void offline.download(); }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${offline.badge.label}. ${offline.badge.detail}`}
+                >
+                  <Icon name={offline.badge.tone === 'ok' ? 'cloud-done-outline' : 'cloud-download-outline'} size="xs" color={theme.onAccent} />
+                  <Text style={styles.heroActionBtnText}>{offline.badge.label}</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={styles.heroActionBtn}
                 onPress={() => void exportGpxFile()}

@@ -111,6 +111,8 @@ const RidersLayer = memo(function RidersLayer({ features, theme }: { features: R
 });
 
 export interface RideMapProps {
+  /** F5: offline packs are saved in outdoors-v12, so use it with no signal. */
+  offline?: boolean;
   s: RideStyles;
   theme: RidePalette;
   mapRetry: number;
@@ -142,7 +144,7 @@ export const RideMap = memo(function RideMap(props: RideMapProps) {
     <Mapbox.MapView
       key={mapRetry}
       style={StyleSheet.absoluteFill}
-      styleURL={theme.scheme === 'dark' ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
+      styleURL={theme.scheme === 'dark' && !props.offline ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/outdoors-v12'}
       onDidFinishLoadingMap={props.onReady}
       onMapLoadingError={props.onError}
       onCameraChanged={state => {
