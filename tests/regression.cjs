@@ -427,7 +427,8 @@ test('Android background permission and native GPS service start are separate us
     '../lib/offlineQueue':{ pruneQueue: async () => {},enqueueLocation:async()=>{}},
     './syncQueue':{syncQueue:async()=>{}},
   })('mobile/src/services/backgroundLocation.ts');
-  const params={rideId:'ride',userId:'u',displayName:'Rider'};
+  // F4: the captain's role selects the precise 5 s / 15 m profile.
+  const params={rideId:'ride',userId:'u',displayName:'Rider',role:'captain'};
   const foreground = await service.startBackgroundLocationUpdates(params);
   assert.equal(foreground.mode,'foreground');
   assert.equal(foregroundWatch,1);
@@ -1516,14 +1517,15 @@ test('trip workspace integrates trip sharing, pack capacity, ride rules, and rid
   assert.match(tripSource, /Group ride rules/);
 });
 
-test('live ride screen integrates complete live ride statistics and touring battery saver', () => {
+test('live ride screen integrates live ride statistics and the role-based battery estimate', () => {
   const rideSource = readRideScreenSource();
   assert.match(rideSource, /calculateLiveRideStats/);
   assert.match(rideSource, /liveStats/);
   assert.match(rideSource, /statsModalVisible/);
-  assert.match(rideSource, /batterySaver/);
+  assert.match(rideSource, /estimateBattery/);
+  assert.doesNotMatch(rideSource, /onToggleBatterySaver/);
   assert.match(rideSource, /Ride stats/);
-  assert.match(rideSource, /TOURING BATTERY SAVER/);
+  assert.doesNotMatch(rideSource, /TOURING BATTERY SAVER/, 'F4: no battery setting to choose');
   assert.match(rideSource, /GPS signal restored/);
 });
 
@@ -2245,15 +2247,15 @@ test('reopening the ride screen reattaches to the running background service ins
   const { service, calls } = trackingFixture({ nativeStarted: true, savedContext: saved });
   assert.deepEqual(await service.restoreActiveTracking(), { rideId: 'ride', userId: 'u' }, 'restart surfaces the running ride');
 
-  const result = await service.startBackgroundLocationUpdates({ ...saved });
+  const result = await service.startBackgroundLocationUpdates({ ...saved, role: 'captain' });
   assert.equal(result.mode, 'background');
   assert.equal(calls.watch, 0, 'no duplicate foreground watcher');
   assert.equal(calls.started.length, 1, 'options unknown after restart, so the service restarts once with current settings');
 
-  const saver = await service.startBackgroundLocationUpdates({ ...saved, batterySaver: true });
+  const saver = await service.startBackgroundLocationUpdates({ ...saved, role: 'member' });
   assert.equal(saver.mode, 'background');
-  assert.equal(calls.started.at(-1).timeInterval, 15000, 'battery saver applies without dropping background mode');
-  const again = await service.startBackgroundLocationUpdates({ ...saved, batterySaver: true });
+  assert.equal(calls.started.at(-1).timeInterval, 15000, 'a middle-of-pack role uses the balanced profile without dropping background mode');
+  const again = await service.startBackgroundLocationUpdates({ ...saved, role: 'member' });
   assert.equal(again.mode, 'background');
   assert.equal(calls.started.length, 2, 'unchanged options do not restart the service');
 

@@ -49,6 +49,11 @@ import {
   routeDeviationAttention,
   noticeAttention,
   selectAttention,
+  lowBatteryAttention,
+  estimateBattery,
+  hoursLeft,
+  profileForRole,
+  LOW_BATTERY_PERCENT,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -94,6 +99,7 @@ import { useCaptainFlow } from '../../src/hooks/ride/useCaptainFlow';
 import { CaptainStepCard } from '../../src/components/ride/CaptainStepCard';
 import { FamilyUpdatesRow } from '../../src/components/ride/FamilyUpdatesRow';
 import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
 import { SosSheet } from '../../src/components/ride/SosSheet';
 import {
   AlertPickerSheet,
@@ -238,7 +244,6 @@ export default function LiveRideScreen() {
   const [now, setNow] = useState(() => Date.now());
   const [dismissedAttention, setDismissedAttention] = useState<string[]>([]);
   const [statsModalVisible, setStatsModalVisible] = useState(false);
-  const [batterySaver, setBatterySaver] = useState(false);
   const [gpsRecoveryStatus, setGpsRecoveryStatus] = useState<'normal' | 'recovered'>('normal');
   const gpsRecoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [breakdownServices, setBreakdownServices] = useState<VerifiedBreakdownService[]>(SEEDED_BREAKDOWN_DIRECTORY);
@@ -273,6 +278,14 @@ export default function LiveRideScreen() {
     distanceKm: ride?.estimated_distance_meters ? ride.estimated_distance_meters / 1000 : null,
   });
   const leader = captainFlow.isLeader;
+  // F4: GPS profile follows the role; the battery estimate is one sentence.
+  const gpsRole = captainFlow.myRole;
+  const battery = useBatteryLevel();
+  const batteryEstimate = useMemo(() => estimateBattery({
+    role: gpsRole,
+    hours: ride?.estimated_duration_seconds ? Math.max(1, ride.estimated_duration_seconds / 3600 * 1.3) : 8,
+    levelPercent: battery.levelPercent,
+  }), [gpsRole, ride?.estimated_duration_seconds, battery.levelPercent]);
   const [briefingVisible, setBriefingVisible] = useState(false);
   const [rollCallVisible, setRollCallVisible] = useState(false);
   const [debriefVisible, setDebriefVisible] = useState(false);
@@ -549,7 +562,7 @@ export default function LiveRideScreen() {
       userId,
       displayName: nameRef.current,
       publish,
-      batterySaver,
+      role: gpsRole,
       destination: destinationRef.current,
       onLocationUpdate: p => {
         if (!cancelled) { setNow(Date.now()); setPosition(p); }
@@ -598,7 +611,7 @@ export default function LiveRideScreen() {
       // Leaving the screen keeps sharing; only explicit actions stop it.
       detachBackgroundLocationCallbacks(id);
     };
-  }, [id, userId, rideLoaded, active, sharing, publish, gpsRetry, batterySaver]);
+  }, [id, userId, rideLoaded, active, sharing, publish, gpsRetry, gpsRole]);
 
   useEffect(() => {
     if (mapReady && follow && position && camera.current) {
@@ -807,7 +820,7 @@ export default function LiveRideScreen() {
         userId,
         displayName: name,
         publish,
-        batterySaver,
+        role: gpsRole,
         destination: destinationRef.current,
         onAutoStop: reason => {
           if (session !== gpsSession.current) return;
@@ -1037,6 +1050,9 @@ export default function LiveRideScreen() {
       items.push(checkInAttention(stationaryCountdown, Boolean(profile?.emergency_contact && position && ride), nowIso));
     }
     if (arrivingRegroupPoint) items.push(regroupArrivalAttention(arrivingRegroupPoint, nowIso, { canMarkAllThrough: captainFlow.canMarkAllThrough }));
+    if (active && battery.levelPercent != null && !battery.charging && battery.levelPercent <= LOW_BATTERY_PERCENT) {
+      items.push(lowBatteryAttention(battery.levelPercent, hoursLeft(battery.levelPercent, profileForRole(gpsRole)), nowIso));
+    }
     if (gps.state === 'fresh' && routeDeviation != null && routeDeviation > deviationLimit) {
       items.push(routeDeviationAttention(routeDeviation, nowIso));
     }
@@ -1049,7 +1065,7 @@ export default function LiveRideScreen() {
       items.push({ ...noticeAttention('problem', problem, nowIso, { actionLabel }), id: `notice:problem:${problem}` });
     }
     return items;
-  }, [alerts, userId, now, acknowledgedAlertIds, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
+  }, [alerts, userId, now, acknowledgedAlertIds, stationaryCountdown, profile?.emergency_contact, position, ride, arrivingRegroupPoint, captainFlow.canMarkAllThrough, battery.levelPercent, battery.charging, gpsRole, gps.state, routeDeviation, deviationLimit, lastArrivedWaypoint, gpsRecoveryStatus, active, message, gpsError, error, mapError, sharing, nowIso]);
 
   const attentionView = selectAttention(attentionItems, { now, dismissedIds: dismissedAttention });
 
@@ -1075,6 +1091,9 @@ export default function LiveRideScreen() {
         return;
       case 'confirm':
         if (arrivingRegroupPoint) void confirmArrival(arrivingRegroupPoint.id);
+        return;
+      case 'dismiss_battery':
+        dismissAttention(item);
         return;
       case 'all_through':
         if (arrivingRegroupPoint) void markAllThrough(arrivingRegroupPoint.id);
@@ -1549,8 +1568,7 @@ export default function LiveRideScreen() {
         visible={statsModalVisible}
         onClose={() => setStatsModalVisible(false)}
         liveStats={liveStats}
-        batterySaver={batterySaver}
-        onToggleBatterySaver={() => setBatterySaver(v => !v)}
+        batterySentence={battery.levelPercent != null ? `${battery.levelPercent}% now. ${batteryEstimate.sentence}` : batteryEstimate.sentence}
       />
 
       <BriefingSheet

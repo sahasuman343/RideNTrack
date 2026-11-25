@@ -41,6 +41,7 @@ test('spectator page explains live, dead zone and next stop', () => {
   assert.match(live.nextStop.etaText, /min away/);
   const dark = shared.spectatorView({ ...base, participants: [{ user_id: 'u1', display_name: 'Asha', lat: 32.2, lng: 77.0, timestamp: new Date(NOW - 25 * 60000).toISOString() }] });
   assert.equal(dark.presence.state, 'dead_zone');
+  assert.equal(dark.title, 'Asha is out of signal');
   assert.match(dark.sentence, /no signal/);
   const stay = shared.spectatorView({ ...base, participants: [{ user_id: 'u1', display_name: 'Asha', lat: 33.0005, lng: 77.0, timestamp: new Date(NOW - 30000).toISOString() }] });
   assert.equal(stay.title, 'Asha reached Sarchu camp');

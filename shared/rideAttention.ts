@@ -143,3 +143,18 @@ export function noticeAttention(id: string, title: string, nowIso: string, optio
     actions: options.actionLabel ? [{ id: 'retry', label: options.actionLabel, emphasis: 'secondary' }] : [],
   };
 }
+
+/** F4: low battery during a ride. Shown once per threshold; the pack is not told. */
+export function lowBatteryAttention(levelPercent: number, hoursOfTracking: number, nowIso: string): AttentionItem {
+  const critical = levelPercent <= 10;
+  return {
+    id: `battery:${critical ? 'critical' : 'low'}`,
+    kind: 'low_battery',
+    title: `Battery ${Math.round(levelPercent)}%`,
+    body: critical
+      ? 'Plug in now. Your pack loses your position when the phone dies.'
+      : `About ${hoursOfTracking} h of tracking left. Plug in at the next stop.`,
+    createdAt: nowIso,
+    actions: [{ id: 'dismiss_battery', label: 'OK', emphasis: 'secondary' }],
+  };
+}

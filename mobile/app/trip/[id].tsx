@@ -45,6 +45,7 @@ import {
   type TripExpenseSummary,
   type AttendanceStatus,
   ATTENDANCE_STATUS_LABELS,
+  estimateBattery,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -80,6 +81,7 @@ import { makeTripStyles as makeStyles } from '../../src/components/trip/tripStyl
 import { TripLiveRadar } from '../../src/components/trip/TripLiveRadar';
 import { PackReadinessList, RideReadyCard } from '../../src/components/trip/RideReadyCard';
 import { useFamilyContacts } from '../../src/hooks/useFamilyContacts';
+import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
 import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
 import { useRideReadiness } from '../../src/hooks/useRideReadiness';
 
@@ -335,6 +337,14 @@ export default function TripWorkspaceScreen() {
   const isAdmin = !!user && trip?.admin_id === user.id;
   // R5: one Ride ready card replaces scattered setup prompts.
   const family = useFamilyContacts();
+  const { levelPercent: batteryLevel } = useBatteryLevel();
+  // F4: one sentence, from the rider's role and the planned riding time.
+  const batteryFootnote = useMemo(() => {
+    if (!trip) return null;
+    const role = isAdmin ? 'captain' : roster.find(r => r.user_id === user?.id)?.role ?? null;
+    const dayHours = trip.estimated_duration_seconds ? Math.min(12, (trip.estimated_duration_seconds / 3600) * 1.3) : 8;
+    return `Battery: ${estimateBattery({ role, hours: Math.max(1, Math.round(dayHours)), levelPercent: batteryLevel }).sentence}`;
+  }, [trip, isAdmin, roster, user?.id, batteryLevel]);
   const [familySheetVisible, setFamilySheetVisible] = useState(false);
   const readinessHandlers = useMemo(() => ({
     edit_emergency_contact: () => router.push('/(tabs)/profile'),
@@ -1540,7 +1550,7 @@ export default function TripWorkspaceScreen() {
         {(activeTab === 'details' || !canShowLiveTracker) && (
           <>
             {(trip.status === 'planned' || isTripOngoing) && (
-              <RideReadyCard items={readiness.items} summary={readiness.summary} onFix={item => void readiness.fix(item)} />
+              <RideReadyCard items={readiness.items} summary={readiness.summary} onFix={item => void readiness.fix(item)} footnote={batteryFootnote} />
             )}
             {isAdmin && trip.status === 'planned' && roster.length > 1 && (
               <PackReadinessList rideId={trip.id} roster={roster} />

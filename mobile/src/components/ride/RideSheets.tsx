@@ -138,8 +138,6 @@ export function AnnouncementSheet(props: BaseSheetProps & {
 export function RideStatsSheet(props: BaseSheetProps & {
   liveStats: LiveRideStats;
   batterySentence?: string | null;
-  batterySaver?: boolean;
-  onToggleBatterySaver?: () => void;
 }) {
   const { s, theme, liveStats } = props;
   return (
@@ -185,18 +183,6 @@ export function RideStatsSheet(props: BaseSheetProps & {
               <Stat s={s} value={String(liveStats.packSummary.stoppedCount)} label="STOPPED" />
             </View>
           </View>
-
-          {props.onToggleBatterySaver && (
-            <View style={[s.statsCard, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-              <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={[s.statsCardHeader, { marginBottom: 2 }]}>TOURING BATTERY SAVER</Text>
-                <Text style={s.muted}>Adapts GPS interval (15s/25m) for all-day tours to conserve phone battery.</Text>
-              </View>
-              <TouchableOpacity style={[s.control, props.batterySaver && s.selected]} onPress={props.onToggleBatterySaver}>
-                <Text style={[s.controlText, props.batterySaver && s.selectedText]}>{props.batterySaver ? 'ON' : 'OFF'}</Text>
-              </TouchableOpacity>
-            </View>
-          )}
 
           {props.batterySentence ? (
             <View style={s.statsCard}>

@@ -76,7 +76,11 @@ export function spectatorView(input: {
     const presence = riderPresence(rider?.timestamp, now);
     const pos = rider ? { lat: rider.lat, lng: rider.lng } : null;
     const atStay = pos && input.stays?.find(s => km(pos, { lat: s.latitude, lng: s.longitude }) < 0.5);
-    const title = atStay ? `${followName} reached ${atStay.name}` : presence.state === 'live' ? `${followName} is riding` : presence.state === 'unknown' ? `Waiting for ${followName}'s location` : `${followName} · ${presence.label}`;
+    const title = atStay
+      ? `${followName} reached ${atStay.name}`
+      : presence.state === 'dead_zone' ? `${followName} is out of signal`
+      : presence.state === 'unknown' ? `Waiting for ${followName}'s location`
+      : `${followName} is riding`;
     const sentence = presence.state === 'dead_zone'
       ? `${presence.sentence} Mountain roads often have no signal; the map updates as soon as the phone reconnects.`
       : presence.sentence;

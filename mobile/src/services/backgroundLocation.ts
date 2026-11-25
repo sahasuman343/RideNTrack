@@ -2,7 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { validCoordinates, type LocationUpdate } from '@ridentrack/shared';
+import { GPS_PROFILES, profileForRole, shouldSwitchProfile, validCoordinates, type GpsProfile, type LocationUpdate } from '@ridentrack/shared';
 import { enqueueLocation } from '../lib/offlineQueue';
 import { supabase } from '../lib/supabase';
 import { syncQueue } from './syncQueue';
@@ -21,7 +21,8 @@ interface Params extends Context {
   onError?: (message: string) => void;
   onGpsRecovered?: () => void;
   onAutoStop?: (reason: 'arrived' | 'timeout') => void;
-  batterySaver?: boolean;
+  /** F4: the rider's role picks the GPS profile; there is no battery toggle. */
+  role?: string | null;
   activeRidersCount?: number;
   maxRideDurationMs?: number;
 }
@@ -35,8 +36,6 @@ let lastMovedCoords: { lat: number; lng: number } | null = null;
 let adaptiveLowPower = false;
 let lastAdaptivePublishMs = 0;
 let arrivedAtDestSinceMs: number | null = null;
-const GPS_INTERVAL_MS = 5000;
-const GPS_DISTANCE_METERS = 15;
 const QUEUE_SYNC_INTERVAL_MS = 30000;
 const STATIONARY_THRESHOLD_MS = 2 * 60 * 1000;
 const STATIONARY_SPEED_MPS = 2 / 3.6; // 2 km/h
@@ -113,15 +112,37 @@ export function detachBackgroundLocationCallbacks(rideId: string) {
   });
 }
 
-function trackingOptions(params: Pick<Params, 'batterySaver'>) {
+// Effective profile: the role's profile, or "stopped" after 3 minutes still.
+let lastProfileSwitchMs: number | null = null;
+function effectiveProfile(params: Pick<Params, 'role'>): GpsProfile {
+  const stoppedForMs = stationarySinceMs != null ? Date.now() - stationarySinceMs : null;
+  return profileForRole(params.role, { stoppedForMs });
+}
+
+function trackingOptions(params: Pick<Params, 'role'>) {
+  const spec = GPS_PROFILES[effectiveProfile(params)];
   return {
-    accuracy: params.batterySaver ? Location.Accuracy.Balanced : Location.Accuracy.High,
-    timeInterval: params.batterySaver ? 15000 : GPS_INTERVAL_MS,
-    distanceInterval: params.batterySaver ? 25 : GPS_DISTANCE_METERS,
+    accuracy: spec.accuracy === 'high' ? Location.Accuracy.High : Location.Accuracy.Balanced,
+    timeInterval: spec.intervalMs,
+    distanceInterval: spec.distanceM,
   };
 }
 
-const optionsKey = (params: Pick<Params, 'batterySaver'>) => (params.batterySaver ? 'saver' : 'normal');
+const optionsKey = (params: Pick<Params, 'role'>) => effectiveProfile(params);
+
+/** Restart the native task when the profile changes, at most once a minute. */
+function maybeSwitchProfile() {
+  const params = context;
+  if (!params || nativeOptionsKey === null) return;
+  const next = effectiveProfile(params);
+  const now = Date.now();
+  if (!shouldSwitchProfile(nativeOptionsKey as GpsProfile, next, lastProfileSwitchMs, now)) return;
+  lastProfileSwitchMs = now;
+  void serialize(async () => {
+    if (context !== params || !(await nativeUpdatesRunning())) return;
+    await startNativeUpdates(params, true);
+  }).catch(() => { /* keep the current profile */ });
+}
 
 async function startNativeUpdates(params: Params, restart = false) {
   if (restart) await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
@@ -210,6 +231,7 @@ async function record(locations: Location.LocationObject[]) {
       }
     }
 
+    maybeSwitchProfile();
     if (!adaptiveLowPower || nowMs - lastAdaptivePublishMs >= ADAPTIVE_PUBLISH_INTERVAL_MS) {
       lastAdaptivePublishMs = nowMs;
       void Promise.resolve(context?.publish?.(point)).catch(() => {});
