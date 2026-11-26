@@ -37,7 +37,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         if: steps.gate.outputs.ready == 'true'
         with:
-          version: latest
+          version: 2.122.1
       - name: Link the dev project
         if: steps.gate.outputs.ready == 'true'
         run: supabase link --project-ref "$DEV_PROJECT_REF"
