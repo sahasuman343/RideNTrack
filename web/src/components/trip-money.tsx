@@ -107,6 +107,8 @@ export default function TripMoney({ tripId, userId, isLeader, riders }: Props) {
     const { error } = await supabase.rpc('delete_trip_expense', { p_expense_id: expense.id });
     setBusy(false); setConfirm(null);
     if (error) { setNotice({ text: error.message || 'Could not delete the expense.', error: true }); return; }
+    // Drop the row now; the refetch below brings the balances up to date.
+    setExpenses(list => list?.filter(x => x.id !== expense.id) ?? list);
     setNotice({ text: `${expense.title} was deleted.` });
     setReload(v => v + 1);
   }
