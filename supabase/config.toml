@@ -1,6 +1,10 @@
 # Minimal Supabase CLI config so `supabase link` / `db push` can run in CI.
 project_id = "ridentrack"
 
+[db]
+# Live and dev both run Postgres 17.
+major_version = 17
+
 # Functions that check their own signature or secret instead of a user JWT.
 [functions.revenuecat-webhook]
 verify_jwt = false
