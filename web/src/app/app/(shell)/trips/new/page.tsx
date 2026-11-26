@@ -10,18 +10,17 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { friendlyTripError, MAPBOX_TOKEN, routePointLimit, useEffectiveTier, useRequiredSession } from '@/lib/planner';
-import AppHeader from '@/components/app-header';
 import PlaceSearch from '@/components/place-search';
 
-const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-2xl bg-[#e4eddb]" /> });
+const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-lg bg-map" /> });
 
 type StopKind = TripPlanDraft['stops'][number]['kind'];
 const STOP_KINDS: StopKind[] = ['stop', 'fuel', 'food', 'rest', 'sightseeing', 'meetup'];
 type Stop = { key: string; place: PlaceResult | null; kind: StopKind };
 type RouteResult = { geometry: { type: 'LineString'; coordinates: number[][] }; distance: number; duration: number };
 
-const inputClass = 'w-full rounded-xl border border-[#d9e1d4] bg-white px-4 py-3 text-sm text-[#203c43] placeholder-[#9aa6a8] focus:border-[#d66029] focus:outline-none';
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[#718084]';
+const inputClass = 'field';
+const labelClass = 'field-label';
 
 export default function NewTripPage() {
   const session = useRequiredSession();
@@ -93,7 +92,7 @@ export default function NewTripPage() {
       const { data, error: rpcError } = await supabase.rpc('create_trip_plan', buildCreateTripPlanArgs(draft, route));
       if (rpcError) throw rpcError;
       if (!data) throw new Error('The trip was not created. Please try again.');
-      router.push('/trip?id=' + data);
+      router.push('/app/trips/' + data);
     } catch (err) {
       setError(friendlyTripError(err, 'Could not create the trip.'));
       setSaving(false);
@@ -101,13 +100,12 @@ export default function NewTripPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f8f3] text-[#203c43]">
-      <AppHeader />
-      <form onSubmit={create} className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+    <main>
+      <form onSubmit={create} className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="min-w-0">
-          <Link href="/trips" className="text-sm text-[#718084] hover:text-[#d66029]">← All trips</Link>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Plan a trip</h1>
-          <p className="mt-2 text-sm text-[#718084]">Invite riders and split it into stages from the app once it is saved.</p>
+          <Link href="/app/trips" className="text-sm text-muted hover:text-fg">← All trips</Link>
+          <h1 className="mt-3 display text-3xl sm:text-4xl">Plan a <em>trip</em></h1>
+          <p className="mt-2 text-sm text-muted">Invite riders and split it into stages from the app once it is saved.</p>
 
           <div className="mt-8 space-y-5">
             <div>
@@ -130,31 +128,31 @@ export default function NewTripPage() {
                 <input id="end-date" type="date" className={inputClass} value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} />
               </div>
             </div>
-            {days.length > 0 && <p className="text-xs text-[#718084]">{days.length} {days.length === 1 ? 'day' : 'days'}{maxDays != null && days.length > maxDays ? ` · the Free plan covers up to ${maxDays}` : ''}</p>}
+            {days.length > 0 && <p className="text-xs text-muted">{days.length} {days.length === 1 ? 'day' : 'days'}{maxDays != null && days.length > maxDays ? ` · the Free plan covers up to ${maxDays}` : ''}</p>}
 
-            <fieldset className="space-y-4 rounded-2xl border border-[#e0e7da] bg-white p-5">
+            <fieldset className="space-y-4 panel p-5">
               <legend className="px-1 text-sm font-semibold">Route</legend>
               <PlaceSearch label="Start" value={origin} onChange={setOrigin} placeholder="Search a town, landmark or PIN code" />
               {stops.map((stop, index) => (
-                <div key={stop.key} className="rounded-xl border border-[#edf1e9] bg-[#fafbf8] p-3">
+                <div key={stop.key} className="rounded border border-line bg-raise p-3">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <label className="sr-only" htmlFor={'kind-' + stop.key}>Stop {index + 1} type</label>
-                    <select id={'kind-' + stop.key} value={stop.kind} className="rounded-lg border border-[#d9e1d4] bg-white px-2 py-1 text-xs"
+                    <select id={'kind-' + stop.key} value={stop.kind} className="rounded border border-line2 bg-bg px-2 py-1 text-xs"
                       onChange={e => setStops(s => s.map(x => x.key === stop.key ? { ...x, kind: e.target.value as StopKind } : x))}>
                       {STOP_KINDS.map(k => <option key={k} value={k}>{WAYPOINT_META[k].label}</option>)}
                     </select>
                     <span className="ml-auto flex gap-1">
-                      <button type="button" aria-label={`Move stop ${index + 1} up`} disabled={index === 0} onClick={() => moveStop(index, -1)} className="rounded-lg px-2 py-1 text-xs hover:bg-[#eef2ea] disabled:opacity-30">↑</button>
-                      <button type="button" aria-label={`Move stop ${index + 1} down`} disabled={index === stops.length - 1} onClick={() => moveStop(index, 1)} className="rounded-lg px-2 py-1 text-xs hover:bg-[#eef2ea] disabled:opacity-30">↓</button>
-                      <button type="button" aria-label={`Remove stop ${index + 1}`} onClick={() => { setError(null); setStops(s => s.filter(x => x.key !== stop.key)); }} className="rounded-lg px-2 py-1 text-xs text-[#a2502a] hover:bg-[#fbeee6]">Remove</button>
+                      <button type="button" aria-label={`Move stop ${index + 1} up`} disabled={index === 0} onClick={() => moveStop(index, -1)} className="rounded px-2 py-1 text-xs hover:bg-surface disabled:opacity-30">↑</button>
+                      <button type="button" aria-label={`Move stop ${index + 1} down`} disabled={index === stops.length - 1} onClick={() => moveStop(index, 1)} className="rounded px-2 py-1 text-xs hover:bg-surface disabled:opacity-30">↓</button>
+                      <button type="button" aria-label={`Remove stop ${index + 1}`} onClick={() => { setError(null); setStops(s => s.filter(x => x.key !== stop.key)); }} className="rounded px-2 py-1 text-xs text-danger hover:bg-surface">Remove</button>
                     </span>
                   </div>
                   <PlaceSearch label={`Stop ${index + 1}`} value={stop.place} proximity={origin ? [origin.longitude, origin.latitude] : null}
                     onChange={place => setStops(s => s.map(x => x.key === stop.key ? { ...x, place } : x))} placeholder="Fuel pump, dhaba, viewpoint…" />
                 </div>
               ))}
-              <button type="button" onClick={addStop} className="text-sm font-semibold text-[#d66029] hover:underline">+ Add a stop</button>
-              <span className="ml-3 text-xs text-[#9aa6a8]">{pointCount} of {limit} route points</span>
+              <button type="button" onClick={addStop} className="text-sm font-semibold text-accent hover:underline">+ Add a stop</button>
+              <span className="ml-3 text-xs text-faint">{pointCount} of {limit} route points</span>
               <PlaceSearch label="End" value={destination} onChange={setDestination} placeholder="Where does the trip finish?" proximity={origin ? [origin.longitude, origin.latitude] : null} />
             </fieldset>
 
@@ -163,20 +161,20 @@ export default function NewTripPage() {
               <textarea id="trip-notes" className={inputClass + ' min-h-24'} value={description} onChange={e => setDescription(e.target.value)} maxLength={2000} placeholder="Meet at the fuel pump at 5:30 AM, full tank." />
             </div>
 
-            {error && <p role="alert" className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm">{error}</p>}
-            <button type="submit" disabled={saving} className="w-full rounded-full bg-[#d66029] px-5 py-3.5 text-sm font-semibold text-white hover:bg-[#bf5422] disabled:opacity-60">
+            {error && <p role="alert" className="notice notice-error">{error}</p>}
+            <button type="submit" disabled={saving} className="w-full btn btn-primary py-3.5">
               {saving ? 'Saving trip…' : 'Save trip'}
             </button>
           </div>
         </div>
 
-        <aside className="flex min-h-[420px] flex-col gap-3 lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)]">
+        <aside className="flex min-h-[420px] flex-col gap-3 lg:sticky lg:top-8 lg:h-[calc(100vh-4rem)]">
           <TripMap points={ordered} route={route?.geometry ?? null} className="min-h-80 flex-1" />
-          <div role="status" aria-live="polite" className="flex flex-wrap gap-x-6 gap-y-1 rounded-2xl border border-[#e0e7da] bg-white px-5 py-4 text-sm">
-            {!origin || !destination ? <span className="text-[#718084]">Choose a start and an end to see the route.</span>
-              : routing ? <span className="text-[#718084]">Working out the route…</span>
-              : route ? <><span><strong>{formatRouteDistance(route.distance)}</strong> riding</span><span><strong>{formatRouteDuration(route.duration)}</strong> in the saddle</span><span className="text-[#718084]">{ordered.length} points</span></>
-              : <span className="text-[#a2704a]">{routeError ?? 'Route preview unavailable. You can still save the trip.'}</span>}
+          <div role="status" aria-live="polite" className="flex flex-wrap gap-x-6 gap-y-1 panel px-5 py-4 text-sm">
+            {!origin || !destination ? <span className="text-muted">Choose a start and an end to see the route.</span>
+              : routing ? <span className="text-muted">Working out the route…</span>
+              : route ? <><span><strong>{formatRouteDistance(route.distance)}</strong> riding</span><span><strong>{formatRouteDuration(route.duration)}</strong> in the saddle</span><span className="text-muted">{ordered.length} points</span></>
+              : <span className="text-accent">{routeError ?? 'Route preview unavailable. You can still save the trip.'}</span>}
           </div>
         </aside>
       </form>

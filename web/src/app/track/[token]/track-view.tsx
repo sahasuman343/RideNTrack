@@ -11,7 +11,7 @@ import {
   type SpectatorStay,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
-import '../../ride/ride.css';
+import '@/styles/ride.css';
 
 const RideMap = dynamic(() => import('@/components/ride-map'), {
   ssr: false,

@@ -24,7 +24,7 @@ export default function RideMap({ ride,riders,selected,fitRequest,onSelect,botto
     let disposed = false;
     try {
       instance = new mapboxgl.Map({ container: container.current,accessToken: token,
-        style: 'mapbox://styles/mapbox/streets-v12',center: latest.current.ride.origin_coords,zoom: 10,attributionControl: false });
+        style: 'mapbox://styles/mapbox/dark-v11',center: latest.current.ride.origin_coords,zoom: 10,attributionControl: false });
     } catch {
       queueMicrotask(() => { if (!disposed) setError('This device could not start the map. Your rider list is still available.'); });
       return () => { disposed = true; };
@@ -56,7 +56,7 @@ export default function RideMap({ ride,riders,selected,fitRequest,onSelect,botto
     else {
       instance.addSource('route',{ type: 'geojson',data: ride.route_geometry });
       instance.addLayer({ id: 'route-outline',type: 'line',source: 'route',layout: { 'line-cap':'round','line-join':'round' },paint: { 'line-color':'#fff','line-width':9 } });
-      instance.addLayer({ id: 'route-line',type: 'line',source: 'route',layout: { 'line-cap':'round','line-join':'round' },paint: { 'line-color':'#e57239','line-width':4 } });
+      instance.addLayer({ id: 'route-line',type: 'line',source: 'route',layout: { 'line-cap':'round','line-join':'round' },paint: { 'line-color':'#ff8a2a','line-width':4 } });
     }
   }, [ready,ride.route_geometry]);
   useEffect(() => {

@@ -34,6 +34,7 @@ const waypoints = [
 ];
 const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, trip_date: '2027-06-1' + (n - 1), title: 'Day ' + n }));
 
+const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'base64-' + Buffer.from(JSON.stringify(s)).toString('base64url'), url: origin });
 (async () => {
   const server = spawn(process.execPath, ['../node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1'], { cwd: 'web', stdio: 'inherit' });
   let browser, page;
@@ -42,10 +43,10 @@ const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, 
     for (let i = 0; i < 60; i++) { try { if ((await fetch(origin)).ok) break; } catch {} await new Promise(r => setTimeout(r, 500)); }
     browser = await chromium.launch({ args: ['--enable-webgl', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
-    await context.addInitScript(s => localStorage.setItem('sb-ridentrack-test-auth-token', JSON.stringify(s)), session);
+    await context.addCookies([sessionCookie(session)]);
     await context.route('https://api.mapbox.com/**', route => {
       const url = route.request().url();
-      if (url.includes('/styles/')) return route.fulfill({ json: { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#e4eddb' } }] } });
+      if (url.includes('/styles/')) return route.fulfill({ json: { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0c0c0e' } }] } });
       if (url.includes('/geocoding/')) {
         calls.geocode++;
         const q = decodeURIComponent(url.split('/mapbox.places/')[1].split('.json')[0]).toLowerCase();
@@ -81,8 +82,8 @@ const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, 
     const errors = []; page.on('pageerror', e => errors.push(e.message));
 
     // Trip list with filters.
-    await page.goto(origin + '/trips');
-    await page.getByRole('heading', { name: 'My Trips' }).waitFor();
+    await page.goto(origin + '/app/trips');
+    await page.getByRole('heading', { name: 'Your trips' }).waitFor();
     await page.getByRole('link', { name: /Spiti Valley Loop/ }).waitFor();
     assert.equal(await page.locator('.trip-card').count(), 1, 'upcoming shows only planned trips');
     await page.getByRole('tab', { name: 'Past' }).click();
@@ -123,7 +124,7 @@ const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, 
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: 'test-results/trip-planner-desktop.png' });
     await page.getByRole('button', { name: 'Save trip' }).click();
-    await page.waitForURL(url => url.pathname === '/trip' && url.search.includes(newTripId));
+    await page.waitForURL(url => url.pathname === '/app/trips/' + newTripId);
     assert.equal(calls.create.p_trip.name, 'Spiti Winter Run');
     assert.equal(calls.create.p_trip.trip_type, 'touring');
     assert.equal(calls.create.p_trip.estimated_distance_meters, 431000);
@@ -131,7 +132,7 @@ const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, 
     assert.deepEqual(calls.create.p_days.map(d => d.trip_date), ['2027-01-10', '2027-01-11']);
 
     // View, edit and delete.
-    await page.goto(origin + '/trip?id=' + tripId);
+    await page.goto(origin + '/app/trips/' + tripId);
     await page.getByRole('heading', { name: 'Spiti Valley Loop' }).waitFor();
     assert.equal(await page.locator('#route-heading + ol li').count(), 3);
     await page.getByText('SPITI1').waitFor();
@@ -152,12 +153,12 @@ const days = [1, 2, 3].map(n => ({ id: 'd' + n, ride_id: tripId, day_number: n, 
     await page.getByRole('button', { name: 'Delete trip' }).click();
     await page.getByRole('alertdialog').waitFor();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete trip' }).click();
-    await page.waitForURL(url => url.pathname === '/trips');
+    await page.waitForURL(url => url.pathname === '/app/trips');
     assert.equal(calls.deleted, tripId);
 
     // Phone width: no sideways scroll on the planner.
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(origin + '/trips/new');
+    await page.goto(origin + '/app/trips/new');
     await page.getByRole('heading', { name: 'Plan a trip' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no horizontal scroll at phone width');
     await page.screenshot({ path: 'test-results/trip-planner-mobile.png', fullPage: true });

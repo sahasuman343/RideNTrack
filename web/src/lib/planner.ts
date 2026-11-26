@@ -13,7 +13,7 @@ export function useRequiredSession(): Session | null {
     let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-      if (!data.session) router.replace('/login');
+      if (!data.session) router.replace('/login?next=' + encodeURIComponent(window.location.pathname));
       else setSession(data.session);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {

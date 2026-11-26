@@ -51,10 +51,10 @@ export default function PlaceSearch({ label, value, onChange, placeholder, proxi
 
   return (
     <div className="relative">
-      <label htmlFor={id} className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[#718084]">{label}</label>
+      <label htmlFor={id} className="field-label">{label}</label>
       <input id={id} role="combobox" aria-expanded={open && shownResults.length > 0} aria-controls={id + '-list'} aria-autocomplete="list"
         value={query} placeholder={placeholder} autoComplete="off"
-        className="w-full rounded-xl border border-[#d9e1d4] bg-white px-4 py-3 text-sm text-[#203c43] placeholder-[#9aa6a8] focus:border-[#d66029] focus:outline-none"
+        className="field"
         onChange={e => { setQuery(e.target.value); setOpen(true); setMessage(''); if (value) onChange(null); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -66,18 +66,18 @@ export default function PlaceSearch({ label, value, onChange, placeholder, proxi
           else if (e.key === 'Escape') setOpen(false);
         }} />
       {open && shownResults.length > 0 && (
-        <ul id={id + '-list'} role="listbox" className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-[#d9e1d4] bg-white py-1 shadow-lg">
+        <ul id={id + '-list'} role="listbox" className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded border border-line2 bg-raise py-1 shadow-lg shadow-black/50">
           {shownResults.map((place, index) => (
             <li key={place.id} role="option" aria-selected={index === active}
-              className={'cursor-pointer px-4 py-2.5 text-sm ' + (index === active ? 'bg-[#fbeee6]' : 'hover:bg-[#f4f6f1]')}
+              className={'cursor-pointer px-4 py-2.5 text-sm ' + (index === active ? 'bg-surface shadow-[inset_2px_0_0_var(--color-accent)]' : 'hover:bg-surface')}
               onMouseDown={e => { e.preventDefault(); choose(place); }}>
-              <span className="block font-medium text-[#203c43]">{place.name}</span>
-              <span className="block truncate text-xs text-[#718084]">{place.address}</span>
+              <span className="block font-medium text-fg">{place.name}</span>
+              <span className="block truncate text-xs text-muted">{place.address}</span>
             </li>
           ))}
         </ul>
       )}
-      {open && shownMessage && <p className="mt-1 text-xs text-[#a2704a]">{shownMessage}</p>}
+      {open && shownMessage && <p className="mt-1 text-xs text-muted">{shownMessage}</p>}
     </div>
   );
 }
