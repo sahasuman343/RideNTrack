@@ -31,7 +31,7 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
       route.fulfill({json:route.request().postDataJSON().requested_username !== 'taken-rider'}));
     await signupContext.route('https://ridentrack-test.supabase.co/auth/v1/signup*',route=>{
       signupRequests++;
-      return route.fulfill({json:{user:{...session.user,identities:[]},session:null}});
+      return route.fulfill({json:{user:{...session.user,identities:[{provider:'email'}]},session:null}});
     });
     const signupPage = await signupContext.newPage();
     await signupPage.goto(origin+'/register');
