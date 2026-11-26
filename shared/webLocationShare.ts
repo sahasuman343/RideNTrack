@@ -19,7 +19,8 @@ export interface BrowserFix {
 export const WEB_SHARE_MIN_INTERVAL_MS = 10_000;
 export const WEB_SHARE_MIN_MOVE_M = 25;
 export const WEB_SHARE_MAX_ACCURACY_M = 100;
-export const WEB_SHARE_HEARTBEAT_MS = 60_000;
+// Under isStale's 30 s cutoff, so a parked rider never flickers to "last known".
+export const WEB_SHARE_HEARTBEAT_MS = 20_000;
 
 function metresBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const rad = Math.PI / 180;

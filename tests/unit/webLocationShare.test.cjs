@@ -17,7 +17,11 @@ test('throttles to movement or a heartbeat', () => {
   assert.equal(share.shouldSendFix(a, fix({ timestamp: a.timestamp + 5_000, lat: 12.98 })), false, 'too soon, even if moved');
   assert.equal(share.shouldSendFix(a, fix({ timestamp: a.timestamp + 15_000 })), false, 'parked and no heartbeat due');
   assert.equal(share.shouldSendFix(a, fix({ timestamp: a.timestamp + 15_000, lat: 12.9705 })), true, 'moved ~55 m');
-  assert.equal(share.shouldSendFix(a, fix({ timestamp: a.timestamp + 61_000 })), true, 'heartbeat keeps a parked rider fresh');
+  assert.equal(share.shouldSendFix(a, fix({ timestamp: a.timestamp + 21_000 })), true, 'heartbeat keeps a parked rider fresh');
+});
+
+test('heartbeat is due before a rider counts as stale', () => {
+  assert.ok(share.WEB_SHARE_HEARTBEAT_MS < 30_000);
 });
 
 test('row matches what bulk_insert_location_updates accepts', () => {
