@@ -23,10 +23,11 @@ interface Props {
   userId: string;
   onLeadershipChanged: () => void;
   onLeft: () => void;
+  onRoster?: (roster: RosterRider[]) => void;
 }
 
 /** Riders on a trip: RSVP, invite link, and the leader's people tools. */
-export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft }: Props) {
+export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft, onRoster }: Props) {
   const [roster, setRoster] = useState<RosterRider[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -46,6 +47,8 @@ export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft }
     });
     return () => { cancelled = true; };
   }, [trip.id, retry]);
+
+  useEffect(() => { if (roster) onRoster?.(roster); }, [roster, onRoster]);
 
   const me = roster?.find(r => r.user_id === userId);
   const going = roster?.filter(r => (r.attendance_status ?? 'confirmed') === 'confirmed').length ?? 0;

@@ -23,6 +23,12 @@ let roster = [
   { user_id: raviId, display_name: 'Ravi', role: 'sweeper', is_active: true, last_seen: null, attendance_status: 'confirmed' },
 ];
 const calls = {};
+let checklist = [];
+const seeded = [
+  { id: 'c1', category: 'fuel_tires', title: 'Tyre pressure checked', description: 'Cold pressure, front and rear.', is_mandatory: true, sequence: 1, my_completed: false, completed_count: 2, assigned_to_user_id: null },
+  { id: 'c2', category: 'emergency_kit', title: 'Puncture kit', description: null, is_mandatory: false, sequence: 2, my_completed: false, completed_count: 0, assigned_to_user_id: raviId },
+];
+let failToggle = false;
 
 (async () => {
   const server = spawn(process.execPath, ['../node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1'], { cwd: 'web', stdio: 'inherit' });
@@ -48,6 +54,10 @@ const calls = {};
       if (rpc === 'transfer_trip_leadership') { trip.admin_id = body.p_new_admin_id; roster = roster.map(r => r.user_id === body.p_new_admin_id ? { ...r, role: 'captain' } : r.user_id === userId ? { ...r, role: 'member' } : r); return route.fulfill({ status: 204, body: '' }); }
       if (rpc === 'leave_ride') return route.fulfill({ status: 204, body: '' });
       if (rpc === 'join_ride_by_code') return body.p_code === 'SPITI1' ? route.fulfill({ json: tripId }) : route.fulfill({ status: 400, json: { code: 'P0001', message: 'Invalid ride code or ride has ended', details: null, hint: null } });
+      if (rpc === 'get_trip_checklists') return route.fulfill({ json: checklist });
+      if (rpc === 'seed_default_trip_checklists') { checklist = seeded.map(i => ({ ...i })); return route.fulfill({ status: 204, body: '' }); }
+      if (rpc === 'toggle_trip_checklist_item') return failToggle ? route.fulfill({ status: 400, json: { code: 'P0001', message: 'You must be a trip participant to check off items' } }) : route.fulfill({ json: body.p_completed });
+      if (rpc === 'claim_trip_checklist_item') return route.fulfill({ status: 204, body: '' });
       if (rpc === 'get_my_flags') return route.fulfill({ json: [] });
       if (url.includes('/auth/v1/user')) return route.fulfill({ json: session.user });
       if (url.includes('/rest/v1/profiles')) return route.fulfill({ json: { id: userId, display_name: 'Suman', subscription_tier: 'free' } });
@@ -101,6 +111,28 @@ const calls = {};
     assert.equal(await list.getByRole('listitem').count(), 2);
     assert.deepEqual(calls.remove_trip_participant.at(-1), { p_ride_id: tripId, p_user_id: ashaId });
 
+    // Checklist: the leader seeds defaults once, ticks are personal, gear can be claimed.
+    await page.getByRole('heading', { name: 'Pre-ride checklist' }).waitFor();
+    await page.getByLabel(/Tyre pressure checked/).waitFor();
+    assert.equal(calls.seed_default_trip_checklists.length, 1);
+    await page.getByText('0/2 ready').waitFor();
+    await page.getByText('bringing it: Ravi').waitFor();
+    await page.getByLabel(/Tyre pressure checked/).check();
+    await page.getByText('1/2 ready').waitFor();
+    assert.deepEqual(calls.toggle_trip_checklist_item.at(-1), { p_checklist_id: 'c1', p_completed: true });
+    await page.getByText('3 riders ticked').waitFor();
+    await page.getByRole('button', { name: /bring it.*Tyre pressure/ }).click();
+    await page.getByText('3 riders ticked · bringing it: you').waitFor();
+    assert.deepEqual(calls.claim_trip_checklist_item.at(-1), { p_checklist_id: 'c1', p_assign_to_self: true });
+    failToggle = true;
+    await page.getByLabel(/Puncture kit/).check();
+    await page.getByRole('alert').filter({ hasText: 'trip participant' }).waitFor();
+    assert.equal(await page.getByLabel(/Puncture kit/).isChecked(), false, 'a failed tick rolls back');
+    await page.getByText('1/2 ready').waitFor();
+    failToggle = false;
+    await page.getByRole('heading', { name: 'Pre-ride checklist' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: 'test-results/trip-checklist-desktop.png' });
+
     // Hand over, then leave as an ordinary rider.
     await page.getByRole('button', { name: 'Manage Ravi' }).click();
     await page.getByRole('button', { name: 'Make trip leader' }).click();
@@ -127,7 +159,7 @@ const calls = {};
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'join page fits at 360px');
     await page.screenshot({ path: 'test-results/join-mobile.png' });
     assert.deepEqual(errors, []);
-    console.log('People browser checks passed: join by link and code (with error), roster, RSVP, invite link, roles, attendance, remove, hand over, leave, phone width; no page errors.');
+    console.log('People browser checks passed: join by link and code (with error), roster, RSVP, invite link, roles, attendance, remove, checklist seed/tick/claim/rollback, hand over, leave, phone width; no page errors.');
   } catch (error) {
     if (page) { fs.mkdirSync('test-results', { recursive: true }); await page.screenshot({ path: 'test-results/people-failure.png', fullPage: true }); }
     throw error;

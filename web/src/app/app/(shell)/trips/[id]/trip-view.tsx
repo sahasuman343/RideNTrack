@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -9,7 +9,8 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { formatTripDates, friendlyTripError, useRequiredSession } from '@/lib/planner';
-import TripPeople from '@/components/trip-people';
+import TripPeople, { type RosterRider } from '@/components/trip-people';
+import TripChecklist from '@/components/trip-checklist';
 
 const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-lg bg-map" /> });
 
@@ -69,6 +70,8 @@ export default function TripView({ tripId }: { tripId: string | null }) {
     ] : [], [waypoints, trip]);
 
   const isLeader = !!trip && trip.admin_id === session?.user.id;
+  const [names, setNames] = useState<Record<string, string>>({});
+  const onRoster = useCallback((roster: RosterRider[]) => setNames(Object.fromEntries(roster.map(r => [r.user_id, r.display_name || 'Rider']))), []);
 
   function startEdit() {
     if (!trip) return;
@@ -193,7 +196,8 @@ export default function TripView({ tripId }: { tripId: string | null }) {
             <p className="mt-3 text-xs text-faint">GPX works with most navigation apps and GPS units.</p>
           </section>
 
-          {session && <TripPeople trip={trip} userId={session.user.id} onLeadershipChanged={() => setReload(v => v + 1)} onLeft={() => router.replace('/app/trips')} />}
+          {session && <TripPeople trip={trip} userId={session.user.id} onLeadershipChanged={() => setReload(v => v + 1)} onLeft={() => router.replace('/app/trips')} onRoster={onRoster} />}
+          {session && <TripChecklist key={trip.admin_id} tripId={trip.id} userId={session.user.id} isLeader={isLeader} names={names} />}
 
           {days.length > 0 && (
             <section className="mt-10" aria-labelledby="days-heading">
