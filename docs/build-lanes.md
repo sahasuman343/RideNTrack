@@ -1,47 +1,27 @@
-# Dev and prod build lanes
+# Android build lanes
 
-One codebase, two lanes. Nothing is copied; the branch and the EAS profile pick the lane.
+Two GitHub workflows, one codebase. The EAS profile decides the app and the keys.
 
-| | Dev (testers) | Prod (riders) |
-|---|---|---|
-| Git branch | `dev` | `main` |
-| Supabase | RideNTrack-dev (`pblyvdrffiqauoqgfqjh`) | live (`lpeaignvaesoeqeijrxe`) |
-| Database deploy | automatic: `.github/workflows/deploy-dev-supabase.yml` | by hand at release (below) |
-| EAS profile / environment | `preview` (APK) and `development` (dev client) | `production` (Play bundle) |
-| App | "RideNTrack Dev", `com.ridentrack.app.dev`, scheme `ridentrack-dev` | "RideNTrack", `com.ridentrack.app`, scheme `ridentrack` |
-| EAS Update channel | `preview` / `development` | `production` |
+| Workflow | Runs | EAS profile | expo.dev environment | App |
+|---|---|---|---|---|
+| **Build RideNTrack APK (main, live)** (`build-android-apk.yml`) | every merge into `main` | `preview` | `preview` (live Supabase) | "RideNTrack", `com.ridentrack.app` |
+| **Build RideNTrack Dev APK (any branch)** (`build-android-dev-apk.yml`) | manually, any branch | `development-apk` | `development` (dev Supabase) | "RideNTrack Dev", `com.ridentrack.app.dev` |
 
-`mobile/app.config.ts` reads `APP_VARIANT` (set per profile in `mobile/eas.json`) and switches the
-name, IDs and scheme. Supabase URL and key come from the EAS environment with the same name as the
-profile (expo.dev > project > Environment variables), so a dev build can never talk to live.
+Both call `_eas-android-apk.yml`, which runs the full validation suite, waits for approval in the
+`apk-approval` GitHub environment, builds on EAS and attaches the APK to the run's Artifacts.
 
-## EAS environment variables
+`mobile/app.config.ts` reads `APP_VARIANT` from `mobile/eas.json`: `development` switches the name,
+IDs and deep-link scheme (`ridentrack-dev`) so the dev app installs next to the live one. Supabase
+keys are never in the repo; each build reads them from its expo.dev environment.
 
-Set these in each of `development`, `preview` and `production`:
+Other profiles: `development` (dev client for `npx expo start`, development environment) and
+`production` (Play Store bundle, production environment).
 
-- `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY` (dev values in development/preview, live in production)
-- `EXPO_PUBLIC_MAPBOX_TOKEN` (can be the same everywhere)
-- `EXPO_PUBLIC_SENTRY_DSN` (optional)
+## Notes
 
-## Day to day
-
-1. Feature branches merge into `dev`. Dev Supabase updates itself.
-2. Testers get a build: run the "Build Android beta APK" workflow on `dev` (EAS `preview`).
-3. JS-only fix for testers: `eas update --channel preview --environment preview --message "..."`.
-
-## Release to riders
-
-1. Open a PR `dev` -> `main`, review, merge.
-2. Apply new migrations to live: `npx supabase link --project-ref lpeaignvaesoeqeijrxe` then `npx supabase db push`
-   (check `npx supabase migration list` first; live was set up partly by hand, so the first push may need
-   `supabase migration repair` for versions that already exist there).
-3. Deploy edge functions to live: `npx supabase functions deploy --project-ref lpeaignvaesoeqeijrxe`.
-4. Build: `eas build --platform android --profile production`, then `eas submit -p android`.
-5. JS-only fix for riders: `eas update --channel production --environment production --message "..."`.
-
-## One-time setup for the dev app
-
-- The dev app has its own Android package, so EAS makes it its own signing key on the first build
-  (accept when asked). Push notifications need FCM credentials for `com.ridentrack.app.dev` too:
-  `eas credentials` > Android > preview > Google Service Account / FCM.
-- Supabase Auth (dev project): add `ridentrack-dev://**` to the redirect URLs.
+- GitHub only shows "Run workflow" for a manual workflow once the file is on the default branch
+  (`main`). Until PR #15 is merged, the dev workflow cannot be started from the Actions tab.
+- First dev build: EAS creates a signing key for `com.ridentrack.app.dev` (accept it). Push
+  notifications in the dev app need FCM credentials for that package (`eas credentials`).
+- Dev Supabase Auth: add `ridentrack-dev://**` to the redirect URLs.
+- Dev database: `deploy-dev-supabase.yml` applies migrations to RideNTrack-dev on pushes that change `supabase/`.

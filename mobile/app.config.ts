@@ -4,14 +4,14 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * Build lanes. app.json is the production app; APP_VARIANT (set per profile
  * in eas.json) turns a build into the dev app so both can live on one phone:
  *
- *   production  -> "RideNTrack"      com.ridentrack.app      live Supabase
- *   preview     -> "RideNTrack Dev"  com.ridentrack.app.dev  dev Supabase
- *   development -> "RideNTrack Dev"  com.ridentrack.app.dev  dev Supabase (dev client)
+ *   production / preview -> "RideNTrack"      com.ridentrack.app      live Supabase
+ *   development          -> "RideNTrack Dev"  com.ridentrack.app.dev  dev Supabase
+ *     (profiles "development" = dev client, "development-apk" = installable APK)
  *
  * Supabase keys come from the EAS environment of the same name, never from here.
  */
 const variant = process.env.APP_VARIANT ?? 'production';
-const isDev = variant === 'development' || variant === 'preview';
+const isDev = variant === 'development';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const base = config as ExpoConfig;

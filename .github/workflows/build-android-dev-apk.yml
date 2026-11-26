@@ -1,0 +1,25 @@
+name: Build RideNTrack Dev APK (any branch)
+
+# Manual: Actions > this workflow > Run workflow > pick any branch.
+# EAS profile "development-apk": the separate "RideNTrack Dev" app
+# (com.ridentrack.app.dev) with the keys from the expo.dev "development"
+# environment. Installs next to the live app.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ridentrack-dev-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    uses: ./.github/workflows/_eas-android-apk.yml
+    with:
+      profile: development-apk
+      lane: dev (${{ github.ref_name }})
+      label_prefix: dev
+    secrets:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
