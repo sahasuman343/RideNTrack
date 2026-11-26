@@ -30,6 +30,7 @@ async function mock(context) {
     if (url.includes('/rest/v1/profiles')) return route.fulfill({ json: { id: userId, display_name: 'Suman', subscription_tier: 'free' } });
     if (url.includes('/rest/v1/ride_participants')) return route.fulfill({ json: [{ ride_id: tripId, rides: ride }] });
     if (url.includes('/rest/v1/rides')) return route.fulfill({ json: ride });
+    if (url.includes('/rest/v1/trip_waypoints') || url.includes('/rest/v1/trip_days')) return route.fulfill({ json: [] });
     if (url.includes('/rpc/get_my_flags')) return route.fulfill({ json: [] });
     return route.fulfill({ json: [] });
   });
@@ -94,6 +95,7 @@ async function noSidewaysScroll(page, label) {
       { path: '/app/trips', heading: 'Your trips', auth: true },
       { path: '/app/trips/new', heading: 'Plan a trip', auth: true },
       { path: '/app/trips/' + tripId, heading: 'Spiti Valley Loop', auth: true },
+      { path: '/app/trips/' + tripId + '/route', heading: 'Edit route', auth: true },
     ];
     for (const width of WIDTHS) {
       const context = await browser.newContext({ viewport: { width, height: width < 768 ? 800 : 900 }, reducedMotion: 'reduce' });
