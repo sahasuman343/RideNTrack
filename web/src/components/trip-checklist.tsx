@@ -71,7 +71,7 @@ export default function TripChecklist({ tripId, userId, isLeader, names }: Props
   }
 
   return (
-    <section className="mt-10" aria-labelledby="checklist-heading">
+    <section aria-labelledby="checklist-heading">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h2 id="checklist-heading" className="font-display text-xl font-semibold">Pre-ride checklist</h2>
         {items && total > 0 && <span className="font-mono text-sm"><span className={done === total ? 'text-live' : 'text-accent'}>{done}</span><span className="text-muted">/{total} ready</span></span>}

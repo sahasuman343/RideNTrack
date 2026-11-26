@@ -81,6 +81,9 @@ jobs:
       - name: Browser trip people checks
         if: success()
         run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-people.cjs
+      - name: Browser trip money and journal checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-money.cjs
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v4

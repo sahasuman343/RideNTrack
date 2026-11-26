@@ -97,7 +97,7 @@ export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft, 
   }
 
   return (
-    <section className="mt-10" aria-labelledby="people-heading">
+    <section aria-labelledby="people-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="people-heading" className="font-display text-xl font-semibold">Riders {roster && <span className="ml-1 font-mono text-sm text-muted">{roster.length}</span>}</h2>
         <button type="button" onClick={() => void copyInvite()} className="btn btn-ghost px-3 py-1.5 text-xs">Copy invite link</button>
