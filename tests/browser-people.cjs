@@ -134,7 +134,9 @@ let failToggle = false;
     await page.getByText('3 riders ticked · bringing it: you').waitFor();
     assert.deepEqual(calls.claim_trip_checklist_item.at(-1), { p_checklist_id: 'c1', p_assign_to_self: true });
     failToggle = true;
-    await page.getByLabel(/Puncture kit/).check();
+    // click(), not check(): the tick is rolled back on purpose, and check() fails if
+    // the rollback lands before it re-reads the box.
+    await page.getByLabel(/Puncture kit/).click();
     await page.getByRole('alert').filter({ hasText: 'trip participant' }).waitFor();
     assert.equal(await page.getByLabel(/Puncture kit/).isChecked(), false, 'a failed tick rolls back');
     await page.getByText('1/2 ready').waitFor();
