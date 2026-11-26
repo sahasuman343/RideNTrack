@@ -41,7 +41,14 @@ export async function registerAccount<T>(client: RegistrationClient<T>, input: {
       if (!stillAvailable) throw new UsernameUnavailableError();
       throw new Error('We could not create your account. Please try again shortly.');
     }
-    throw new Error(error.message);
+    // Keep Supabase's code so the screen can explain it (see authErrors.ts).
+    throw Object.assign(new Error(error.message), { code: error.code, status: error.status });
+  }
+  // With email confirmation on, Supabase hides existing accounts: it returns a user
+  // with no identities and sends no email. Say so instead of "check your inbox".
+  const user = (data as { user?: { identities?: unknown[] } | null } | null)?.user;
+  if (user && Array.isArray(user.identities) && user.identities.length === 0) {
+    throw Object.assign(new Error('User already registered'), { code: 'user_already_exists' });
   }
   return data;
 }

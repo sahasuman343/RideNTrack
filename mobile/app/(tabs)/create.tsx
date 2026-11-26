@@ -332,17 +332,32 @@ export default function CreateRideScreen() {
   const isDraftClearedRef = useRef(false);
   const isCreatingRef = useRef(false);
 
+  /** Back to an empty trip. The Create tab stays mounted, so state must be cleared by hand. */
+  const resetForm = () => {
+    setCurrentStep(1);
+    setName('');
+    setOrigin(null);
+    setDestination(null);
+    setStartDate('');
+    setEndDate('');
+    setPreviewRoute(null);
+    setShowCustomizations(false);
+    setTripType('group');
+    setDescription('');
+    setMeetup(null);
+    setStops([]);
+    setStay(null);
+    setStayType('hotel');
+    setCheckIn('');
+    setCheckOut('');
+    setStayPrice('');
+  };
+
   // Load autosaved draft scoped to active user on mount / account switch
   useEffect(() => {
     if (!user?.id) {
       // Clear form when logged out
-      setName('');
-      setOrigin(null);
-      setDestination(null);
-      setStartDate('');
-      setEndDate('');
-      setStops([]);
-      setStay(null);
+      resetForm();
       return;
     }
 
@@ -686,6 +701,9 @@ export default function CreateRideScreen() {
       const scopedKey = `${DRAFT_STORAGE_KEY}_${user.id}`;
       await AsyncStorage.removeItem(scopedKey).catch(() => {});
       await AsyncStorage.removeItem(DRAFT_STORAGE_KEY).catch(() => {});
+      // The next trip starts empty; autosave stays paused until the form is cleared.
+      resetForm();
+      setTimeout(() => { isDraftClearedRef.current = false; }, 0);
 
       setActiveDialog({
         visible: true,

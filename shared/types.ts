@@ -368,6 +368,7 @@ export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
 
 export { watchRide, classifyRiderFreshness, formatLastSeenAgo, fetchRideMessages, sendRideMessage, type Connection, type RiderFreshness } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
+export * from './authErrors';
 
 export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system' | 'voice';
 
