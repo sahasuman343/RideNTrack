@@ -1,0 +1,15 @@
+# Minimal Supabase CLI config so `supabase link` / `db push` can run in CI.
+project_id = "ridentrack"
+
+# Functions that check their own signature or secret instead of a user JWT.
+[functions.revenuecat-webhook]
+verify_jwt = false
+
+[functions.razorpay-webhook]
+verify_jwt = false
+
+[functions.notify-ride-alert]
+verify_jwt = false
+
+[functions.purge-location-history]
+verify_jwt = false
