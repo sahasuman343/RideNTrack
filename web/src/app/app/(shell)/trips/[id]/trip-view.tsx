@@ -9,6 +9,7 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { formatTripDates, friendlyTripError, useRequiredSession } from '@/lib/planner';
+import TripPeople from '@/components/trip-people';
 
 const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-lg bg-map" /> });
 
@@ -191,6 +192,8 @@ export default function TripView({ tripId }: { tripId: string | null }) {
             </ol>
             <p className="mt-3 text-xs text-faint">GPX works with most navigation apps and GPS units.</p>
           </section>
+
+          {session && <TripPeople trip={trip} userId={session.user.id} onLeadershipChanged={() => setReload(v => v + 1)} onLeft={() => router.replace('/app/trips')} />}
 
           {days.length > 0 && (
             <section className="mt-10" aria-labelledby="days-heading">

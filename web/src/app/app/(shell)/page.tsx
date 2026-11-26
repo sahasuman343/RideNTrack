@@ -43,7 +43,10 @@ export default function RidesHome() {
       <p className="eyebrow-label">Logbook</p>
       <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
         <h1 className="display text-4xl sm:text-5xl">Your <em>rides</em></h1>
-        <Link href="/app/trips/new" className="btn btn-primary">Plan a trip</Link>
+        <div className="flex gap-2">
+          <Link href="/app/join" className="btn btn-ghost">Join with a code</Link>
+          <Link href="/app/trips/new" className="btn btn-primary">Plan a trip</Link>
+        </div>
       </div>
       <p className="mt-3 max-w-xl text-sm text-muted">Every ride and trip you are part of. Open one to see the pack on the map as they ride.</p>
 

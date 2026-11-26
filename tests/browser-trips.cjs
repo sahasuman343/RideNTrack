@@ -69,6 +69,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
       const req = route.request(); const url = req.url(); const method = req.method();
       if (url.includes('/auth/v1/user')) return route.fulfill({ json: session.user });
       if (url.includes('/rpc/get_my_flags')) return route.fulfill({ json: flags });
+      if (url.includes('/rpc/get_trip_roster')) return route.fulfill({ json: [{ user_id: userId, display_name: 'Suman', role: 'captain', is_active: true, last_seen: null, attendance_status: 'confirmed' }] });
       if (url.includes('/rpc/create_trip_plan')) { calls.create = req.postDataJSON(); trips = [{ ...existingTrip, id: newTripId, name: calls.create.p_trip.name }, ...trips]; return route.fulfill({ json: newTripId }); }
       if (url.includes('/rpc/save_trip_route')) { calls.saveRoute = req.postDataJSON(); return route.fulfill({ status: 204, body: '' }); }
       if (url.includes('/rpc/delete_trip')) { calls.deleted = req.postDataJSON().p_ride_id; trips = trips.filter(t => t.id !== calls.deleted); return route.fulfill({ status: 204, body: '' }); }
