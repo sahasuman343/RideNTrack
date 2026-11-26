@@ -464,3 +464,5 @@ export * from './referrals';
 export * from './clubs';
 export * from './registrations';
 export * from './headset';
+export * from './tripPlanner';
+export * from './routeEditor';
