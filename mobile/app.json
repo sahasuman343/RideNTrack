@@ -4,7 +4,7 @@
     "slug": "ridentrack",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/RnT_logo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "ridentrack",
     "plugins": [
@@ -67,8 +67,8 @@
       "package": "com.ridentrack.app",
       "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#1a1a2e",
-        "foregroundImage": "./assets/RnT_logo.png",
+        "backgroundColor": "#0c1428",
+        "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -83,7 +83,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/RnT_logo.png",
+      "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
     "extra": {
