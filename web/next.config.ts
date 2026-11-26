@@ -26,6 +26,19 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // Old app URLs, kept working for bookmarks and links already shared.
+  async redirects() {
+    const id = { type: "query" as const, key: "id", value: "(?<id>[0-9a-fA-F-]{36})" };
+    return [
+      { source: "/dashboard", destination: "/app", permanent: false },
+      { source: "/trips", destination: "/app/trips", permanent: false },
+      { source: "/trips/new", destination: "/app/trips/new", permanent: false },
+      { source: "/trip", has: [id], destination: "/app/trips/:id", permanent: false },
+      { source: "/trip", destination: "/app/trips", permanent: false },
+      { source: "/ride", has: [id], destination: "/app/rides/:id", permanent: false },
+      { source: "/ride", destination: "/app", permanent: false },
+    ];
+  },
   async headers() {
     return [
       {

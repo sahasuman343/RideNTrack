@@ -2,27 +2,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
-  formatRouteDistance, formatRouteDuration, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
+  formatRouteDistance, formatRouteDuration, tripFileName, tripRouteToGpx, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
   type Ride, type RouteWaypointType, type TripDay, type TripPlanType, type TripStay, type TripWaypoint,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { formatTripDates, friendlyTripError, useRequiredSession } from '@/lib/planner';
-import AppHeader from '@/components/app-header';
 
-const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-2xl bg-[#e4eddb]" /> });
+const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-lg bg-map" /> });
 
 type Visibility = 'private' | 'invite_only' | 'public';
-const inputClass = 'w-full rounded-xl border border-[#d9e1d4] bg-white px-4 py-3 text-sm text-[#203c43] focus:border-[#d66029] focus:outline-none';
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[#718084]';
+const inputClass = 'field';
+const labelClass = 'field-label';
 
-export default function TripView() {
-  const tripId = useSearchParams().get('id');
-  return <TripSession key={tripId} tripId={tripId} />;
-}
-
-function TripSession({ tripId }: { tripId: string | null }) {
+export default function TripView({ tripId }: { tripId: string | null }) {
   const session = useRequiredSession();
   const router = useRouter();
   const [trip, setTrip] = useState<Ride | null>(null);
@@ -96,38 +90,48 @@ function TripSession({ tripId }: { tripId: string | null }) {
     setEditing(false); setNotice('Trip details saved.'); setReload(v => v + 1);
   }
 
+  function downloadGpx() {
+    if (!trip) return;
+    const gpx = tripRouteToGpx(trip, points.map(p => ({ ...p, waypoint_type: p.type })), trip.route_geometry?.geometry ?? null);
+    const url = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = tripFileName(trip.name, 'gpx');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function remove() {
     if (!trip || busy) return;
     setBusy(true);
     const { error: deleteError } = await supabase.rpc('delete_trip', { p_ride_id: trip.id });
     if (deleteError) { setBusy(false); setConfirmDelete(false); setNotice(friendlyTripError(deleteError, 'Could not delete the trip.')); return; }
-    router.replace('/trips');
+    router.replace('/app/trips');
   }
 
-  if (!tripId) return <Shell><p className="text-[#718084]">No trip selected. <Link className="underline" href="/trips">See all trips</Link></p></Shell>;
-  if (loading) return <Shell><p role="status" className="text-[#718084]">Loading trip…</p></Shell>;
-  if (error || !trip) return <Shell><div role="alert" className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm">{error}<Link href="/trips" className="ml-4 underline">Back to trips</Link></div></Shell>;
+  if (!tripId) return <Shell><p className="text-muted">No trip selected. <Link className="underline" href="/app/trips">See all trips</Link></p></Shell>;
+  if (loading) return <Shell><p role="status" className="text-muted">Loading trip…</p></Shell>;
+  if (error || !trip) return <Shell><div role="alert" className="notice notice-error">{error}<Link href="/app/trips" className="ml-4 underline">Back to trips</Link></div></Shell>;
 
   return (
     <Shell>
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="min-w-0">
-          <Link href="/trips" className="text-sm text-[#718084] hover:text-[#d66029]">← All trips</Link>
+          <Link href="/app/trips" className="text-sm text-muted hover:text-fg">← All trips</Link>
           <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">{trip.name}</h1>
-            <span className="rounded-full bg-[#fbeee6] px-3 py-1 text-[10px] uppercase tracking-wide text-[#a2502a]">{trip.status}</span>
+            <h1 className="display text-3xl sm:text-4xl">{trip.name}</h1>
+            <span className="chip chip-accent">{trip.status}</span>
           </div>
-          <p className="mt-2 text-sm text-[#718084]">{formatTripDates(trip.start_date, trip.end_date)} · {TRIP_TYPE_LABELS[(trip.trip_type ?? 'group') as TripPlanType]} · {TRIP_VISIBILITY_LABELS[(trip.visibility ?? 'invite_only') as Visibility]}</p>
+          <p className="mt-2 text-sm text-muted">{formatTripDates(trip.start_date, trip.end_date)} · {TRIP_TYPE_LABELS[(trip.trip_type ?? 'group') as TripPlanType]} · {TRIP_VISIBILITY_LABELS[(trip.visibility ?? 'invite_only') as Visibility]}</p>
           <dl className="mt-6 grid grid-cols-3 gap-3">
             <Stat label="Distance" value={formatRouteDistance(trip.estimated_distance_meters)} />
             <Stat label="Riding time" value={formatRouteDuration(trip.estimated_duration_seconds)} />
             <Stat label="Invite code" value={trip.ride_code} mono />
           </dl>
           {trip.description && <p className="mt-6 whitespace-pre-line text-sm leading-6">{trip.description}</p>}
-          {notice && <p role="status" className="mt-6 rounded-xl border border-[#e0e7da] bg-white p-3 text-sm">{notice}</p>}
+          {notice && <p role="status" className="mt-6 notice text-sm">{notice}</p>}
 
           {editing ? (
-            <form onSubmit={save} className="mt-6 space-y-4 rounded-2xl border border-[#e0e7da] bg-white p-5">
+            <form onSubmit={save} className="mt-6 space-y-4 panel p-5">
               <h2 className="text-sm font-semibold">Edit trip details</h2>
               <div><label htmlFor="edit-name" className={labelClass}>Trip name</label><input id="edit-name" className={inputClass} value={form.name} maxLength={120} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
               <div><label htmlFor="edit-notes" className={labelClass}>Notes for riders</label><textarea id="edit-notes" className={inputClass + ' min-h-20'} value={form.description} maxLength={2000} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
@@ -140,59 +144,65 @@ function TripSession({ tripId }: { tripId: string | null }) {
               </div>
               <div><label htmlFor="edit-rules" className={labelClass}>Ride rules</label><textarea id="edit-rules" className={inputClass + ' min-h-20'} value={form.rules} maxLength={2000} onChange={e => setForm(f => ({ ...f, rules: e.target.value }))} placeholder="Helmets on, no overtaking the lead." /></div>
               <div className="flex gap-3">
-                <button type="submit" disabled={busy} className="rounded-full bg-[#d66029] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? 'Saving…' : 'Save changes'}</button>
-                <button type="button" onClick={() => setEditing(false)} className="rounded-full px-5 py-2.5 text-sm hover:bg-[#eef2ea]">Cancel</button>
+                <button type="submit" disabled={busy} className="btn btn-primary">{busy ? 'Saving…' : 'Save changes'}</button>
+                <button type="button" onClick={() => setEditing(false)} className="btn hover:bg-raise">Cancel</button>
               </div>
             </form>
           ) : (
             <div className="mt-6 flex flex-wrap gap-3">
-              {trip.status === 'active' && <Link href={'/ride?id=' + trip.id} className="rounded-full bg-[#203c43] px-5 py-2.5 text-sm font-semibold text-white">Open live map</Link>}
-              {isLeader && <button onClick={startEdit} className="rounded-full border border-[#203c43] px-5 py-2.5 text-sm font-semibold">Edit details</button>}
-              {isLeader && !confirmDelete && <button onClick={() => setConfirmDelete(true)} className="rounded-full px-5 py-2.5 text-sm text-[#a2502a] hover:bg-[#fbeee6]">Delete trip</button>}
+              {trip.status === 'active' && <Link href={'/app/rides/' + trip.id} className="btn btn-primary">Open live map</Link>}
+              {isLeader && <button onClick={startEdit} className="btn btn-ghost">Edit details</button>}
+              {isLeader && !confirmDelete && <button onClick={() => setConfirmDelete(true)} className="btn text-danger hover:bg-raise">Delete trip</button>}
             </div>
           )}
           {confirmDelete && (
-            <div role="alertdialog" aria-labelledby="delete-title" className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+            <div role="alertdialog" aria-labelledby="delete-title" className="mt-4 notice notice-error p-5">
               <p id="delete-title" className="text-sm font-semibold">Delete “{trip.name}” for everyone?</p>
-              <p className="mt-1 text-sm text-[#718084]">The route, stops, days and records go too. This cannot be undone.</p>
+              <p className="mt-1 text-sm text-muted">The route, stops, days and records go too. This cannot be undone.</p>
               <div className="mt-4 flex gap-3">
-                <button onClick={() => void remove()} disabled={busy} className="rounded-full bg-[#a2502a] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? 'Deleting…' : 'Delete trip'}</button>
-                <button onClick={() => setConfirmDelete(false)} className="rounded-full px-5 py-2.5 text-sm hover:bg-white">Keep trip</button>
+                <button onClick={() => void remove()} disabled={busy} className="btn btn-danger">{busy ? 'Deleting…' : 'Delete trip'}</button>
+                <button onClick={() => setConfirmDelete(false)} className="btn hover:bg-raise">Keep trip</button>
               </div>
             </div>
           )}
 
           <section className="mt-10" aria-labelledby="route-heading">
-            <h2 id="route-heading" className="text-lg font-semibold">Route</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="route-heading" className="font-display text-xl font-semibold">Route</h2>
+              <div className="flex gap-2">
+                <button type="button" onClick={downloadGpx} className="btn btn-ghost px-3 py-1.5 text-xs">Download GPX</button>
+                {isLeader && <Link href={'/app/trips/' + trip.id + '/route'} className="btn btn-ghost px-3 py-1.5 text-xs">Edit route</Link>}
+              </div>
+            </div>
             <ol className="mt-4 space-y-2">
               {points.map((p, i) => (
-                <li key={i} className="flex items-center gap-3 rounded-xl border border-[#edf1e9] bg-white px-4 py-3 text-sm">
-                  <span className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ' + (p.type === 'origin' || p.type === 'destination' ? 'bg-[#203c43]' : 'bg-[#d66029]')}>{p.type === 'origin' ? 'A' : p.type === 'destination' ? 'B' : i}</span>
-                  <span className="min-w-0"><span className="block truncate font-medium">{p.name}</span><span className="text-xs text-[#718084]">{WAYPOINT_META[p.type as RouteWaypointType]?.label ?? 'Stop'}</span></span>
+                <li key={i} className="flex items-center gap-3 rounded border border-line bg-surface px-4 py-3 text-sm">
+                  <span className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-mono text-xs font-bold ' + (p.type === 'origin' || p.type === 'destination' ? 'bg-fg text-bg' : 'bg-accent text-on-accent')}>{p.type === 'origin' ? 'A' : p.type === 'destination' ? 'B' : i}</span>
+                  <span className="min-w-0"><span className="block truncate font-medium">{p.name}</span><span className="text-xs text-muted">{WAYPOINT_META[p.type as RouteWaypointType]?.label ?? 'Stop'}</span></span>
                 </li>
               ))}
             </ol>
-            <p className="mt-3 text-xs text-[#9aa6a8]">Editing stops on the web is coming next. For now, change the route in the app.</p>
+            <p className="mt-3 text-xs text-faint">GPX works with most navigation apps and GPS units.</p>
           </section>
 
           {days.length > 0 && (
             <section className="mt-10" aria-labelledby="days-heading">
-              <h2 id="days-heading" className="text-lg font-semibold">Days</h2>
+              <h2 id="days-heading" className="font-display text-xl font-semibold">Days</h2>
               <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                {days.map(d => <li key={d.id} className="rounded-xl border border-[#edf1e9] bg-white px-4 py-3 text-sm"><span className="font-medium">{d.title || 'Day ' + d.day_number}</span><span className="block text-xs text-[#718084]">{d.trip_date ? formatTripDates(d.trip_date, d.trip_date) : 'Date not set'}</span></li>)}
+                {days.map(d => <li key={d.id} className="rounded border border-line bg-surface px-4 py-3 text-sm"><span className="font-medium">{d.title || 'Day ' + d.day_number}</span><span className="block text-xs text-muted">{d.trip_date ? formatTripDates(d.trip_date, d.trip_date) : 'Date not set'}</span></li>)}
               </ul>
             </section>
           )}
           {stays.length > 0 && (
             <section className="mt-10" aria-labelledby="stays-heading">
-              <h2 id="stays-heading" className="text-lg font-semibold">Stays</h2>
+              <h2 id="stays-heading" className="font-display text-xl font-semibold">Stays</h2>
               <ul className="mt-4 space-y-2">
-                {stays.map(s => <li key={s.id} className="rounded-xl border border-[#edf1e9] bg-white px-4 py-3 text-sm"><span className="font-medium">{s.name}</span><span className="block text-xs text-[#718084]">{[s.address, s.check_in && formatTripDates(s.check_in.slice(0, 10), s.check_out?.slice(0, 10))].filter(Boolean).join(' · ')}</span></li>)}
+                {stays.map(s => <li key={s.id} className="rounded border border-line bg-surface px-4 py-3 text-sm"><span className="font-medium">{s.name}</span><span className="block text-xs text-muted">{[s.address, s.check_in && formatTripDates(s.check_in.slice(0, 10), s.check_out?.slice(0, 10))].filter(Boolean).join(' · ')}</span></li>)}
               </ul>
             </section>
           )}
         </div>
-        <aside className="min-h-[420px] lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)]">
+        <aside className="min-h-[420px] lg:sticky lg:top-8 lg:h-[calc(100vh-4rem)]">
           <TripMap points={points} route={trip.route_geometry?.geometry ?? null} className="h-full min-h-[420px]" />
         </aside>
       </div>
@@ -201,9 +211,9 @@ function TripSession({ tripId }: { tripId: string | null }) {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-screen bg-[#f7f8f3] text-[#203c43]"><AppHeader /><div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">{children}</div></main>;
+  return <main className="mx-auto max-w-7xl px-4 py-8 sm:px-8">{children}</main>;
 }
 
 function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return <div className="rounded-xl border border-[#e0e7da] bg-white px-4 py-3"><dt className="text-[10px] uppercase tracking-wide text-[#718084]">{label}</dt><dd className={'mt-1 text-base font-semibold ' + (mono ? 'font-mono tracking-widest text-[#a2704a]' : '')}>{value}</dd></div>;
+  return <div className="rounded border border-line bg-surface px-4 py-3"><dt className="eyebrow-label text-[10px]">{label}</dt><dd className={'mt-1 text-base font-semibold ' + (mono ? 'font-mono tracking-widest text-accent' : '')}>{value}</dd></div>;
 }

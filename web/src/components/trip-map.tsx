@@ -29,7 +29,7 @@ export default function TripMap({ points, route, className }: Props) {
     if (!container.current || !MAPBOX_TOKEN) return;
     let instance: mapboxgl.Map;
     try {
-      instance = new mapboxgl.Map({ container: container.current, accessToken: MAPBOX_TOKEN, style: 'mapbox://styles/mapbox/streets-v12', center: [78.96, 22.59], zoom: 3.6, attributionControl: false });
+      instance = new mapboxgl.Map({ container: container.current, accessToken: MAPBOX_TOKEN, style: 'mapbox://styles/mapbox/dark-v11', center: [78.96, 22.59], zoom: 3.6, attributionControl: false });
     } catch {
       queueMicrotask(() => setError('This browser could not start the map. Your plan is still saved.'));
       return;
@@ -61,8 +61,8 @@ export default function TripMap({ points, route, className }: Props) {
     if (source) source.setData(data);
     else {
       instance.addSource('trip-route', { type: 'geojson', data });
-      instance.addLayer({ id: 'trip-route-outline', type: 'line', source: 'trip-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9 } });
-      instance.addLayer({ id: 'trip-route-line', type: 'line', source: 'trip-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#d66029', 'line-width': 4 } });
+      instance.addLayer({ id: 'trip-route-outline', type: 'line', source: 'trip-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#060607', 'line-width': 9 } });
+      instance.addLayer({ id: 'trip-route-line', type: 'line', source: 'trip-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ff8a2a', 'line-width': 4 } });
     }
     const coords: [number, number][] = route?.coordinates?.length ? route.coordinates.map(c => [c[0], c[1]]) : points.map(p => [p.longitude, p.latitude]);
     if (coords.length === 1) instance.easeTo({ center: coords[0], zoom: 9, duration: 0 });
@@ -72,11 +72,11 @@ export default function TripMap({ points, route, className }: Props) {
     }
   }, [ready, points, route]);
 
-  if (!MAPBOX_TOKEN) return <div className={'flex items-center justify-center rounded-2xl bg-[#eef2ea] text-sm text-[#718084] ' + (className ?? '')}>Map preview needs a Mapbox token.</div>;
+  if (!MAPBOX_TOKEN) return <div className={'flex items-center justify-center rounded-lg border border-line bg-map text-sm text-muted ' + (className ?? '')}>Map preview needs a Mapbox token.</div>;
   return (
-    <div className={'relative overflow-hidden rounded-2xl border border-[#e0e7da] bg-[#e4eddb] ' + (className ?? '')}>
+    <div className={'relative overflow-hidden rounded-lg border border-line bg-map ' + (className ?? '')}>
       <div className="absolute inset-0"><div ref={container} className="trip-map-canvas h-full w-full" aria-label="Trip route map" role="region" /></div>
-      {error && <p role="status" className="absolute left-3 top-3 rounded-lg bg-white/95 px-3 py-2 text-xs text-[#a2704a] shadow">{error}</p>}
+      {error && <p role="status" className="absolute left-3 top-3 notice px-3 py-2 text-xs">{error}</p>}
     </div>
   );
 }

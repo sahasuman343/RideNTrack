@@ -1,17 +1,13 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { type Ride, type LocationUpdate, type Alert, type RideMessage, QUICK_REPLY_PRESETS, ALERT_LABELS, mergeAlerts, isStale, watchRide, fetchRideMessages, sendRideMessage, type Connection } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
-import './ride.css';
+import '@/styles/ride.css';
 const RideMap = dynamic(() => import('@/components/ride-map'), { ssr: false, loading: () => <div className="ride-loading">Loading map…</div> });
-export default function RideView() {
-  const rideId = useSearchParams().get('id');
-  return <RideSession key={rideId} rideId={rideId} />;
-}
-function RideSession({ rideId }: { rideId: string | null }) {
+export default function RideView({ rideId }: { rideId: string | null }) {
   const router = useRouter();
   const panel = useRef<HTMLElement>(null);
   const [bottomInset, setBottomInset] = useState(0);
@@ -34,7 +30,7 @@ function RideSession({ rideId }: { rideId: string | null }) {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
   useEffect(() => {
-    if (!rideId || !/^[0-9a-f-]{36}$/i.test(rideId)) { router.replace('/dashboard'); return; }
+    if (!rideId || !/^[0-9a-f-]{36}$/i.test(rideId)) { router.replace('/app'); return; }
     let cancelled = false;
     let feed: ReturnType<typeof watchRide> | undefined;
     const start = async () => {
@@ -98,11 +94,11 @@ function RideSession({ rideId }: { rideId: string | null }) {
     try { await navigator.clipboard.writeText(ride!.ride_code); setCopied(true); }
     catch { setError('Copy this ride code: ' + ride?.ride_code); }
   }
-  if (!ride) return <main className="ride-loading"><Link className="wordmark" href="/dashboard">ride<span>n</span>track.</Link>
+  if (!ride) return <main className="ride-loading"><Link className="wordmark" href="/app">ride<span>n</span>track.</Link>
     {error ? <><h1>We couldn’t open this ride</h1><p role="alert">{error}</p><button className="primary-button" onClick={() => setRetry(v => v + 1)}>Try again</button></> : <><span className="loader" /><p>Connecting to your group…</p></>}
-    <Link href="/dashboard">Back to rides</Link></main>;
+    <Link href="/app">Back to rides</Link></main>;
   return <main className="ride-shell">
-    <header className="ride-topbar"><Link href="/dashboard" className="wordmark">ride<span>n</span>track<span>.</span></Link><div className="topbar-divider" /><div className="topbar-ride"><span className="eyebrow">YOUR GROUP, IN SYNC</span><h1>{ride.name}</h1></div><div className={'connection-pill ' + (online && connection === 'live' ? '' : 'is-offline')} role="status"><i />{!online ? 'Offline' : connection === 'live' ? 'Connected' : 'Reconnecting'}</div><Link href="/dashboard" className="back-link">← All rides</Link></header>
+    <header className="ride-topbar"><Link href="/app" className="wordmark">ride<span>n</span>track<span>.</span></Link><div className="topbar-divider" /><div className="topbar-ride"><span className="eyebrow">YOUR GROUP, IN SYNC</span><h1>{ride.name}</h1></div><div className={'connection-pill ' + (online && connection === 'live' ? '' : 'is-offline')} role="status"><i />{!online ? 'Offline' : connection === 'live' ? 'Connected' : 'Reconnecting'}</div><Link href="/app" className="back-link">← All rides</Link></header>
     <div className="ride-workspace">
       <aside ref={panel} className={'ride-panel ' + (expanded ? 'is-expanded' : '')}>
         <button className="mobile-panel-toggle" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}><span className="panel-handle" /><span>{liveCount} live · {riders.length} on map <b>{expanded ? '⌄' : '⌃'}</b></span></button>
