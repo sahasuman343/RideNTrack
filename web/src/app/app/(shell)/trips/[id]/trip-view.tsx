@@ -4,7 +4,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
-  formatRouteDistance, formatRouteDuration, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
+  formatRouteDistance, formatRouteDuration, tripFileName, tripRouteToGpx, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
   type Ride, type RouteWaypointType, type TripDay, type TripPlanType, type TripStay, type TripWaypoint,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
@@ -90,6 +90,16 @@ export default function TripView({ tripId }: { tripId: string | null }) {
     setEditing(false); setNotice('Trip details saved.'); setReload(v => v + 1);
   }
 
+  function downloadGpx() {
+    if (!trip) return;
+    const gpx = tripRouteToGpx(trip, points.map(p => ({ ...p, waypoint_type: p.type })), trip.route_geometry?.geometry ?? null);
+    const url = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = tripFileName(trip.name, 'gpx');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function remove() {
     if (!trip || busy) return;
     setBusy(true);
@@ -157,7 +167,13 @@ export default function TripView({ tripId }: { tripId: string | null }) {
           )}
 
           <section className="mt-10" aria-labelledby="route-heading">
-            <h2 id="route-heading" className="font-display text-xl font-semibold">Route</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="route-heading" className="font-display text-xl font-semibold">Route</h2>
+              <div className="flex gap-2">
+                <button type="button" onClick={downloadGpx} className="btn btn-ghost px-3 py-1.5 text-xs">Download GPX</button>
+                {isLeader && <Link href={'/app/trips/' + trip.id + '/route'} className="btn btn-ghost px-3 py-1.5 text-xs">Edit route</Link>}
+              </div>
+            </div>
             <ol className="mt-4 space-y-2">
               {points.map((p, i) => (
                 <li key={i} className="flex items-center gap-3 rounded border border-line bg-surface px-4 py-3 text-sm">
@@ -166,7 +182,7 @@ export default function TripView({ tripId }: { tripId: string | null }) {
                 </li>
               ))}
             </ol>
-            <p className="mt-3 text-xs text-faint">Editing stops on the web is coming next. For now, change the route in the app.</p>
+            <p className="mt-3 text-xs text-faint">GPX works with most navigation apps and GPS units.</p>
           </section>
 
           {days.length > 0 && (
