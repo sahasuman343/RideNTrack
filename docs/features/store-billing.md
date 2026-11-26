@@ -94,3 +94,15 @@ export function startRevenueCat() {
   });
 }
 ```
+
+## Beta without payments (`beta_free_pro`)
+
+For testers who will not pay: turn on `beta_free_pro` and every ride gets Pro
+limits (50 riders, 50 waypoints, unlimited days, 100 active trips) with no
+purchase. Leave `store_billing`, `club_plan` and `paid_registrations` off, so
+no paywall can sell anything. Nothing is written to subscriptions, so turning
+the flag off returns everyone to their real plan. Turn it off before charging.
+
+```sql
+UPDATE public.app_flags SET enabled = true, rollout_percent = 100 WHERE key = 'beta_free_pro';
+```

@@ -60,6 +60,7 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useEffectiveTier } from '../../src/hooks/useEffectiveTier';
 import { useRide } from '../../src/hooks/useRide';
 import { useOfflineSync } from '../../src/hooks/useOfflineSync';
 import { useRideTrail } from '../../src/hooks/useRideTrail';
@@ -151,6 +152,7 @@ export default function LiveRideScreen() {
   useKeepAwake();
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const { user, profile } = useAuth();
+  const effectiveTier = useEffectiveTier();
   const t = useT();
   const perf = usePerformanceProfile();
   const userId = user?.id;
@@ -371,7 +373,7 @@ export default function LiveRideScreen() {
 
   // Family spectator links (free during a ride with decision 3, otherwise Pro).
   const { hasActiveSpectatorLink, rideProAccess: hasRideProAccess, shareFamilySpectatorLink, revokeFamilySpectatorLink } = useSpectatorLinks({
-    ride, rideId: id, userId, subscriptionTier: profile?.subscription_tier, setMessage, onNeedsUpgrade: () => setUpgradePromptVisible(true),
+    ride, rideId: id, userId, subscriptionTier: effectiveTier, setMessage, onNeedsUpgrade: () => setUpgradePromptVisible(true),
   });
   // F12: voice notes (free during a live ride with decision 3, otherwise Pro).
   const voiceFlag = useFlag('voice_notes');

@@ -21,6 +21,7 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useEffectiveTier } from '../../src/hooks/useEffectiveTier';
 import * as Location from 'expo-location';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
@@ -317,7 +318,7 @@ export default function CreateRideScreen() {
 
   const [loading, setLoading] = useState(false);
   const { user, profile } = useAuth();
-  const tier = profile?.subscription_tier ?? 'free';
+  const tier = useEffectiveTier();
   const routePointLimit = PLAN_LIMITS[tier].maxWaypointsPerTrip;
   const router = useRouter();
   const storePrices = useStorePrices();

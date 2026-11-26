@@ -42,6 +42,8 @@ export const FLAG_DEFAULTS = {
   club_plan: false,
   /** F16: paid ride registration through Razorpay payment links. */
   paid_registrations: false,
+  /** Beta without payments: everyone gets Pro limits. Turn off before charging. */
+  beta_free_pro: false,
   /** F17: referral prompts on the spectator page and recap card. */
   referrals: true,
   /** F20: Android headset auto-start prompt (needs the native receiver). */
