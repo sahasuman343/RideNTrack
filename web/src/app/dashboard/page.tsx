@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { type Ride, type Profile } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
+import AppHeader from '@/components/app-header';
 
 export default function DashboardPage() {
   const [rides,setRides] = useState<Ride[]>([]);
@@ -36,12 +37,8 @@ export default function DashboardPage() {
     const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(!session)router.replace('/login');});
     return()=>{cancelled=true;subscription.unsubscribe();};
   },[router,retry]);
-  async function signOut(){
-    const {error}=await supabase.auth.signOut();
-    if(error)setError(error.message);else router.replace('/login');
-  }
   return <main className="min-h-screen bg-[#f7f8f3] text-[#203c43]">
-    <header className="flex items-center justify-between gap-4 border-b border-[#e5e9e2] bg-white px-6 py-5"><Link href="/dashboard" className="text-2xl font-extrabold tracking-tight">ride<span className="text-[#d66029]">n</span>track.</Link><div className="flex items-center gap-5"><span className="text-sm text-[#718084]">{profile?.display_name}</span><button className="text-sm font-medium hover:text-[#d66029]" onClick={()=>void signOut()}>Sign out</button></div></header>
+    <AppHeader name={profile?.display_name} />
     <section className="mx-auto max-w-5xl px-6 py-12"><p className="text-xs tracking-[0.2em] text-[#718084]">THE NEXT ADVENTURE STARTS HERE</p><h1 className="mt-3 text-4xl font-semibold tracking-tight">My Rides</h1><p className="mt-3 text-sm text-[#718084]">Your group, your route, all in one place.</p>
       {error&&<div role="alert" className="mt-8 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm">{error} {rides.length > 0 && 'Showing your last loaded rides.'}<button className="ml-4 underline" onClick={()=>{setError(null);setLoading(true);setRetry(v=>v+1);}}>Try again</button></div>}
       {(!error || rides.length > 0) && <>
