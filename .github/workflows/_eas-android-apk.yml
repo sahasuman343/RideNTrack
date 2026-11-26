@@ -1,0 +1,110 @@
+name: EAS Android APK (shared steps)
+# Called by build-android-apk.yml (main, live) and build-android-dev-apk.yml
+# (any branch, dev). Not run on its own.
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: EAS build profile in mobile/eas.json
+        required: true
+        type: string
+      lane:
+        description: Human label for the build summary
+        required: true
+        type: string
+      label_prefix:
+        description: Prefix for the APK file name
+        required: true
+        type: string
+    secrets:
+      EXPO_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Run complete RideNTrack validation suite
+    uses: ./.github/workflows/verify.yml
+
+  build:
+    name: EAS APK build (${{ inputs.profile }})
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment:
+      name: apk-approval
+    env:
+      EAS_PROFILE: ${{ inputs.profile }}
+    steps:
+      - name: Check out the commit being built
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Name this build
+        run: |
+          # Tags name beta releases; branch builds get "<branch>-<commit>".
+          # Slashes are not allowed in artifact names (feat/x -> feat-x).
+          if [ "$GITHUB_REF_TYPE" = tag ]; then LABEL="$GITHUB_REF_NAME"; else LABEL="${{ inputs.label_prefix }}-${GITHUB_REF_NAME}-${GITHUB_SHA::7}"; fi
+          echo "BUILD_LABEL=$(echo "$LABEL" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')" >> "$GITHUB_ENV"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install workspace dependencies
+        run: npm ci --ignore-scripts
+      - name: Install pinned EAS CLI
+        run: npm install --global eas-cli@27.10.0
+      - name: Start Android APK build on EAS
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Configure EXPO_TOKEN as a GitHub Actions secret."
+            exit 1
+          fi
+          eas build --platform android --profile "$EAS_PROFILE" --non-interactive --wait --verbose-logs --build-logger-level debug --json > "$RUNNER_TEMP/eas-build.json"
+      - name: Download APK from this EAS build
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          BUILD_ID="$(node -e "
+            const fs = require('node:fs');
+            const value = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/eas-build.json', 'utf8'));
+            const build = Array.isArray(value) ? value[0] : value;
+            const id = build?.id ?? build?.build?.id;
+            if (!id) throw new Error('EAS CLI did not return a build ID');
+            process.stdout.write(id);
+          ")"
+          echo "EAS_BUILD_ID=$BUILD_ID" >> "$GITHUB_ENV"
+          eas build:download --build-id "$BUILD_ID" --json > "$RUNNER_TEMP/eas-download.json"
+          APK_PATH="$(node -e "
+            const fs = require('node:fs');
+            const result = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/eas-download.json', 'utf8'));
+            if (!result.path) throw new Error('EAS CLI did not return the downloaded APK path');
+            process.stdout.write(result.path);
+          ")"
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/RideNTrack-${BUILD_LABEL}.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RideNTrack-${{ env.BUILD_LABEL }}-APK
+          path: RideNTrack-${{ env.BUILD_LABEL }}.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish build details
+        if: always()
+        run: |
+          {
+            echo "## RideNTrack APK"
+            echo
+            echo "- **${GITHUB_REF_TYPE^}:** \`${GITHUB_REF_NAME}\`"
+            echo "- **Commit:** \`${GITHUB_SHA}\`"
+            echo "- **EAS build ID:** \`${EAS_BUILD_ID:-not available}\`"
+            echo "- **EAS profile:** \`${EAS_PROFILE}\` (${{ inputs.lane }})"
+            echo
+            echo "Download the APK from this workflow run's **Artifacts** section."
+          } >> "$GITHUB_STEP_SUMMARY"
