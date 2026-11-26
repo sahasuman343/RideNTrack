@@ -132,7 +132,9 @@ function summary() {
     await page.getByRole('button', { name: 'Delete expense' }).click();
     await page.getByRole('status').filter({ hasText: 'Homestay in Kaza was deleted.' }).waitFor();
     assert.deepEqual(calls.delete_trip_expense.at(-1), { p_expense_id: 'e9' });
+    await page.getByRole('list', { name: 'Trip expenses' }).getByText('Homestay in Kaza').waitFor({ state: 'detached' });
     assert.equal(await page.getByRole('list', { name: 'Trip expenses' }).getByRole('listitem').count(), 2);
+    await page.getByRole('list', { name: 'Who owes whom' }).getByText('Ravi pays you').waitFor();
 
     // Journal: empty, then write with a rating and a photo link (https only).
     await page.getByRole('tab', { name: 'Journal' }).click();
