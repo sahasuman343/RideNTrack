@@ -81,3 +81,47 @@
 .ride-loading{background:transparent}
 @media(prefers-reduced-motion:reduce){.rider-marker::after{animation:none!important;display:none}}
 .rider-avatar,.rider-avatar.is-stale{background:#1b1b1e;border:1px solid #313137}.rider-avatar.is-stale{color:#7c7c84}
+
+/* Live ride pass: readable type (nothing under 11px), one scrolling panel so
+   the rider list never gets squeezed by chat, and chat bubbles that read as a
+   conversation. */
+.eyebrow{font-size:11px}
+.panel-intro h2{font-size:24px;margin:14px 0 20px}
+.route-stops small{font-size:10px}.route-stops strong{font-size:14px}
+.invite-code span{font-size:10px}.invite-code strong{font-size:15px}
+.section-heading h3{font-size:15px}.section-heading h3 span{font-size:11px;font-family:var(--font-mono)}.live-label{font-size:12px;color:#6fd3a0}
+.ride-status{font-size:11px;font-family:var(--font-mono);letter-spacing:.06em}
+.rider-search input{font-size:13px}
+.rider-detail strong{font-size:14px}.rider-detail small{font-size:12px}.rider-speed{font-size:18px}.rider-speed small{font-size:10px}.rider-empty{font-size:13px;line-height:1.6}
+.rider-row{border-radius:4px}.rider-avatar{border-radius:50%}
+.panel-footer p{font-size:12px;line-height:1.6}
+.map-label strong{font-size:14px}.map-action span{font-size:13px}
+.map-legend{font-size:11px}.map-legend i{width:8px;height:8px}.map-note{font-size:11px;border:1px solid #232327}
+.ride-alert strong{font-size:14px}.ride-alert p{font-size:12px}
+.map-error,.ride-notice{font-size:13px}
+.connection-pill{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em}.connection-pill i{animation:pill-pulse 2s ease-in-out infinite}.connection-pill.is-offline i{animation:none}
+@keyframes pill-pulse{50%{opacity:.35}}
+@media(min-width:641px){
+  .ride-panel{overflow-y:auto;overscroll-behavior:contain}
+  .rider-section{flex:none}.rider-list{overflow:visible}
+  .chat-section{max-height:none}
+}
+.chat-section{gap:10px;padding:16px}
+.chat-list{max-height:220px;gap:8px}
+.chat-msg{font-size:13px;line-height:1.45;max-width:88%;align-self:flex-start;border-radius:4px 10px 10px 10px;padding:8px 11px}
+.chat-msg small{font-size:11px}
+.chat-msg.is-mine{align-self:flex-end;border-radius:10px 4px 10px 10px}
+.chat-quick button{font-size:12px;padding:6px 10px;border-radius:99px;min-height:32px}
+.chat-quick button:hover:not(:disabled){border-color:#ff8a2a}
+.chat-quick button:disabled,.chat-form button:disabled{opacity:.45;cursor:not-allowed}
+.chat-form input{font-size:13px;padding:9px 11px;border-radius:4px}
+.chat-form button{font-size:13px;padding:9px 14px;border-radius:4px}
+@media(max-width:640px){.mobile-panel-toggle{font-size:13px}.connection-pill{font-size:0}}
+@media(prefers-reduced-motion:reduce){.connection-pill i{animation:none!important}}
+@media(max-width:640px){
+  .panel-handle{background:#3a3a40}
+  .ride-panel.is-expanded{overflow-y:auto;overscroll-behavior:contain}
+  .ride-panel.is-expanded .rider-section{flex:none}
+  .ride-panel.is-expanded .rider-list{max-height:none;overflow:visible}
+  .ride-panel.is-expanded .chat-section{max-height:none}
+}
