@@ -5,6 +5,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { type Ride, type LocationUpdate, type Alert, type RideMessage, QUICK_REPLY_PRESETS, ALERT_LABELS, mergeAlerts, isStale, watchRide, fetchRideMessages, sendRideMessage, type Connection } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
+import { useLocationShare } from '@/lib/use-location-share';
 import '@/styles/ride.css';
 const RideMap = dynamic(() => import('@/components/ride-map'), { ssr: false, loading: () => <div className="ride-loading">Loading map…</div> });
 export default function RideView({ rideId }: { rideId: string | null }) {
@@ -29,6 +30,7 @@ export default function RideView({ rideId }: { rideId: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<string[]>([]);
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
+  const share = useLocationShare(rideId, currentUserId, ride?.status === 'active');
   useEffect(() => {
     if (!rideId || !/^[0-9a-f-]{36}$/i.test(rideId)) { router.replace('/app'); return; }
     let cancelled = false;
@@ -140,7 +142,17 @@ export default function RideView({ rideId }: { rideId: string | null }) {
         <div className="panel-footer"><span>◎</span><p>Tap a rider to follow.<br /><strong>Pan the map to explore freely.</strong></p></div>
       </aside>
       <section className="ride-map-area" aria-label="Ride map and controls"><RideMap key={ride.id} ride={ride} riders={riders} selected={selected} fitRequest={fitRequest} onSelect={onSelect} bottomInset={bottomInset} now={now} />
-        <div className="map-top-controls"><div className="map-label"><span className="eyebrow">{ride.status === 'completed' ? 'RIDE COMPLETE' : 'LIVE RIDE MAP'}</span><strong>{selected ? 'Following ' + (riders.find(p => p.user_id === selected)?.display_name || 'rider') : 'A little closer, wherever you ride.'}</strong></div><button className="map-action" onClick={() => { setSelected(null); setFitRequest(v => v + 1); }}>⊞ <span>Fit group</span></button></div>
+        <div className="map-top-controls ride-controls"><div className="map-label"><span className="eyebrow">{ride.status === 'completed' ? 'RIDE COMPLETE' : 'LIVE RIDE MAP'}</span><strong>{selected ? 'Following ' + (riders.find(p => p.user_id === selected)?.display_name || 'rider') : 'A little closer, wherever you ride.'}</strong></div><div className="map-actions">{ride.status === 'active' && currentUserId && (share.state.kind === 'sharing' || share.state.kind === 'asking'
+            ? <button className="map-action share-action is-sharing" aria-pressed="true" onClick={share.stop}><i aria-hidden="true" /><span>{share.state.kind === 'asking' ? 'Waiting for location…' : 'Sharing · Stop'}</span></button>
+            : <button className="map-action share-action" aria-pressed="false" onClick={share.start}><i aria-hidden="true" /><span>Share my location</span></button>)}
+          <button className="map-action" onClick={() => { setSelected(null); setFitRequest(v => v + 1); }}>⊞ <span>Fit group</span></button></div></div>
+        {ride.status === 'active' && (share.state.kind === 'sharing' || share.state.kind === 'denied' || share.state.kind === 'unavailable') && (
+          <div className={'share-note ' + (share.state.kind === 'sharing' ? '' : 'is-problem')} role={share.state.kind === 'sharing' ? 'status' : 'alert'}>
+            {share.state.kind === 'sharing' ? <p>{share.state.lastSentAt ? 'Your group sees you. Last sent ' + new Date(share.state.lastSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '.' : 'Finding you…'}{share.state.pending > 0 ? ' ' + share.state.pending + ' waiting to send.' : ''} Only while this page is open. <a href="/download">Use the app</a> for the whole ride.</p>
+              : share.state.kind === 'denied' ? <p>Location is blocked for this site. Allow it in your browser’s site settings, then try again.</p>
+              : <p>{share.state.reason}</p>}
+          </div>
+        )}
         {(error || !online) && <div className="ride-notice" role="alert"><span>{!online ? 'You’re offline. Showing last known positions.' : error}</span><button onClick={() => { setError(null); setRetry(v => v + 1); }}>Retry</button></div>}
         <div className="map-alerts" aria-live="polite">{freshAlerts.map(a => <div className="ride-alert" key={a.id}><div><strong>{ALERT_LABELS[a.type]}</strong><p>{a.display_name} · {new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit',minute: '2-digit' })}</p>{a.message && <p>{a.message}</p>}</div><button aria-label="Dismiss alert" onClick={() => setDismissed(ids => [...ids,a.id])}>×</button></div>)}</div>
         <div className="map-bottom" style={{ bottom: bottomInset + 36 }}><div className="map-legend"><span><i className="legend-live" />Live rider</span><span><i className="legend-stale" />Last known</span><span><i className="legend-route" />Planned route</span></div><span className="map-note">{ride.status === 'completed' ? 'Location sharing has ended' : 'Positions update automatically'}</span></div>
