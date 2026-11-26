@@ -25,19 +25,37 @@ test('save_trip_route arguments match the mobile route editor', () => {
   assert.equal(args.p_waypoints[1].address, ' Narkanda ');
 });
 
-test('GPX export has every point and the road line, escaped', () => {
-  const gpx = shared.tripRouteToGpx({ name: 'Spiti <loop> & back' }, [
-    pt(0, 'origin', 'Shimla', 77.1734567891, 31.1), pt(1, 'destination', 'Kaza "camp"', 78.07, 32.22),
-  ], route.geometry);
-  assert.match(gpx, /^<\?xml version="1.0"/);
-  assert.match(gpx, /<metadata><name>Spiti &lt;loop&gt; &amp; back<\/name>/);
-  assert.equal((gpx.match(/<wpt /g) || []).length, 2);
-  assert.match(gpx, /<wpt lat="31.1" lon="77.173457"><name>Shimla<\/name><type>origin<\/type><\/wpt>/);
-  assert.match(gpx, /Kaza &quot;camp&quot;/);
-  assert.equal((gpx.match(/<trkpt /g) || []).length, 3);
-  const noLine = shared.tripRouteToGpx({ name: '' }, [pt(0, 'origin', 'A', 1, 2)], null);
-  assert.doesNotMatch(noLine, /<trk>/);
-  assert.match(noLine, /rideNtrack trip/);
+const gpxFile = body => `<?xml version="1.0"?><gpx version="1.1"><metadata><name>Spiti &amp; back</name></metadata>${body}</gpx>`;
+
+test('GPX import prefers named waypoints and sets the ends', () => {
+  const r = shared.gpxToRoutePoints(gpxFile(`
+    <wpt lat="31.10" lon="77.17"><name>Shimla</name><type>fuel</type></wpt>
+    <wpt lat="31.26" lon="77.45"><name>Narkanda</name><type>origin</type></wpt>
+    <wpt lat="31.44" lon="77.63"><name>Rampur</name><type>food</type></wpt>
+    <wpt lat="32.22" lon="78.07"><name>Kaza</name></wpt>
+    <trk><trkseg><trkpt lat="1" lon="1"/><trkpt lat="2" lon="2"/></trkseg></trk>`), 5);
+  assert.equal(r.source, 'waypoints');
+  assert.equal(r.name, 'Spiti & back');
+  assert.deepEqual(r.points.map(p => [p.sequence, p.waypoint_type, p.name]), [
+    [0, 'origin', 'Shimla'], [1, 'stop', 'Narkanda'], [2, 'food', 'Rampur'], [3, 'destination', 'Kaza'],
+  ]);
+  assert.equal(shared.validateRoutePoints(r.points), null, 'imported points pass the save checks');
+});
+
+test('GPX import thins a long track to the plan limit and keeps both ends', () => {
+  const pts = Array.from({ length: 30 }, (_, i) => `<trkpt lat="${30 + i / 10}" lon="${77 + i / 10}"/>`).join('');
+  const r = shared.gpxToRoutePoints(gpxFile(`<trk><trkseg>${pts}</trkseg></trk>`), 5);
+  assert.equal(r.source, 'track');
+  assert.equal(r.total, 30);
+  assert.equal(r.points.length, 5);
+  assert.deepEqual([r.points[0].latitude, r.points[4].latitude], [30, 32.9]);
+  assert.equal(r.points[2].name, 'Track point 3');
+  assert.equal(shared.validateRoutePoints(r.points), null);
+});
+
+test('GPX import explains an empty or broken file', () => {
+  assert.throws(() => shared.gpxToRoutePoints('', 5), /no route/);
+  assert.throws(() => shared.gpxToRoutePoints(gpxFile('<wpt lat="abc" lon="77"><name>x</name></wpt>'), 5), /no route/);
 });
 
 test('trip file names are safe', () => {

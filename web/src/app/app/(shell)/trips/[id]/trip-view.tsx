@@ -4,7 +4,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
-  formatRouteDistance, formatRouteDuration, tripFileName, tripRouteToGpx, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
+  formatRouteDistance, formatRouteDuration, exportTripToGpx, tripFileName, TRIP_TYPE_LABELS, TRIP_VISIBILITY_LABELS, WAYPOINT_META,
   type Ride, type RouteWaypointType, type TripDay, type TripPlanType, type TripStay, type TripWaypoint,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
@@ -92,7 +92,14 @@ export default function TripView({ tripId }: { tripId: string | null }) {
 
   function downloadGpx() {
     if (!trip) return;
-    const gpx = tripRouteToGpx(trip, points.map(p => ({ ...p, waypoint_type: p.type })), trip.route_geometry?.geometry ?? null);
+    const gpx = exportTripToGpx({
+      tripName: trip.name,
+      description: trip.description,
+      waypoints: waypoints.length
+        ? waypoints.map(w => ({ name: w.name, latitude: w.latitude, longitude: w.longitude, waypoint_type: w.waypoint_type, notes: w.notes }))
+        : points.map(p => ({ name: p.name, latitude: p.latitude, longitude: p.longitude, waypoint_type: p.type })),
+      routeCoordinates: trip.route_geometry?.geometry?.coordinates as [number, number][] | undefined,
+    });
     const url = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
     const a = document.createElement('a');
     a.href = url; a.download = tripFileName(trip.name, 'gpx');
