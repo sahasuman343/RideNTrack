@@ -139,7 +139,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     await page.goto(origin + '/app/trips/' + tripId);
     await page.getByRole('heading', { name: 'Spiti Valley Loop' }).waitFor();
     assert.equal(await page.locator('section[aria-labelledby="route-heading"] ol li').count(), 3);
-    await page.getByText('SPITI1').waitFor();
+    await page.getByText('SPITI1', { exact: true }).first().waitFor();
     await page.getByRole('heading', { name: 'Days' }).waitFor();
     assert.ok((await page.locator('.trip-map-canvas').boundingBox()).height > 300, 'trip map fills its panel');
     await page.screenshot({ path: 'test-results/trip-view-desktop.png' });
