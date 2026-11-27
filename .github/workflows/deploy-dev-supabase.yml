@@ -41,6 +41,16 @@ jobs:
       - name: Link the dev project
         if: steps.gate.outputs.ready == 'true'
         run: supabase link --project-ref "$DEV_PROJECT_REF"
+      # One-time: migrations after 036 were renamed from timestamps to 037-064.
+      # Dev already ran them under the old versions, so record the new versions
+      # instead of running them again. Does nothing once the old versions are gone.
+      - name: Remap renamed migration versions
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          if supabase migration list --linked | grep -Eq '20261004062839|20261201002600'; then
+            supabase migration repair --linked --status reverted 20261004062839 20261004141301 20261201000100 20261201000200 20261201000300 20261201000400 20261201000500 20261201000600 20261201000700 20261201000800 20261201000900 20261201001000 20261201001100 20261201001200 20261201001300 20261201001400 20261201001500 20261201001600 20261201001700 20261201001800 20261201001900 20261201002000 20261201002100 20261201002200 20261201002300 20261201002400 20261201002500 20261201002600
+            supabase migration repair --linked --status applied 037 038 039 040 041 042 043 044 045 046 047 048 049 050 051 052 053 054 055 056 057 058 059 060 061 062 063 064
+          fi
       - name: Apply migrations
         if: steps.gate.outputs.ready == 'true'
         run: supabase db push --include-all
