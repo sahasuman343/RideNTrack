@@ -75,7 +75,7 @@ const session = {
     await page.getByLabel('New password').fill('abc');
     await page.getByLabel('Type it again').fill('abc');
     await page.getByRole('button', { name: 'Save new password' }).click();
-    await page.getByRole('alert').filter({ hasText: 'at least 6 characters' }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'Use at least 8 characters.' }).waitFor();
     await page.getByLabel('New password').fill('test-only-fixture-2');
     await page.getByLabel('Type it again').fill('test-only-fixture-3');
     await page.getByRole('button', { name: 'Save new password' }).click();

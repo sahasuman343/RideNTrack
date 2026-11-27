@@ -123,7 +123,7 @@ export default function RegisterScreen() {
             ref={passwordRef}
             label="Password"
             icon="lock-closed-outline"
-            placeholder={`At least ${MIN_PASSWORD} characters`}
+            placeholder={`${MIN_PASSWORD}+ characters, letters and numbers`}
             value={password}
             onChangeText={edit('password', setPassword)}
             error={errors.password}

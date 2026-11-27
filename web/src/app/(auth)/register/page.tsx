@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AuthFrame from '@/components/auth-frame';
-import { referralCodeFrom, referralSourceFrom, registerAccount, UsernameUnavailableError, type ReferralSource } from '@ridentrack/shared';
+import { MIN_PASSWORD, passwordProblem, referralCodeFrom, referralSourceFrom, registerAccount, UsernameUnavailableError, type ReferralSource } from '@ridentrack/shared';
 
 export default function RegisterPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const query = use(searchParams);
@@ -32,6 +32,8 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
     setError('');
     setSuccessMsg('');
     setUsernameError(false);
+    const problem = passwordProblem(password);
+    if (problem) { setError(problem); setLoading(false); return; }
     try {
       const data = await registerAccount(supabase, {
         email, password, username, displayName,
@@ -107,12 +109,12 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
           />
           <input
             type="password"
-            placeholder="Password (min 6 characters)"
+            placeholder={`Password (${MIN_PASSWORD}+ letters and numbers)`}
             aria-label="Password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            minLength={6}
+            minLength={MIN_PASSWORD}
             className="field"
             required
           />
