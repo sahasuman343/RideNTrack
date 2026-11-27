@@ -79,6 +79,15 @@ let failToggle = false;
     await page.waitForURL(u => u.pathname === '/app/trips/' + tripId);
     assert.equal(calls.join_ride_by_code.at(-1).p_code, 'SPITI1');
 
+    // Tabs: Plan opens first, the rest are one click (or arrow key) away.
+    assert.equal(await page.getByRole('tab', { name: 'Plan' }).getAttribute('aria-selected'), 'true');
+    assert.equal(await page.getByRole('heading', { name: /Riders/ }).count(), 0, 'other tabs stay hidden');
+    await page.getByRole('tab', { name: 'Plan' }).focus();
+    await page.keyboard.press('ArrowRight');
+    // Wait for the re-render rather than reading the attribute straight after the key press.
+    await page.getByRole('tab', { name: /Riders/, selected: true }).waitFor({ timeout: 5000 });
+    await page.waitForURL(u => u.hash === '#riders');
+
     // Roster and RSVP.
     await page.getByRole('heading', { name: /Riders/ }).waitFor();
     const list = page.getByRole('list', { name: 'Riders on this trip' });
@@ -112,6 +121,7 @@ let failToggle = false;
     assert.deepEqual(calls.remove_trip_participant.at(-1), { p_ride_id: tripId, p_user_id: ashaId });
 
     // Checklist: the leader seeds defaults once, ticks are personal, gear can be claimed.
+    await page.getByRole('tab', { name: 'Checklist' }).click();
     await page.getByRole('heading', { name: 'Pre-ride checklist' }).waitFor();
     await page.getByLabel(/Tyre pressure checked/).waitFor();
     assert.equal(calls.seed_default_trip_checklists.length, 1);
@@ -136,6 +146,7 @@ let failToggle = false;
     await page.screenshot({ path: 'test-results/trip-checklist-desktop.png' });
 
     // Hand over, then leave as an ordinary rider.
+    await page.getByRole('tab', { name: /Riders/ }).click();
     await page.getByRole('button', { name: 'Manage Ravi' }).click();
     await page.getByRole('button', { name: 'Make trip leader' }).click();
     await page.getByRole('button', { name: 'Hand over' }).click();
@@ -152,16 +163,17 @@ let failToggle = false;
     // Phone width.
     trip.admin_id = userId;
     await page.setViewportSize({ width: 360, height: 800 });
-    await page.goto(origin + '/app/trips/' + tripId);
+    await page.goto(origin + '/app/trips/' + tripId + '#riders');
     await page.getByRole('list', { name: 'Riders on this trip' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 360px');
+    assert.equal(await page.evaluate(() => { const t = document.querySelector('[role=tablist]'); return t.scrollWidth <= t.clientWidth + 1 || getComputedStyle(t).overflowX === 'auto'; }), true, 'tab strip scrolls inside itself');
     await page.getByRole('heading', { name: /Riders/ }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: 'test-results/trip-people-mobile.png' });
     await page.goto(origin + '/app/join');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'join page fits at 360px');
     await page.screenshot({ path: 'test-results/join-mobile.png' });
     assert.deepEqual(errors, []);
-    console.log('People browser checks passed: join by link and code (with error), roster, RSVP, invite link, roles, attendance, remove, checklist seed/tick/claim/rollback, hand over, leave, phone width; no page errors.');
+    console.log('People browser checks passed: join by link and code (with error), roster, RSVP, invite link, roles, attendance, remove, tabs (click, arrow keys, #hash), checklist seed/tick/claim/rollback, hand over, leave, phone width; no page errors.');
   } catch (error) {
     if (page) { fs.mkdirSync('test-results', { recursive: true }); await page.screenshot({ path: 'test-results/people-failure.png', fullPage: true }); }
     throw error;

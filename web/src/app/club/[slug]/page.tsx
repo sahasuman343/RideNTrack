@@ -102,7 +102,10 @@ export default async function ClubPage({ params }: { params: Promise<{ slug: str
               : 'Get RideNTrack, open this page on your phone, and tap Join.'}
           </p>
         </div>
-        <Link className="club-cta" href={join}>Create your account</Link>
+        <div className="club-ctas">
+          <Link className="club-cta" href={join}>Create your account</Link>
+          <Link className="club-signin" href={`/app/clubs/${encodeURIComponent(club.slug)}`}>Have an account? Join on the web</Link>
+        </div>
       </section>
 
       <footer className="club-foot">

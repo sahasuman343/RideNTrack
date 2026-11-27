@@ -171,9 +171,19 @@ export function nextOccurrences(rule: string, fromIso: string, count = 4, anchor
 }
 
 /** The first date a series still needs planned, skipping dates already scheduled. */
-export function nextUnplannedDate(series: Pick<ClubSeries, 'recurrence_rule' | 'planned_dates'>, todayIso: string): string | null {
+export function nextUnplannedDate(series: Pick<ClubSeries, 'recurrence_rule' | 'planned_dates'>, todayIso: string, anchorIso?: string | null): string | null {
   const planned = new Set(series.planned_dates.map(d => String(d).slice(0, 10)));
-  return nextOccurrences(series.recurrence_rule, todayIso, 12).find(d => !planned.has(d)) ?? null;
+  return nextOccurrences(series.recurrence_rule, todayIso, 12, anchorIso).find(d => !planned.has(d)) ?? null;
+}
+
+/**
+ * A date the series is known to ride on, so "every other week" keeps its
+ * weeks: the earliest planned date, or else the template trip's date.
+ */
+export function seriesAnchor(series: Pick<ClubSeries, 'planned_dates' | 'template_ride_id'>, rides: Pick<ClubRideRow, 'id' | 'start_date'>[]): string | null {
+  const planned = series.planned_dates.map(d => String(d).slice(0, 10)).sort()[0];
+  if (planned) return planned;
+  return rides.find(r => r.id === series.template_ride_id)?.start_date?.slice(0, 10) ?? null;
 }
 
 export function clubRoleLabel(role: ClubRole): string {
