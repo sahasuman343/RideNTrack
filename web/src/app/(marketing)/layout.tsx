@@ -5,7 +5,7 @@ import { FOOTER_LINKS } from '@/lib/site';
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <div className="grain">
       <a href="#content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-accent focus:px-3 focus:py-2 focus:text-on-accent">Skip to content</a>
       <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 px-4 pt-4 sm:flex-nowrap sm:px-8 sm:py-5">
         <Wordmark />
@@ -29,6 +29,6 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           </nav>
         </div>
       </footer>
-    </>
+    </div>
   );
 }

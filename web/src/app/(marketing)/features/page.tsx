@@ -2,17 +2,18 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { TIER_LIMITS } from '@ridentrack/shared';
 import { LOCATION_PURGE_SCHEDULED } from '@/lib/site';
+import MarketingIcon, { type IconName } from '@/components/marketing-icon';
 
 export const metadata: Metadata = {
   title: 'Features',
   description: 'Trip planning, a live group map, pack alerts, SOS, family links, shared expenses and GPX for motorcycle groups.',
 };
 
-type Group = { id: string; title: string; intro: string; items: { name: string; text: string; pro?: boolean; app?: boolean }[] };
+type Group = { id: string; icon: IconName; title: string; intro: string; items: { name: string; text: string; pro?: boolean; app?: boolean }[] };
 
 const GROUPS: Group[] = [
   {
-    id: 'planning', title: 'Planning', intro: 'Build the trip once and every rider gets the same plan.',
+    id: 'planning', icon: 'map', title: 'Planning', intro: 'Build the trip once and every rider gets the same plan.',
     items: [
       { name: 'Route and stops', text: 'Search for places, add stops by kind (fuel, food, chai, viewpoint, mechanic, meetup, stay) and reorder them. The road route, distance and riding time update as you edit.' },
       { name: 'Multi-day trips', text: 'Split a tour into dated days with an overnight stay for each.', pro: true },
@@ -24,7 +25,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    id: 'riding', title: 'On the ride', intro: 'Everything here runs in the phone app, because it needs the phone’s location.',
+    id: 'riding', icon: 'ride', title: 'On the ride', intro: 'Everything here runs in the phone app, because it needs the phone’s location.',
     items: [
       { name: 'Live group map', text: 'The planned route, each rider’s trail and live position, speed, distance covered and distance to the next stop.', app: true },
       { name: 'Pack roles and gaps', text: 'Captain, co-captain, marshal, sweeper and member. The app shows the order along the route and alerts when a rider falls too far behind (1 km unless the leader changes it) or leaves the route.', app: true },
@@ -36,7 +37,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    id: 'safety', title: 'Safety', intro: 'Joining a ride and every safety tool stay free.',
+    id: 'safety', icon: 'shield', title: 'Safety', intro: 'Joining a ride and every safety tool stay free.',
     items: [
       { name: 'SOS', text: 'Hold to confirm. Sends your exact position to everyone on the ride, prepares a text with a map link to your emergency contact, and can dial 112.', app: true },
       { name: 'Emergency details, opt in', text: 'Choose whether your blood group and emergency contact are shown to riders on the same ride. Nobody else sees them.' },
@@ -45,7 +46,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    id: 'after', title: 'After the ride', intro: 'The trip doesn’t end at the last fuel stop.',
+    id: 'after', icon: 'wallet', title: 'After the ride', intro: 'The trip doesn’t end at the last fuel stop.',
     items: [
       { name: 'Shared expenses', text: 'Log fuel, food and stays with equal or custom splits. rideNtrack works out the fewest payments to settle up.', pro: true },
       { name: 'Ride journal', text: 'Notes, odometer readings and photos for each day, and a recap card to share.', pro: true },
@@ -54,7 +55,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    id: 'clubs', title: 'Clubs', intro: 'For groups that ride together often.',
+    id: 'clubs', icon: 'users', title: 'Clubs', intro: 'For groups that ride together often.',
     items: [
       { name: 'Club page', text: 'A public page with the club’s next rides, and a join code or open joining.' },
       { name: 'Regular rides', text: 'Set up a weekly, fortnightly or monthly ride and plan each one from the club in one step.' },
@@ -79,13 +80,13 @@ export default function FeaturesPage() {
 
       {GROUPS.map(g => (
         <section key={g.id} id={g.id} aria-labelledby={g.id + '-h'} className="mt-16 scroll-mt-6">
-          <div className="grid gap-2 border-b border-line pb-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] md:gap-8">
-            <h2 id={g.id + '-h'} className="font-display text-3xl font-semibold">{g.title}</h2>
-            <p className="text-muted md:pt-2">{g.intro}</p>
+          <div className="grid gap-3 pb-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] md:items-center md:gap-8">
+            <h2 id={g.id + '-h'} className="flex items-center gap-4 font-display text-3xl font-semibold"><span className="icon-tile"><MarketingIcon name={g.icon} /></span>{g.title}</h2>
+            <p className="text-muted">{g.intro}</p>
           </div>
-          <dl className="grid gap-x-8 sm:grid-cols-2">
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {g.items.map(item => (
-              <div key={item.name} className="border-b border-line py-5">
+              <div key={item.name} className="panel lift p-5">
                 <dt className="flex flex-wrap items-center gap-2 font-semibold">
                   {item.name}
                   {item.pro && <span className="chip chip-accent">Pro</span>}

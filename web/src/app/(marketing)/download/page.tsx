@@ -28,7 +28,7 @@ export default function DownloadPage() {
 
       <div className="mt-10 grid gap-4 sm:grid-cols-2">
         {STORES.map(s => (
-          <div key={s.name} className="panel flex flex-col p-6">
+          <div key={s.name} className="panel glow-panel lift flex flex-col p-6">
             <p className="eyebrow-label">{s.device}</p>
             <h2 className="mt-2 font-display text-2xl font-semibold">{s.name}</h2>
             {s.url ? (

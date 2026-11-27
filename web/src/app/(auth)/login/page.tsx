@@ -48,7 +48,10 @@ export default function LoginPage({ searchParams }: { searchParams: Promise<{ [k
           <input id="login-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} className="field" required />
         </div>
         <div>
-          <label htmlFor="login-password" className="field-label">Password</label>
+          <div className="flex items-baseline justify-between gap-3">
+            <label htmlFor="login-password" className="field-label">Password</label>
+            <Link href="/forgot-password" className="mb-1.5 text-xs text-muted underline-offset-4 hover:text-fg hover:underline">Forgot password?</Link>
+          </div>
           <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} className="field" required />
         </div>
         <button type="submit" disabled={loading} className="btn btn-primary w-full py-3">{loading ? 'Signing in…' : 'Sign in'}</button>

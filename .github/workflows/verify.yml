@@ -93,6 +93,9 @@ jobs:
       - name: Browser marketing page checks
         if: success()
         run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-marketing.cjs
+      - name: Browser password reset checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-password-reset.cjs
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v4

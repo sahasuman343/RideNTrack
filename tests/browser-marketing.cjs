@@ -69,6 +69,8 @@ const inkOffsets = page => page.$$eval('.journey-ink', els => els.map(e => Numbe
       await page.goto(origin + '/');
       await page.waitForTimeout(100);
       assert.ok((await inkOffsets(page)).every(o => o === 0), 'route fully drawn with reduced motion');
+      assert.equal(await page.locator('.scene[aria-hidden="true"]').count(), 1, '3D hero is decorative');
+      assert.deepEqual(await page.$$eval('.scene-rider, .scene-plane', els => els.map(e => getComputedStyle(e).animationName)), ['none', 'none', 'none'], '3D hero holds still with reduced motion');
       await context.close();
     }
 
@@ -77,19 +79,24 @@ const inkOffsets = page => page.$$eval('.journey-ink', els => els.map(e => Numbe
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(origin + '/');
-    await page.waitForTimeout(200);
+    await page.locator('.journey-ink-whole').first().waitFor({ state: 'detached' });
+    await page.waitForTimeout(300);
     const before = await inkOffsets(page);
     assert.ok(before.every(o => o === 1), 'route undrawn before scrolling: ' + before);
     assert.equal(await page.locator('.journey-stop.is-reached').count(), 0);
     await page.locator('.journey-stop').nth(2).scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, 200));
-    await page.waitForTimeout(300);
+    // The ink eases over 0.12 s; wait for it to settle rather than sampling mid-transition.
+    await page.waitForFunction(() => {
+      const v = [...document.querySelectorAll('.journey-ink')].map(e => parseFloat(getComputedStyle(e).strokeDashoffset));
+      return v[0] === 0 && v[v.length - 1] === 1;
+    }, null, { timeout: 5000 }).catch(() => {});
     const mid = await inkOffsets(page);
     await page.screenshot({ path: 'test-results/marketing/home-route-midway-1440.png' });
     assert.ok(mid[0] === 0 && mid[mid.length - 1] === 1, 'first segments drawn, last not yet: ' + mid);
     assert.ok(await page.locator('.journey-stop.is-reached').count() >= 2, 'reached stops light up');
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(600);
     assert.ok((await inkOffsets(page)).every(o => o === 0), 'whole route drawn at the bottom');
 
     // FAQ answers open by keyboard.

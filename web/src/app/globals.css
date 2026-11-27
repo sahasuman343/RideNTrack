@@ -51,7 +51,7 @@ body {
 
 @layer components {
   /* Display type: Fraunces at its largest optical size. */
-  .display { font-family: var(--font-display); font-weight: 600; font-variation-settings: "opsz" 144; letter-spacing: -.02em; line-height: 1.02; }
+  .display { font-family: var(--font-fraunces-display), Georgia, serif; font-weight: 600; letter-spacing: -.02em; line-height: 1.02; }
   .display em { font-style: italic; color: var(--color-accent); }
   .eyebrow-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--color-muted); }
 
@@ -130,6 +130,71 @@ body {
 @keyframes draw { to { stroke-dashoffset: 0; } }
 @keyframes pin { to { opacity: 1; } }
 
+/* Home hero: a slab of terrain in CSS 3D, with the route and two riders on it. */
+@property --drift { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
+.scene { position: relative; height: 320px; perspective: 1500px; perspective-origin: 50% 30%; pointer-events: none; overflow-x: clip; overflow-y: visible; }
+.scene-tilt { --rx: 57deg; --rz: -34deg; --px: 0deg; --pz: 0deg; position: absolute; left: 50%; top: 50%; width: 600px; height: 600px; margin: -300px 0 0 -300px; transform-style: preserve-3d; transform: scale(.56); }
+.scene-plane {
+  position: relative; transform-style: preserve-3d;
+  transform: rotateX(calc(var(--rx) + var(--px))) rotateZ(calc(var(--rz) + var(--pz) + var(--drift)));
+  animation: drift 16s ease-in-out infinite alternate;
+  transition: transform .6s cubic-bezier(.2, .7, .2, 1);
+}
+.scene-plane::before, .scene-plane::after { content: ""; position: absolute; background: linear-gradient(180deg, #1a1a1e, #08080a); }
+.scene-plane::before { left: 0; top: 100%; width: 100%; height: 26px; transform-origin: top; transform: rotateX(-90deg); }
+.scene-plane::after { top: 0; left: 100%; width: 26px; height: 100%; transform-origin: left; transform: rotateY(90deg); background: linear-gradient(90deg, #141417, #060607); }
+.scene-base, .scene-layer, .scene-route { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.scene-base { box-shadow: 0 0 0 1px #26262b, 0 60px 120px -20px rgba(255, 138, 42, .18); }
+.scene-layer path { fill: rgba(237, 235, 230, .045); stroke: rgba(237, 235, 230, .2); stroke-width: 1; }
+.scene-road { fill: none; stroke: #000; stroke-width: 11; stroke-linecap: round; opacity: .75; }
+.scene-ink { fill: none; stroke: var(--color-accent); stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.6s cubic-bezier(.6, .1, .2, 1) .3s forwards; filter: drop-shadow(0 0 6px rgba(255, 138, 42, .7)); }
+.scene-at, .scene-rider { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-style: preserve-3d; }
+.scene-at { transform: translateZ(3px); }
+.scene-ring { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 999px; border: 2px solid var(--color-fg); background: var(--color-bg); }
+.scene-ring::after { content: ""; position: absolute; inset: -2px; border-radius: inherit; border: 2px solid currentColor; animation: ring 2.4s ease-out infinite; }
+.scene-ring-fg { color: var(--color-fg); }
+.scene-ring-accent { color: var(--color-accent); border-color: var(--color-accent); }
+.scene-bb {
+  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; transform-origin: 0 0;
+  transform: rotateZ(calc(-1 * (var(--rz) + var(--pz) + var(--drift)))) rotateX(calc(-1 * (var(--rx) + var(--px)))) translate(-50%, -100%);
+}
+.scene-tag { white-space: nowrap; border-radius: 3px; border: 1px solid var(--color-line2); background: rgba(18, 18, 20, .92); padding: 5px 9px; font: 600 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--color-fg); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
+.scene-tag-accent { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 50%, transparent); }
+.scene-tag-live { color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 45%, transparent); }
+.scene-stem { width: 1px; height: 34px; background: linear-gradient(180deg, var(--color-line2), transparent); }
+.scene-rider { offset-rotate: 0deg; offset-anchor: 0 0; animation: ride 22s linear infinite; }
+.scene-rider-lead { animation-delay: -8s; }
+.scene-rider-sweep { animation-delay: -5.6s; }
+.scene-dot { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 999px; background: var(--color-live); box-shadow: 0 0 0 3px #0b0b0d, 0 0 18px 4px rgba(111, 211, 160, .55); transform: translateZ(4px); }
+@keyframes ride { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@keyframes drift { from { --drift: -5deg; } to { --drift: 5deg; } }
+/* The slow sway re-styles the scene every frame, so it only runs on larger screens. */
+@media (max-width: 1023px) { .scene-plane { animation: none; } }
+@media (max-width: 639px) { .scene-tag { font-size: 19px; padding: 7px 12px; } .scene-stem { height: 48px; } }
+@media (min-width: 640px) { .scene { height: 440px; } .scene-tilt { transform: scale(.7); } }
+@media (min-width: 1024px) { .scene { height: 500px; overflow: visible; } .scene-tilt { transform: scale(.78) translateX(30px); } }
+
+/* Paper grain over the whole page, so large black areas read as a surface. */
+.grain { overflow-x: clip; }
+.grain::before { content: ""; position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .035;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+
+/* Ember-edged card that lifts a little on hover. */
+.lift { transition: transform .25s cubic-bezier(.2, .7, .2, 1), border-color .25s, box-shadow .25s; }
+.lift:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-line)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 18px 40px -18px rgba(255, 138, 42, .35); }
+.glow-panel { position: relative; overflow: hidden; }
+.glow-panel::before { content: ""; position: absolute; inset: -40% -10% auto auto; width: 70%; aspect-ratio: 1; border-radius: 999px; background: radial-gradient(closest-side, rgba(255, 138, 42, .22), transparent); pointer-events: none; }
+.icon-tile { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: var(--radius-lg); border: 1px solid var(--color-line2); background: linear-gradient(180deg, rgba(255, 255, 255, .07), transparent 60%), var(--color-raise); color: var(--color-accent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 24px -12px rgba(255, 138, 42, .5); }
+.journey-ink { filter: drop-shadow(0 0 5px rgba(255, 138, 42, .55)); }
+.journey-ink-whole { stroke-dasharray: none; }
+.journey-ghost { display: none; }
+@media (min-width: 768px) {
+  .journey-ghost { display: block; grid-row: 1; align-self: start; margin-top: -1.5rem; font: 600 10rem/1 var(--font-display); letter-spacing: -.04em; color: transparent; -webkit-text-stroke: 1px var(--color-line2); opacity: .9; transition: -webkit-text-stroke-color .6s; user-select: none; }
+  .journey-left .journey-ghost { grid-column: 3; }
+  .journey-right .journey-ghost { grid-column: 1; text-align: right; }
+  .is-reached .journey-ghost { -webkit-text-stroke-color: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+}
+
 /* Long-form pages: privacy, terms, support. */
 .prose-page { max-width: 46rem; }
 .prose-page h2 { margin-top: 2.75rem; font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
@@ -149,6 +214,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   .trip-marker::after, .journey-dot::after { animation: none !important; }
+  .scene-plane { animation: none !important; transition: none !important; }
+  .scene-ink { stroke-dashoffset: 0 !important; animation: none !important; }
+  .scene-ring::after { animation: none !important; }
+  .scene-rider { animation: none !important; }
+  .scene-rider-lead { offset-distance: 46%; }
+  .scene-rider-sweep { offset-distance: 36%; }
+  .lift:hover { transform: none; }
   .hero-ink { stroke-dashoffset: 0 !important; animation: none !important; }
   .hero-pin { opacity: 1 !important; animation: none !important; }
 }

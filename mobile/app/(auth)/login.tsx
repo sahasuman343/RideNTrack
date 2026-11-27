@@ -1,10 +1,13 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Image, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Image, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { authProblem, validateSignIn, type AuthField, type AuthProblem } from '@ridentrack/shared';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { AuthInput, AuthProblemDialog, useResendConfirmation } from '../../src/components/auth';
+
+// Password reset happens on the website, which works the same for app and web accounts.
+const WEB_BASE = process.env.EXPO_PUBLIC_WEB_URL || 'https://ridentrack.app';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -94,6 +97,10 @@ export default function LoginScreen() {
             accessibilityState={{ busy: loading, disabled: loading }}
           >
             {loading ? <ActivityIndicator color={theme.onAccent} /> : <Text style={styles.buttonText}>Sign In</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => void Linking.openURL(`${WEB_BASE}/forgot-password`)} style={styles.link} accessibilityRole="link" accessibilityHint="Opens the rideNtrack website">
+            <Text style={styles.linkMuted}>Forgot your password? <Text style={styles.linkText}>Reset it</Text></Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={styles.link} accessibilityRole="link">

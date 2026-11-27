@@ -52,7 +52,7 @@ export default function SupportPage() {
 
       <div className="mt-12 grid gap-4 md:grid-cols-2">
         {FIXES.map(f => (
-          <section key={f.t} className="panel p-6">
+          <section key={f.t} className="panel lift p-6">
             <h2 className="font-display text-xl font-semibold">{f.t}</h2>
             <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-muted marker:font-mono marker:text-accent">
               {f.steps.map(s => <li key={s}>{s}</li>)}

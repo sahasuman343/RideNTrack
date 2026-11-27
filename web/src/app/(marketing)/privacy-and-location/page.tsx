@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { TIER_LIMITS } from '@ridentrack/shared';
 import { LOCATION_PURGE_SCHEDULED } from '@/lib/site';
+import MarketingIcon from '@/components/marketing-icon';
 
 export const metadata: Metadata = {
   title: 'Location and privacy',
@@ -82,9 +83,13 @@ export default function PrivacyLocationPage() {
       <p className="mt-6 max-w-2xl text-lg text-muted">rideNtrack only works if riders trust it with where they are. This page explains, in plain words, what happens to your location. The <Link href="/privacy" className="text-accent underline underline-offset-4">privacy policy</Link> has the full detail.</p>
 
       <ul className="mt-12 grid gap-4 sm:grid-cols-3" aria-label="In short">
-        <li className="panel p-5"><p className="font-mono text-xs text-accent">ONLY ON A RIDE</p><p className="mt-2">Shared while you ride, never in between.</p></li>
-        <li className="panel p-5"><p className="font-mono text-xs text-accent">ONLY YOUR GROUP</p><p className="mt-2">Riders on the same ride, and family links the organiser sends.</p></li>
-        <li className="panel p-5"><p className="font-mono text-xs text-accent">YOURS TO DELETE</p><p className="mt-2">Delete your account and your history goes with it.</p></li>
+        {([['pin', 'Only on a ride', 'Shared while you ride, never in between.'], ['users', 'Only your group', 'Riders on the same ride, and family links the organiser sends.'], ['trash', 'Yours to delete', 'Delete your account and your history goes with it.']] as const).map(([icon, t, d]) => (
+          <li key={t} className="panel lift p-5">
+            <span className="icon-tile"><MarketingIcon name={icon} /></span>
+            <p className="mt-4 font-mono text-xs uppercase tracking-[.12em] text-accent">{t}</p>
+            <p className="mt-2">{d}</p>
+          </li>
+        ))}
       </ul>
 
       <div className="mt-16 divide-y divide-line border-y border-line">

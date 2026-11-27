@@ -43,6 +43,9 @@ One-time setup in the Vercel dashboard (about 10 minutes):
 7. Supabase (live and dev) > **Authentication > URL Configuration**: on live set
    Site URL `https://ridentrack.app` and add `https://ridentrack.app/**`; on dev add
    `https://*-<team>.vercel.app/**` to the redirect URLs.
+   Password reset emails send riders to `/reset-password`, which those patterns
+   cover. The link only works in the browser that asked for it (PKCE), so the
+   app opens the website's `/forgot-password` page in the phone's browser.
 8. Mapbox: create a public token restricted to `https://ridentrack.app`
    (account.mapbox.com > Tokens > **Create a token** > URL restrictions) and use it
    for Production. Preview can keep the unrestricted `ridentrack` token, since
@@ -67,7 +70,7 @@ Supabase and Mapbox, so nothing else needs opening.
 CI (`verify.yml`) builds the site and runs `tests/browser.cjs` (live ride map),
 `tests/browser-trips.cjs` (trip planner), `tests/browser-people.cjs` (riders,
 joining, tabs, checklist), `tests/browser-money.cjs` (shared expenses and the
-journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs), `tests/browser-marketing.cjs` (marketing pages, route line, axe-core WCAG AA checks) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
+journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs), `tests/browser-marketing.cjs` (marketing pages, route line, axe-core WCAG AA checks), `tests/browser-password-reset.cjs` (forgot and reset password) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
 layouts at 360, 768 and 1440 px) on every push,
 so a broken build is caught before Vercel deploys it.
 
