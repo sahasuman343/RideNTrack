@@ -1,3 +1,5 @@
+import WaitlistForm from '@/components/waitlist-form';
+import { WAITLIST_OFFER } from '@/lib/site';
 import Link from 'next/link';
 import RouteJourney, { type JourneyStop } from '@/components/route-journey';
 import HeroScene from '@/components/hero-scene';
@@ -86,6 +88,17 @@ export default function Home() {
             <p className="mt-3 text-muted">Sign in with the same account to plan routes on a big map, manage riders, track expenses and the journal, run a club, and watch a live ride.</p>
             <Link href="/login" className="mt-5 inline-block text-sm text-accent underline underline-offset-4">Sign in on the web</Link>
           </div>
+        </div>
+      </section>
+
+      <section id="waitlist" aria-labelledby="waitlist-heading" className="mx-auto mt-20 max-w-6xl scroll-mt-8 px-4 sm:px-8">
+        <div className="panel glow-panel grid gap-8 p-8 sm:p-10 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] md:items-start">
+          <div>
+            <p className="eyebrow-label">Waitlist</p>
+            <h2 id="waitlist-heading" className="display mt-3 text-3xl sm:text-4xl">First {WAITLIST_OFFER.places} get Pro <em>free.</em></h2>
+            <p className="mt-3 max-w-md text-muted">The phone app is on its way. Join the waitlist and the first {WAITLIST_OFFER.places} people get Pro free for {WAITLIST_OFFER.months} months.</p>
+          </div>
+          <WaitlistForm headingId="waitlist-heading" />
         </div>
       </section>
 

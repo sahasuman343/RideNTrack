@@ -34,6 +34,10 @@ export default function PrivacyPolicyPage() {
           <li>Your position, speed and time, only during a ride you have joined and only while you are sharing. Sharing stops when you pause it, sign out, the ride ends, you reach the destination, or after 12 hours.</li>
           <li>Without signal, positions are stored on your phone and sent when the network returns.</li>
         </ul>
+        <h3>Waitlist</h3>
+        <ul>
+          <li>If you join the waitlist: your email address, the name you give (optional), and when you joined. We use it only to tell you about the launch and the waitlist offer. Ask us and we will remove it.</li>
+        </ul>
         <h3>Device and usage</h3>
         <ul>
           <li>A push notification token, so we can send ride alerts to your phone.</li>
@@ -72,6 +76,7 @@ export default function PrivacyPolicyPage() {
           {LOCATION_PURGE_SCHEDULED
             ? <li>Location history from trips on the Free plan is deleted after {TIER_LIMITS.free.locationRetentionDays} days. On Pro trips it is kept until the trip or your account is deleted.</li>
             : <li>Location history is kept until the trip or your account is deleted.</li>}
+          <li>Waitlist signups are kept until the app launches and the waitlist offer is given out, or until you ask us to remove yours.</li>
           <li>Everything else is kept while your account exists, or until the trip it belongs to is deleted.</li>
           <li>When you delete your account, your data is deleted, including trips you organised. Backups are overwritten on their normal cycle.</li>
         </ul>

@@ -31,6 +31,9 @@ export function realDate(iso: string | null): string | null {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso ? iso : null;
 }
 
+/** Launch offer for the waitlist. The database function waitlist_offer_places() holds the same count. */
+export const WAITLIST_OFFER = { places: 10, months: 3 } as const;
+
 export const MARKETING_NAV = [
   { href: '/features', label: 'Features' },
   { href: '/privacy-and-location', label: 'Location data' },
@@ -40,6 +43,7 @@ export const MARKETING_NAV = [
 
 export const FOOTER_LINKS = [
   ...MARKETING_NAV,
+  { href: '/waitlist', label: 'Waitlist' },
   { href: '/support', label: 'Support' },
   { href: '/privacy', label: 'Privacy policy' },
   { href: '/terms', label: 'Terms' },

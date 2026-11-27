@@ -17,6 +17,7 @@ const PAGES = [
   { path: '/faq', name: 'faq', heading: 'Questions riders ask.' },
   { path: '/download', name: 'download', heading: 'The ride happens on your phone.' },
   { path: '/support', name: 'support', heading: 'Get back on the road.' },
+  { path: '/waitlist', name: 'waitlist', heading: 'Be first on the road.' },
   { path: '/privacy', name: 'privacy', heading: 'Privacy policy' },
   { path: '/terms', name: 'terms', heading: 'Terms of use' },
 ];
@@ -60,7 +61,7 @@ const inkOffsets = page => page.$$eval('.journey-ink', els => els.map(e => Numbe
         if (p.path !== '/') {
           const nav = page.getByRole('navigation', { name: 'Site' });
           const current = await nav.locator('[aria-current="page"]').count();
-          assert.equal(current, ['/support', '/privacy', '/terms'].includes(p.path) ? 0 : 1, `nav marks ${p.path}`);
+          assert.equal(current, ['/support', '/waitlist', '/privacy', '/terms'].includes(p.path) ? 0 : 1, `nav marks ${p.path}`);
         }
         await axe(page, `${p.path} at ${width}px`);
         await page.screenshot({ path: `test-results/marketing/${p.name}-${width}.png`, fullPage: true });

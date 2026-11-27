@@ -11,8 +11,9 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
         <Wordmark />
         <MarketingNav />
         <div className="flex items-center gap-1 py-2 text-sm sm:py-0">
-          <Link href="/login" className="rounded px-3 py-2 text-muted hover:text-fg">Sign in</Link>
-          <Link href="/register" className="btn btn-primary">Create account</Link>
+          <Link href="/waitlist" className="btn btn-ghost btn-sm sm:max-lg:hidden">Join waitlist</Link>
+          <Link href="/login" className="rounded px-2.5 py-1.5 text-[13px] text-muted hover:text-fg">Sign in</Link>
+          <Link href="/register" className="btn btn-primary btn-sm">Create account</Link>
         </div>
       </header>
       <div id="content" tabIndex={-1} className="outline-none">{children}</div>

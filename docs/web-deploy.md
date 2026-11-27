@@ -65,12 +65,38 @@ Optional marketing-page variables (Production only, add when you have the real v
 `next.config.ts` already sends a strict Content-Security-Policy that allows only
 Supabase and Mapbox, so nothing else needs opening.
 
+## Waitlist
+
+The form on the home page and `/waitlist` calls two public database functions
+from `supabase/migrations/20261201002300_waitlist.sql`: `join_waitlist` and
+`waitlist_places_left`. Apply that migration before deploying the site; until
+then the form shows "Couldn't join the waitlist just now" and no places count.
+The table `waitlist_signups` can't be read through the API. Read it in the
+Supabase SQL editor:
+
+```sql
+SELECT position, email, name, created_at FROM public.waitlist_signups ORDER BY position LIMIT 10;
+```
+
+Before granting the offer, check the first 10 for fake or duplicate addresses
+(anyone can submit the form). When one of them signs up, grant Pro by hand.
+Nothing downgrades the account when `subscription_expires_at` passes, so set a
+reminder to switch it back to `free` after 3 months.
+
+```sql
+SELECT set_config('request.jwt.claim.role', 'service_role', false);
+UPDATE public.profiles p SET subscription_tier = 'pro_tourer', subscription_expires_at = now() + interval '3 months'
+FROM auth.users u WHERE u.id = p.id AND lower(u.email) = 'rider@example.com';
+```
+
+To remove someone from the list: `DELETE FROM public.waitlist_signups WHERE email = 'rider@example.com';`
+
 ## Checks
 
 CI (`verify.yml`) builds the site and runs `tests/browser.cjs` (live ride map),
 `tests/browser-trips.cjs` (trip planner), `tests/browser-people.cjs` (riders,
 joining, tabs, checklist), `tests/browser-money.cjs` (shared expenses and the
-journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs), `tests/browser-marketing.cjs` (marketing pages, route line, axe-core WCAG AA checks), `tests/browser-password-reset.cjs` (forgot and reset password) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
+journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs), `tests/browser-marketing.cjs` (marketing pages, route line, axe-core WCAG AA checks), `tests/browser-password-reset.cjs` (forgot and reset password), `tests/browser-waitlist.cjs` (waitlist form and compact header) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
 layouts at 360, 768 and 1440 px) on every push,
 so a broken build is caught before Vercel deploys it.
 
