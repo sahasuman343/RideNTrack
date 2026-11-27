@@ -34,4 +34,7 @@ test('sign-up carries a valid code in the account metadata and drops a bad one',
   assert.deepEqual(calls[0].options.data, { username: 'asha', display_name: 'Asha', referral_code: 'XK7P2M', referral_source: 'spectator' });
   await shared.registerAccount(client, { email: 'rider@example.test', password: pw, username: 'asha', displayName: 'Asha', referralCode: 'nope' });
   assert.deepEqual(calls[1].options.data, { username: 'asha', display_name: 'Asha' });
+  assert.equal('emailRedirectTo' in calls[1].options, false, 'mobile keeps the project default');
+  await shared.registerAccount(client, { email: 'rider@example.test', password: pw, username: 'asha', displayName: 'Asha', emailRedirectTo: 'https://preview.example.test/login' });
+  assert.equal(calls[2].options.emailRedirectTo, 'https://preview.example.test/login', 'web sends the confirmation link back to its own site');
 });

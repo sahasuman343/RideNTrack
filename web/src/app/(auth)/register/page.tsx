@@ -36,6 +36,9 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
       const data = await registerAccount(supabase, {
         email, password, username, displayName,
         referralCode: referralCodeFrom(inviteCode), referralSource: inviteSource,
+        // Send the confirmation link back to this site (production or a preview),
+        // where the login page finishes sign-in and moves on to the app.
+        emailRedirectTo: window.location.origin + '/login',
       });
       if (data.session) {
         router.replace('/app');

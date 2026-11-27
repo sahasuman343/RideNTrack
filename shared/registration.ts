@@ -1,6 +1,6 @@
 import { normaliseReferralCode, type ReferralSource } from './referrals';
 type SignupError = { message: string; code?: string; status?: number };
-type SignupPayload = { email: string; password: string; options: { data: { username: string; display_name: string; referral_code?: string; referral_source?: string } } };
+type SignupPayload = { email: string; password: string; options: { data: { username: string; display_name: string; referral_code?: string; referral_source?: string }; emailRedirectTo?: string } };
 interface RegistrationClient<T> {
   rpc(name: string, args: { requested_username: string }): PromiseLike<{ data: unknown; error: unknown }>;
   auth: { signUp(payload: SignupPayload): Promise<{ data: T; error: SignupError | null }> };
@@ -17,6 +17,8 @@ export async function registerAccount<T>(client: RegistrationClient<T>, input: {
   email: string; password: string; username: string; displayName: string;
   /** F17: credited to the inviting rider once the account exists. */
   referralCode?: string | null; referralSource?: ReferralSource | null;
+  /** Where the confirmation email's link lands. The web passes its own origin so preview sites don't fall back to the project's Site URL. */
+  emailRedirectTo?: string | null;
 }): Promise<T> {
   const username = input.username.trim();
   const displayName = input.displayName.trim();
@@ -32,7 +34,10 @@ export async function registerAccount<T>(client: RegistrationClient<T>, input: {
 
   const { data, error } = await client.auth.signUp({
     email: input.email.trim(), password: input.password,
-    options: { data: referralMetadata(username, displayName, input.referralCode, input.referralSource) },
+    options: {
+      data: referralMetadata(username, displayName, input.referralCode, input.referralSource),
+      ...(input.emailRedirectTo ? { emailRedirectTo: input.emailRedirectTo } : {}),
+    },
   });
   if (error) {
     // The unique constraint remains authoritative if another signup wins the race.
