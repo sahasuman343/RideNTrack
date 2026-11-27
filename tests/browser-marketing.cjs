@@ -103,10 +103,12 @@ const inkOffsets = page => page.$$eval('.journey-ink', els => els.map(e => Numbe
     for (const path of ['/privacy', '/terms']) {
       await page.goto(origin + path);
       await page.getByRole('note').filter({ hasText: 'This is a draft' }).waitFor();
-      assert.equal(await page.locator('a[href^="mailto:"]').count(), 0, path + ' has no made-up email');
+      assert.ok(await page.locator('a[href="mailto:dev.sahasuman343@gmail.com"]').count() > 0, path + ' lists the support address');
     }
     await page.goto(origin + '/download');
-    assert.equal(await page.getByText('Not listed yet').count(), 2, 'no store links until they are set');
+    assert.equal(await page.getByText('Coming soon', { exact: true }).count(), 2, 'both stores say coming soon until links are set');
+    await page.goto(origin + '/support');
+    await page.getByRole('link', { name: 'dev.sahasuman343@gmail.com' }).waitFor();
     await page.goto(origin + '/features');
     const freeDays = await page.getByRole('row', { name: /^Days/ }).locator('td').first().innerText();
     assert.equal(freeDays, '2', 'plan table reads the shared limits');

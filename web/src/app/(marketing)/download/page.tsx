@@ -34,13 +34,13 @@ export default function DownloadPage() {
             {s.url ? (
               <a href={s.url} className="btn btn-primary mt-6 self-start" rel="noopener">Get it on {s.name}</a>
             ) : (
-              <p className="mt-3 text-sm text-muted">Not listed yet. The link will appear here when the app is published.</p>
+              <p className="mt-6 self-start chip chip-accent px-3 py-2 text-[11px]">Coming soon</p>
             )}
           </div>
         ))}
       </div>
       {live.length === 0 && (
-        <p className="notice mt-4">Until then you can <Link href="/register" className="text-accent underline underline-offset-4">create an account</Link> and plan trips on the web.</p>
+        <p className="notice mt-4">While the app is on its way, you can <Link href="/register" className="text-accent underline underline-offset-4">create an account</Link> and plan trips on the web.</p>
       )}
 
       <section aria-labelledby="perm-h" className="mt-16">

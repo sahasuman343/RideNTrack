@@ -52,9 +52,9 @@ Optional marketing-page variables (Production only, add when you have the real v
 
 | Name | Used for | While unset |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPPORT_EMAIL` | Support page and policy contact lines | "A support email address will be listed here soon" |
-| `NEXT_PUBLIC_PLAY_STORE_URL` | Download page (must start `https://play.google.com/`) | "Not listed yet" |
-| `NEXT_PUBLIC_APP_STORE_URL` | Download page (must start `https://apps.apple.com/`) | "Not listed yet" |
+| `NEXT_PUBLIC_SUPPORT_EMAIL` | Support page and policy contact lines | dev.sahasuman343@gmail.com |
+| `NEXT_PUBLIC_PLAY_STORE_URL` | Download page (must start `https://play.google.com/`) | "Coming soon" |
+| `NEXT_PUBLIC_APP_STORE_URL` | Download page (must start `https://apps.apple.com/`) | "Coming soon" |
 | `NEXT_PUBLIC_OPERATOR_NAME` | Legal name in the privacy policy and terms | Policies say they are a draft |
 | `NEXT_PUBLIC_POLICY_DATE` | "Last updated" date, `YYYY-MM-DD` | Policies say they are a draft |
 | `NEXT_PUBLIC_LOCATION_PURGE_SCHEDULED` | Set to `true` only once the `purge-location-history` function is scheduled in production; then the pages state that Free trip history is deleted after 7 days | Pages say history is kept until the trip or account is deleted |

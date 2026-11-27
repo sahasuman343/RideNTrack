@@ -10,7 +10,7 @@ function clean(v: string | undefined, pattern: RegExp): string | null {
   return t && pattern.test(t) ? t : null;
 }
 
-export const SUPPORT_EMAIL = clean(process.env.NEXT_PUBLIC_SUPPORT_EMAIL, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+export const SUPPORT_EMAIL = clean(process.env.NEXT_PUBLIC_SUPPORT_EMAIL || 'dev.sahasuman343@gmail.com', /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
 export const PLAY_STORE_URL = clean(process.env.NEXT_PUBLIC_PLAY_STORE_URL, /^https:\/\/play\.google\.com\//);
 export const APP_STORE_URL = clean(process.env.NEXT_PUBLIC_APP_STORE_URL, /^https:\/\/apps\.apple\.com\//);
 /** Legal name of whoever runs rideNtrack, as it should appear in the policies. */
