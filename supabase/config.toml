@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.purge-location-history]
 verify_jwt = false
+
+[functions.waitlist-join]
+verify_jwt = false
