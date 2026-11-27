@@ -11,7 +11,7 @@ test('clip path matches the database rule', () => {
   const clip = '33333333-3333-4333-8333-333333333333';
   const path = shared.voiceClipPath(ride, user, clip);
   assert.equal(path, `${ride}/${user}/${clip}.m4a`);
-  const sql = fs.readFileSync('supabase/migrations/20261201001300_voice_notes.sql', 'utf8');
+  const sql = fs.readFileSync('supabase/migrations/051_voice_notes.sql', 'utf8');
   assert.match(sql, /'\/\[0-9a-f-\]\{36\}\\\.m4a\$'/);
   assert.match(sql, /voice_duration_ms BETWEEN 300 AND 15500/);
   assert.ok(shared.VOICE_MAX_MS <= 15500);

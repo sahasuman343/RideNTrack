@@ -68,7 +68,7 @@ Supabase and Mapbox, so nothing else needs opening.
 ## Waitlist
 
 The form on the home page and `/waitlist` calls two public database functions
-from `supabase/migrations/20261201002300_waitlist.sql`: `join_waitlist` and
+from `supabase/migrations/061_waitlist.sql`: `join_waitlist` and
 `waitlist_places_left`. Apply that migration before deploying the site; until
 then the form shows "Couldn't join the waitlist just now" and no places count.
 The table `waitlist_signups` can't be read through the API. Read it in the

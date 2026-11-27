@@ -11,7 +11,7 @@ test('slugs match the database rule', () => {
   assert.ok(shared.isValidClubSlug('deccan-dawn'));
   assert.ok(!shared.isValidClubSlug('ab'));
   assert.ok(!shared.isValidClubSlug('bad--slug'));
-  const sql = fs.readFileSync('supabase/migrations/20261201001800_clubs.sql', 'utf8');
+  const sql = fs.readFileSync('supabase/migrations/056_clubs.sql', 'utf8');
   assert.ok(sql.includes(shared.CLUB_SLUG_PATTERN.source.replace(/^\^|\$$/g, '')), 'slug pattern matches the migration');
 });
 

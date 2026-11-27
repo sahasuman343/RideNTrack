@@ -2,7 +2,7 @@
  * F1 Guided captain flow. The captain confirms, the app does the counting.
  * Pure logic: which step the captain is on, who is checked in by location,
  * whether the ride can start, who is missing at a regroup, and the generated
- * debrief. The database enforces the same rules (migration 20261201000600).
+ * debrief. The database enforces the same rules (migration 044).
  */
 
 export type CaptainPhase = 'briefing' | 'roll_call' | 'riding' | 'debrief' | 'done';

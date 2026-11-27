@@ -2598,7 +2598,7 @@ test('Phase 6 spectator links migration enforces Pro gating and zero-PII public 
   assert.match(trackPage, /get_public_ride_snapshot/);
   assert.match(trackPage, /This live link has ended/);
   // F2 replaces the snapshot; it must stay free of personal data too.
-  const family = fs.readFileSync(path.resolve('supabase/migrations/20261201000700_family_updates.sql'), 'utf8');
+  const family = fs.readFileSync(path.resolve('supabase/migrations/045_family_updates.sql'), 'utf8');
   const snapshot = family.slice(family.indexOf('FUNCTION public.get_public_ride_snapshot'));
   assert.doesNotMatch(snapshot.slice(0, snapshot.indexOf('$$;')), /emergency_contact|blood_group|ride_messages|ride_code|phone/i);
 });
