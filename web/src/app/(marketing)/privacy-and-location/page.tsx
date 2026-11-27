@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { TIER_LIMITS } from '@ridentrack/shared';
+import { LOCATION_PURGE_SCHEDULED } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Location and privacy',
@@ -39,7 +40,10 @@ const QA: { q: string; a: React.ReactNode }[] = [
   {
     q: 'How long is location history kept?',
     a: <>
-      <p>The trail recorded on a ride is kept so the group can look back at it. On trips hosted on the Free plan it is deleted after {TIER_LIMITS.free.locationRetentionDays} days. On Pro trips it is kept until the trip or your account is deleted.</p>
+      <p>The trail recorded on a ride is kept so the group can look back at it.</p>
+      {LOCATION_PURGE_SCHEDULED
+        ? <p>On trips hosted on the Free plan it is deleted after {TIER_LIMITS.free.locationRetentionDays} days. On Pro trips it is kept until the trip or your account is deleted.</p>
+        : <p>It is kept until the trip or your account is deleted.</p>}
     </>,
   },
   {

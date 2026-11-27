@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { TIER_LIMITS } from '@ridentrack/shared';
+import { LOCATION_PURGE_SCHEDULED } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Features',
@@ -16,7 +17,7 @@ const GROUPS: Group[] = [
       { name: 'Route and stops', text: 'Search for places, add stops by kind (fuel, food, chai, viewpoint, mechanic, meetup, stay) and reorder them. The road route, distance and riding time update as you edit.' },
       { name: 'Multi-day trips', text: 'Split a tour into dated days with an overnight stay for each.', pro: true },
       { name: 'Fuel plan for the pack', text: 'Uses each rider’s tank size, mileage and reserve to find the group’s shortest range and suggest where to fill up.', pro: true },
-      { name: 'Daylight and weather', text: 'Warns when a day is likely to end after sunset, with extra time allowed for ghats and mountain roads, and shows the forecast along the way.', pro: true },
+      { name: 'Daylight and weather', text: 'Warns when a day is likely to end after sunset, with extra time allowed for ghats and mountain roads, and shows the current weather at the start and the end.', pro: true },
       { name: 'GPX import', text: 'Start a trip from a GPX file of a route you already have.', pro: true },
       { name: 'Gear checklist', text: 'A pre-ride checklist each rider ticks off, and shared kit like the puncture kit or tow strap that someone claims.' },
       { name: 'Copy a trip', text: 'Reuse a past trip with new dates, or copy a route another group has made public.' },
@@ -26,7 +27,7 @@ const GROUPS: Group[] = [
     id: 'riding', title: 'On the ride', intro: 'Everything here runs in the phone app, because it needs the phone’s location.',
     items: [
       { name: 'Live group map', text: 'The planned route, each rider’s trail and live position, speed, distance covered and distance to the next stop.', app: true },
-      { name: 'Pack roles and gaps', text: 'Captain, co-captain, marshal, sweeper and member. The app shows the order along the route and alerts when the gap grows past 1.5 km or a rider leaves the route.', app: true },
+      { name: 'Pack roles and gaps', text: 'Captain, co-captain, marshal, sweeper and member. The app shows the order along the route and alerts when a rider falls too far behind (1 km unless the leader changes it) or leaves the route.', app: true },
       { name: 'One-tap alerts', text: 'Fuel stop, break, hazard, regroup, breakdown and captain announcements, with sound and vibration, and a record of who saw them.', app: true },
       { name: 'Regroup points', text: 'Set a place to wait for each other and see who has arrived.', app: true },
       { name: 'Trip chat and voice notes', text: 'Pinned details like the hotel address, quick replies such as “Fuel needed”, and hold-to-talk voice notes.', app: true },
@@ -112,10 +113,10 @@ export default function FeaturesPage() {
             </thead>
             <tbody className="divide-y divide-line">
               <Row label="Days" a={String(free.maxTripDays)} b={pro.maxTripDays == null ? 'No limit' : String(pro.maxTripDays)} />
-              <Row label="Stops on the route" a={String(free.maxWaypointsPerTrip)} b={String(pro.maxWaypointsPerTrip)} />
+              <Row label="Route points, counting start and end" a={String(free.maxWaypointsPerTrip)} b={String(pro.maxWaypointsPerTrip)} />
               <Row label="Riders" a={String(free.maxParticipantsPerRide)} b={String(pro.maxParticipantsPerRide)} />
               <Row label="Trips going at once" a={String(free.maxActiveTrips)} b={String(pro.maxActiveTrips)} />
-              <Row label="Location history kept" a={`${free.locationRetentionDays} days`} b={pro.locationRetentionDays == null ? 'Kept' : `${pro.locationRetentionDays} days`} />
+              {LOCATION_PURGE_SCHEDULED && <Row label="Location history kept" a={`${free.locationRetentionDays} days`} b={pro.locationRetentionDays == null ? 'Kept' : `${pro.locationRetentionDays} days`} />}
               <Row label="Fuel, daylight and weather planning" a="No" b="Yes" />
               <Row label="Expenses and journal" a="No" b="Yes" />
               <Row label="GPX import and export" a="No" b="Yes" />

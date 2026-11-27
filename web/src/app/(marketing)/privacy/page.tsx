@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { TIER_LIMITS } from '@ridentrack/shared';
+import { LOCATION_PURGE_SCHEDULED } from '@/lib/site';
 import LegalHeader, { ContactLine, Operator } from '@/components/legal-header';
 
 export const metadata: Metadata = {
@@ -60,7 +61,7 @@ export default function PrivacyPolicyPage() {
         <ul>
           <li><strong>Supabase</strong>: database, sign-in and file storage.</li>
           <li><strong>Mapbox</strong>: maps, place search and road routes. It receives the places you search for and the map area you view.</li>
-          <li><strong>Open-Meteo</strong>: weather forecasts. It receives the coordinates of the trip’s start or end, not who you are.</li>
+          <li><strong>Open-Meteo</strong>: current weather. It receives the coordinates of the trip’s start or end, not who you are.</li>
           <li><strong>Expo</strong>: delivers push notifications to your phone.</li>
           <li><strong>Vercel</strong>: hosts this website.</li>
         </ul>
@@ -68,7 +69,9 @@ export default function PrivacyPolicyPage() {
 
         <h2>How long we keep it</h2>
         <ul>
-          <li>Location history from trips on the Free plan is deleted after {TIER_LIMITS.free.locationRetentionDays} days. On Pro trips it is kept until the trip or your account is deleted.</li>
+          {LOCATION_PURGE_SCHEDULED
+            ? <li>Location history from trips on the Free plan is deleted after {TIER_LIMITS.free.locationRetentionDays} days. On Pro trips it is kept until the trip or your account is deleted.</li>
+            : <li>Location history is kept until the trip or your account is deleted.</li>}
           <li>Everything else is kept while your account exists, or until the trip it belongs to is deleted.</li>
           <li>When you delete your account, your data is deleted, including trips you organised. Backups are overwritten on their normal cycle.</li>
         </ul>

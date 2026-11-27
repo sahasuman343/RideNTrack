@@ -37,7 +37,7 @@ const FAQ: { group: string; items: { q: string; a: React.ReactNode }[] }[] = [
   {
     group: 'Free and Pro',
     items: [
-      { q: 'What does Pro add?', a: <p>Longer trips, more stops and riders, fuel, daylight and weather planning, expenses and the journal, GPX import and export, and location history that is kept. <Link href="/features#plans">Compare Free and Pro</Link>.</p> },
+      { q: 'What does Pro add?', a: <p>Longer trips, more stops and riders, fuel, daylight and weather planning, expenses and the journal, and GPX import and export. <Link href="/features#plans">Compare Free and Pro</Link>.</p> },
       { q: 'How much is Pro?', a: <p>In-app purchases are not open yet. Prices will be shown in the app, in your local currency, when they are.</p> },
     ],
   },

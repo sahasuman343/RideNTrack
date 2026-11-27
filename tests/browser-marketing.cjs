@@ -110,6 +110,9 @@ const inkOffsets = page => page.$$eval('.journey-ink', els => els.map(e => Numbe
     await page.goto(origin + '/features');
     const freeDays = await page.getByRole('row', { name: /^Days/ }).locator('td').first().innerText();
     assert.equal(freeDays, '2', 'plan table reads the shared limits');
+    assert.equal(await page.getByRole('row', { name: /Location history kept/ }).count(), 0, 'no retention promise until the purge job is scheduled');
+    await page.goto(origin + '/privacy');
+    await page.getByText('Location history is kept until the trip or your account is deleted.').waitFor();
 
     // Skip link reaches the content.
     await page.goto(origin + '/');
