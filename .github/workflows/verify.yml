@@ -67,7 +67,7 @@ jobs:
       - name: Browser tools
         if: success()
         run: |
-          npm install --prefix "$RUNNER_TEMP/ridentrack-browser-tools" --ignore-scripts playwright@1.56.1
+          npm install --prefix "$RUNNER_TEMP/ridentrack-browser-tools" --ignore-scripts playwright@1.56.1 axe-core@4.13.0
           node "$RUNNER_TEMP/ridentrack-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Browser map checks
         if: success()
@@ -90,6 +90,15 @@ jobs:
       - name: Browser profile and club checks
         if: success()
         run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-profile-clubs.cjs
+      - name: Browser marketing page checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-marketing.cjs
+      - name: Browser password reset checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-password-reset.cjs
+      - name: Browser waitlist checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-waitlist.cjs
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
