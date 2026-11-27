@@ -102,7 +102,53 @@ body {
 .mapboxgl-ctrl-attrib { background: rgba(6, 6, 7, .7) !important; }
 .mapboxgl-ctrl-attrib a { color: var(--color-muted) !important; }
 
+/* Home page route: one road segment per stop, inked in as you scroll. */
+.journey { list-style: none; margin: 0; padding: 0; }
+.journey-stop { position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 1rem; padding-bottom: 4.5rem; }
+.journey-stop:last-child { padding-bottom: 1rem; }
+.journey-track { position: relative; grid-column: 1; grid-row: 1; }
+.journey-svg { position: absolute; left: 0; top: 14px; width: 100%; height: calc(100% + 4.5rem - 14px); overflow: visible; }
+.journey-stop:last-child .journey-svg { height: calc(100% + 1rem - 14px); }
+.journey-road { fill: none; stroke: var(--color-line2); stroke-width: 8; stroke-linecap: round; }
+.journey-ink { fill: none; stroke: var(--color-accent); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 1; transition: stroke-dashoffset .12s linear; }
+.journey-dot { position: absolute; left: 50%; top: 0; z-index: 1; display: flex; width: 30px; height: 30px; transform: translateX(-50%); align-items: center; justify-content: center; border-radius: 999px; background: var(--color-raise); color: var(--color-muted); box-shadow: 0 0 0 4px var(--color-bg); font: 700 11px/1 var(--font-mono); transition: background-color .3s, color .3s; }
+.journey-dot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; border: 2px solid var(--color-accent); opacity: 0; pointer-events: none; }
+.is-reached .journey-dot { background: var(--color-accent); color: var(--color-on-accent); }
+.is-reached .journey-dot::after { animation: ring 2.4s ease-out infinite; }
+.journey-body { grid-column: 2; grid-row: 1; padding-top: 2px; }
+@media (min-width: 768px) {
+  .journey-stop { grid-template-columns: minmax(0, 1fr) 160px minmax(0, 1fr); column-gap: 2.5rem; padding-bottom: 7rem; }
+  .journey-svg { height: calc(100% + 7rem - 14px); }
+  .journey-track { grid-column: 2; }
+  .journey-left .journey-body { grid-column: 1; text-align: right; }
+  .journey-right .journey-body { grid-column: 3; }
+}
+
+/* Hero road draws in once on load. */
+.hero-ink { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.2s cubic-bezier(.6, .1, .2, 1) .2s forwards; }
+.hero-pin { opacity: 0; animation: pin .4s ease-out forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pin { to { opacity: 1; } }
+
+/* Long-form pages: privacy, terms, support. */
+.prose-page { max-width: 46rem; }
+.prose-page h2 { margin-top: 2.75rem; font-family: var(--font-display); font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+.prose-page h3 { margin-top: 1.75rem; font-weight: 600; font-size: 1.05rem; }
+.prose-page p, .prose-page ul { margin-top: .85rem; color: var(--color-muted); line-height: 1.65; }
+.prose-page ul { padding-left: 1.2rem; list-style: disc; }
+.prose-page li + li { margin-top: .4rem; }
+.prose-page strong { color: var(--color-fg); font-weight: 600; }
+.prose-page a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px; }
+
+/* FAQ disclosure rows. */
+.faq-item summary { list-style: none; cursor: pointer; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary .faq-sign { transition: transform .2s; }
+.faq-item[open] summary .faq-sign { transform: rotate(45deg); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-  .trip-marker::after { animation: none !important; }
+  .trip-marker::after, .journey-dot::after { animation: none !important; }
+  .hero-ink { stroke-dashoffset: 0 !important; animation: none !important; }
+  .hero-pin { opacity: 1 !important; animation: none !important; }
 }

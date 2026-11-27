@@ -48,6 +48,16 @@ One-time setup in the Vercel dashboard (about 10 minutes):
    for Production. Preview can keep the unrestricted `ridentrack` token, since
    preview hostnames change per branch.
 
+Optional marketing-page variables (Production only, add when you have the real value):
+
+| Name | Used for | While unset |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPPORT_EMAIL` | Support page and policy contact lines | "A support email address will be listed here soon" |
+| `NEXT_PUBLIC_PLAY_STORE_URL` | Download page (must start `https://play.google.com/`) | "Not listed yet" |
+| `NEXT_PUBLIC_APP_STORE_URL` | Download page (must start `https://apps.apple.com/`) | "Not listed yet" |
+| `NEXT_PUBLIC_OPERATOR_NAME` | Legal name in the privacy policy and terms | Policies say they are a draft |
+| `NEXT_PUBLIC_POLICY_DATE` | "Last updated" date, `YYYY-MM-DD` | Policies say they are a draft |
+
 `next.config.ts` already sends a strict Content-Security-Policy that allows only
 Supabase and Mapbox, so nothing else needs opening.
 
@@ -56,7 +66,7 @@ Supabase and Mapbox, so nothing else needs opening.
 CI (`verify.yml`) builds the site and runs `tests/browser.cjs` (live ride map),
 `tests/browser-trips.cjs` (trip planner), `tests/browser-people.cjs` (riders,
 joining, tabs, checklist), `tests/browser-money.cjs` (shared expenses and the
-journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
+journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs), `tests/browser-marketing.cjs` (marketing pages, route line, axe-core WCAG AA checks) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
 layouts at 360, 768 and 1440 px) on every push,
 so a broken build is caught before Vercel deploys it.
 

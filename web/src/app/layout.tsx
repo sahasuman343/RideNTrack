@@ -7,6 +7,7 @@ const sourceSans = Source_Sans_3({ variable: "--font-source-sans", subsets: ["la
 const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://ridentrack.app"),
   title: { default: "rideNtrack: group motorcycle rides, planned and tracked", template: "%s · rideNtrack" },
   description: "Plan motorcycle trips, ride together and let family follow along. Built for riders in India.",
 };
