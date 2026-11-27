@@ -125,3 +125,20 @@
   .ride-panel.is-expanded .rider-list{max-height:none;overflow:visible}
   .ride-panel.is-expanded .chat-section{max-height:none}
 }
+/* Foreground location sharing from the browser. */
+.map-actions{display:flex;gap:10px;align-items:flex-start;pointer-events:none}.map-actions .map-action{pointer-events:auto}
+.share-action{display:flex;align-items:center;gap:8px}.share-action span{margin-left:0}
+.share-action i{width:9px;height:9px;border-radius:50%;border:2px solid #a7a7ae}
+.share-action.is-sharing{border-color:color-mix(in srgb,#6fd3a0 45%,transparent);color:#6fd3a0}
+.share-action.is-sharing i{border-color:#6fd3a0;background:#6fd3a0;animation:pill-pulse 2s ease-in-out infinite}
+.share-note{position:absolute;right:60px;top:84px;max-width:340px;padding:12px 14px;border-radius:4px;background:#121214;border:1px solid #313137;font-size:13px;line-height:1.5;color:#a7a7ae;z-index:2}
+.share-note a{color:#ff8a2a;text-decoration:underline}
+.share-note.is-problem{color:#e0c49a}
+@media(max-width:640px){.map-actions{flex-direction:column;align-items:flex-end}.share-note{left:14px;right:14px;top:14px;max-width:none;font-size:12px}}
+@media(prefers-reduced-motion:reduce){.share-action.is-sharing i{animation:none!important}}
+@media(max-width:640px){
+  .map-top-controls.ride-controls{top:14px;bottom:auto;left:14px;right:14px;justify-content:flex-end}
+  .ride-controls .map-actions{flex-direction:row}
+  .share-note{top:72px}
+  .ride-notice{top:72px;bottom:auto}
+}

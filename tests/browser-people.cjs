@@ -84,8 +84,9 @@ let failToggle = false;
     assert.equal(await page.getByRole('heading', { name: /Riders/ }).count(), 0, 'other tabs stay hidden');
     await page.getByRole('tab', { name: 'Plan' }).focus();
     await page.keyboard.press('ArrowRight');
-    assert.equal(await page.getByRole('tab', { name: /Riders/ }).getAttribute('aria-selected'), 'true', 'arrow keys move between tabs');
-    assert.equal(new URL(page.url()).hash, '#riders');
+    // Wait for the re-render rather than reading the attribute straight after the key press.
+    await page.getByRole('tab', { name: /Riders/, selected: true }).waitFor({ timeout: 5000 });
+    await page.waitForURL(u => u.hash === '#riders');
 
     // Roster and RSVP.
     await page.getByRole('heading', { name: /Riders/ }).waitFor();

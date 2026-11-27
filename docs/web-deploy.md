@@ -34,7 +34,7 @@ Supabase and Mapbox, so nothing else needs opening.
 CI (`verify.yml`) builds the site and runs `tests/browser.cjs` (live ride map),
 `tests/browser-trips.cjs` (trip planner), `tests/browser-people.cjs` (riders,
 joining, tabs, checklist), `tests/browser-money.cjs` (shared expenses and the
-journal) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
+journal), `tests/browser-share.cjs` (sharing your location from the browser), `tests/browser-profile-clubs.cjs` (profile, saved places and clubs) and `tests/browser-foundation.cjs` (sign-in gate, old-URL redirects,
 layouts at 360, 768 and 1440 px) on every push,
 so a broken build is caught before Vercel deploys it.
 
