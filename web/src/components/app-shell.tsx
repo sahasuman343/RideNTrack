@@ -8,7 +8,9 @@ import Wordmark from '@/components/wordmark';
 const NAV = [
   { href: '/app', label: 'Rides', match: (p: string) => p === '/app' || p.startsWith('/app/rides') },
   { href: '/app/trips', label: 'Trips', match: (p: string) => p.startsWith('/app/trips') },
+  { href: '/app/clubs', label: 'Clubs', match: (p: string) => p.startsWith('/app/clubs') },
   { href: '/app/join', label: 'Join', match: (p: string) => p.startsWith('/app/join') },
+  { href: '/app/profile', label: 'Profile', match: (p: string) => p.startsWith('/app/profile') },
 ];
 
 /** Signed-in frame: a quiet sidebar on desktop, a top bar on phones. */
@@ -49,9 +51,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
-      <aside className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b sm:gap-4 border-line bg-bg/95 px-4 py-3 backdrop-blur-sm lg:h-screen lg:flex-col lg:items-stretch lg:justify-start lg:border-b-0 lg:border-r lg:bg-transparent lg:px-5 lg:py-6">
+      <aside className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-b sm:flex-nowrap sm:gap-4 border-line bg-bg/95 px-4 py-3 backdrop-blur-sm lg:h-screen lg:flex-col lg:items-stretch lg:justify-start lg:border-b-0 lg:border-r lg:bg-transparent lg:px-5 lg:py-6">
         <Wordmark href="/app" />
-        <nav aria-label="App" className="flex gap-1 lg:mt-10 lg:flex-col">{nav}</nav>
+        <nav aria-label="App" className="order-last -mx-1 flex w-full gap-1 overflow-x-auto px-1 sm:order-none sm:mx-0 sm:w-auto sm:px-0 lg:mt-10 lg:flex-col">{nav}</nav>
         <div className="hidden lg:mt-auto lg:block">
           <p className="eyebrow-label">Signed in</p>
           <p className="mt-1 truncate text-sm">{name ?? ' '}</p>

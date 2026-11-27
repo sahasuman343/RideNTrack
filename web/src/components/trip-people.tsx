@@ -23,10 +23,11 @@ interface Props {
   userId: string;
   onLeadershipChanged: () => void;
   onLeft: () => void;
+  onRoster?: (roster: RosterRider[]) => void;
 }
 
 /** Riders on a trip: RSVP, invite link, and the leader's people tools. */
-export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft }: Props) {
+export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft, onRoster }: Props) {
   const [roster, setRoster] = useState<RosterRider[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -46,6 +47,8 @@ export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft }
     });
     return () => { cancelled = true; };
   }, [trip.id, retry]);
+
+  useEffect(() => { if (roster) onRoster?.(roster); }, [roster, onRoster]);
 
   const me = roster?.find(r => r.user_id === userId);
   const going = roster?.filter(r => (r.attendance_status ?? 'confirmed') === 'confirmed').length ?? 0;
@@ -94,7 +97,7 @@ export default function TripPeople({ trip, userId, onLeadershipChanged, onLeft }
   }
 
   return (
-    <section className="mt-10" aria-labelledby="people-heading">
+    <section aria-labelledby="people-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="people-heading" className="font-display text-xl font-semibold">Riders {roster && <span className="ml-1 font-mono text-sm text-muted">{roster.length}</span>}</h2>
         <button type="button" onClick={() => void copyInvite()} className="btn btn-ghost px-3 py-1.5 text-xs">Copy invite link</button>
