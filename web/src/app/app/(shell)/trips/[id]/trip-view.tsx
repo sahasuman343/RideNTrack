@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -9,6 +9,19 @@ import {
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { formatTripDates, friendlyTripError, useRequiredSession } from '@/lib/planner';
+import TripPeople, { type RosterRider } from '@/components/trip-people';
+import TripChecklist from '@/components/trip-checklist';
+import TripMoney, { type MoneyRider } from '@/components/trip-money';
+import TripJournal from '@/components/trip-journal';
+
+const TABS = [
+  { id: 'plan', label: 'Plan' },
+  { id: 'riders', label: 'Riders' },
+  { id: 'checklist', label: 'Checklist' },
+  { id: 'money', label: 'Money' },
+  { id: 'journal', label: 'Journal' },
+] as const;
+type TabId = typeof TABS[number]['id'];
 
 const TripMap = dynamic(() => import('@/components/trip-map'), { ssr: false, loading: () => <div className="h-full min-h-80 rounded-lg bg-map" /> });
 
@@ -68,6 +81,31 @@ export default function TripView({ tripId }: { tripId: string | null }) {
     ] : [], [waypoints, trip]);
 
   const isLeader = !!trip && trip.admin_id === session?.user.id;
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [riders, setRiders] = useState<MoneyRider[]>([]);
+  const onRoster = useCallback((roster: RosterRider[]) => {
+    setNames(Object.fromEntries(roster.map(r => [r.user_id, r.display_name || 'Rider'])));
+    setRiders(roster.filter(r => r.is_active !== false).map(r => ({ user_id: r.user_id, display_name: r.display_name || 'Rider' })));
+  }, []);
+  const [tab, setTab] = useState<TabId>('plan');
+  useEffect(() => {
+    // Deep links such as /app/trips/<id>#money open that tab.
+    const fromHash = () => { const h = window.location.hash.slice(1); if (TABS.some(t => t.id === h)) setTab(h as TabId); };
+    fromHash();
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, []);
+  function chooseTab(id: TabId, focus = false) {
+    setTab(id);
+    history.replaceState(null, '', id === 'plan' ? window.location.pathname + window.location.search : '#' + id);
+    if (focus) document.getElementById('tab-' + id)?.focus();
+  }
+  function onTabKey(e: React.KeyboardEvent) {
+    const i = TABS.findIndex(t => t.id === tab);
+    const next = e.key === 'ArrowRight' ? (i + 1) % TABS.length : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault(); chooseTab(TABS[next].id, true);
+  }
 
   function startEdit() {
     if (!trip) return;
@@ -173,7 +211,18 @@ export default function TripView({ tripId }: { tripId: string | null }) {
             </div>
           )}
 
-          <section className="mt-10" aria-labelledby="route-heading">
+          <div role="tablist" aria-label="Trip sections" onKeyDown={onTabKey} className="mt-10 flex gap-1 overflow-x-auto border-b border-line">
+            {TABS.map(t => (
+              <button key={t.id} id={'tab-' + t.id} role="tab" type="button" aria-selected={tab === t.id} aria-controls={'panel-' + t.id} tabIndex={tab === t.id ? 0 : -1}
+                onClick={() => chooseTab(t.id)}
+                className={'-mb-px shrink-0 whitespace-nowrap border-b-2 px-2 py-2.5 text-sm sm:px-3 transition-colors ' + (tab === t.id ? 'border-accent font-semibold text-fg' : 'border-transparent text-muted hover:text-fg')}>
+                {t.label}{t.id === 'riders' && riders.length > 0 && <span className="ml-1.5 font-mono text-xs text-faint">{riders.length}</span>}
+              </button>
+            ))}
+          </div>
+
+          <div role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" hidden={tab !== 'plan'} className="pt-6">
+          <section aria-labelledby="route-heading">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 id="route-heading" className="font-display text-xl font-semibold">Route</h2>
               <div className="flex gap-2">
@@ -207,6 +256,24 @@ export default function TripView({ tripId }: { tripId: string | null }) {
                 {stays.map(s => <li key={s.id} className="rounded border border-line bg-surface px-4 py-3 text-sm"><span className="font-medium">{s.name}</span><span className="block text-xs text-muted">{[s.address, s.check_in && formatTripDates(s.check_in.slice(0, 10), s.check_out?.slice(0, 10))].filter(Boolean).join(' · ')}</span></li>)}
               </ul>
             </section>
+          )}
+          </div>
+
+          {session && (
+            <>
+              <div role="tabpanel" id="panel-riders" aria-labelledby="tab-riders" hidden={tab !== 'riders'} className="pt-6">
+                <TripPeople trip={trip} userId={session.user.id} onLeadershipChanged={() => setReload(v => v + 1)} onLeft={() => router.replace('/app/trips')} onRoster={onRoster} />
+              </div>
+              <div role="tabpanel" id="panel-checklist" aria-labelledby="tab-checklist" hidden={tab !== 'checklist'} className="pt-6">
+                <TripChecklist key={trip.admin_id} tripId={trip.id} userId={session.user.id} isLeader={isLeader} names={names} />
+              </div>
+              <div role="tabpanel" id="panel-money" aria-labelledby="tab-money" hidden={tab !== 'money'} className="pt-6">
+                <TripMoney key={trip.admin_id} tripId={trip.id} userId={session.user.id} isLeader={isLeader} riders={riders} />
+              </div>
+              <div role="tabpanel" id="panel-journal" aria-labelledby="tab-journal" hidden={tab !== 'journal'} className="pt-6">
+                <TripJournal tripId={trip.id} userId={session.user.id} tripName={trip.name} />
+              </div>
+            </>
           )}
         </div>
         <aside className="min-h-[420px] lg:sticky lg:top-8 lg:h-[calc(100vh-4rem)]">
