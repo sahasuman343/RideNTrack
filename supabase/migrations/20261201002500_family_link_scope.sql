@@ -7,18 +7,23 @@
 --     the group, as before.
 --   * A family link keeps working for the whole live ride, even a multi-day
 --     ride longer than the 72 hours it was created with, and stops 6 hours
---     after the ride ends.
+--     after the ride ends. Only a link that was still valid when this run of
+--     the ride started gets that extension, so a restarted ride does not
+--     revive links that had already ended.
 
 BEGIN;
 
--- Cut family links to ride end + 6 hours when a ride is completed or archived.
+-- When a ride is completed or archived, family links that were live for it
+-- end 6 hours after the ride ends. That can extend a link whose 72 hours ran
+-- out during a long ride; links that had already ended are left alone.
 CREATE OR REPLACE FUNCTION public.family_links_end_with_ride()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   IF NEW.status IN ('completed', 'archived') AND OLD.status IN ('planned', 'active') THEN
     UPDATE public.ride_share_links
-       SET expires_at = least(expires_at, coalesce(NEW.ended_at, now()) + interval '6 hours')
-     WHERE ride_id = NEW.id AND kind = 'family' AND revoked_at IS NULL;
+       SET expires_at = coalesce(NEW.ended_at, now()) + interval '6 hours'
+     WHERE ride_id = NEW.id AND kind = 'family' AND revoked_at IS NULL
+       AND (expires_at > now() OR (NEW.started_at IS NOT NULL AND expires_at > NEW.started_at));
   END IF;
   RETURN NEW;
 END;
@@ -46,12 +51,14 @@ DECLARE
   v_subject jsonb;
 BEGIN
   IF p_token IS NULL OR length(trim(p_token)) < 16 THEN RETURN NULL; END IF;
-  -- A family link outlives its 72 hours while the ride is still live.
+  -- A family link outlives its 72 hours while the ride is still live, if it
+  -- was still valid when this run of the ride started.
   SELECT l.ride_id, l.expires_at, l.kind, l.subject_user_id, r.admin_id INTO v_link
     FROM public.ride_share_links l
     JOIN public.rides r ON r.id = l.ride_id
    WHERE l.token = trim(p_token) AND l.revoked_at IS NULL
-     AND (l.expires_at > now() OR (l.kind = 'family' AND r.status = 'active'))
+     AND (l.expires_at > now()
+          OR (l.kind = 'family' AND r.status = 'active' AND l.expires_at > r.started_at))
    LIMIT 1;
   IF v_link.ride_id IS NULL THEN RETURN NULL; END IF;
 
