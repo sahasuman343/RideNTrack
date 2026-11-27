@@ -64,10 +64,12 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     });
     await context.route('https://events.mapbox.com/**', r => r.fulfill({ status: 204 }));
     let trips = [existingTrip, pastTrip];
+    let flags = [];
     await context.route('https://ridentrack-test.supabase.co/**', route => {
       const req = route.request(); const url = req.url(); const method = req.method();
       if (url.includes('/auth/v1/user')) return route.fulfill({ json: session.user });
-      if (url.includes('/rpc/get_my_flags')) return route.fulfill({ json: [] });
+      if (url.includes('/rpc/get_my_flags')) return route.fulfill({ json: flags });
+      if (url.includes('/rpc/get_trip_roster')) return route.fulfill({ json: [{ user_id: userId, display_name: 'Suman', role: 'captain', is_active: true, last_seen: null, attendance_status: 'confirmed' }] });
       if (url.includes('/rpc/create_trip_plan')) { calls.create = req.postDataJSON(); trips = [{ ...existingTrip, id: newTripId, name: calls.create.p_trip.name }, ...trips]; return route.fulfill({ json: newTripId }); }
       if (url.includes('/rpc/save_trip_route')) { calls.saveRoute = req.postDataJSON(); return route.fulfill({ status: 204, body: '' }); }
       if (url.includes('/rpc/delete_trip')) { calls.deleted = req.postDataJSON().p_ride_id; trips = trips.filter(t => t.id !== calls.deleted); return route.fulfill({ status: 204, body: '' }); }
@@ -137,7 +139,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     await page.goto(origin + '/app/trips/' + tripId);
     await page.getByRole('heading', { name: 'Spiti Valley Loop' }).waitFor();
     assert.equal(await page.locator('section[aria-labelledby="route-heading"] ol li').count(), 3);
-    await page.getByText('SPITI1').waitFor();
+    await page.getByText('SPITI1', { exact: true }).first().waitFor();
     await page.getByRole('heading', { name: 'Days' }).waitFor();
     assert.ok((await page.locator('.trip-map-canvas').boundingBox()).height > 300, 'trip map fills its panel');
     await page.screenshot({ path: 'test-results/trip-view-desktop.png' });
@@ -158,7 +160,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     assert.equal(download.suggestedFilename(), 'spiti-valley-loop-2027.gpx');
     const gpx = fs.readFileSync(await download.path(), 'utf8');
     assert.equal((gpx.match(/<wpt /g) || []).length, 3, 'GPX has every route point');
-    assert.equal((gpx.match(/<trkpt /g) || []).length, 3, 'GPX has the road line:\n' + gpx);
+    assert.equal((gpx.match(/<rtept /g) || []).length, 3, 'GPX has the road line');
     await page.getByRole('link', { name: 'Edit route' }).click();
     await page.waitForURL(url => url.pathname === '/app/trips/' + tripId + '/route');
     await page.getByRole('heading', { name: 'Edit route' }).waitFor();
@@ -180,6 +182,28 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     ]);
     assert.equal(calls.saveRoute.p_trip.estimated_distance_meters, 431000);
     assert.equal(calls.saveRoute.p_trip.route_geometry.geometry.coordinates.length, 4);
+
+    // GPX import: Pro only, like the plan table; beta_free_pro turns it on for everyone.
+    await page.getByRole('link', { name: 'Edit route' }).click();
+    await page.getByRole('heading', { name: 'Edit route' }).waitFor();
+    await page.getByRole('button', { name: 'Import GPX' }).click();
+    await page.getByRole('status').filter({ hasText: 'part of Pro Tourer' }).waitFor();
+    flags = [{ key: 'beta_free_pro', enabled: true }];
+    await page.reload();
+    await page.getByText('of 50 route points').waitFor();
+    const importFile = '<?xml version="1.0"?><gpx version="1.1"><metadata><name>Spiti</name></metadata>'
+      + '<wpt lat="31.1048" lon="77.1734"><name>Shimla Mall Road</name></wpt><wpt lat="31.4493" lon="77.6346"><name>Rampur</name><type>fuel</type></wpt>'
+      + '<wpt lat="32.2276" lon="78.0718"><name>Kaza</name></wpt></gpx>';
+    await page.locator('input[type=file]').setInputFiles({ name: 'spiti.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(importFile) });
+    await page.getByRole('status').filter({ hasText: 'Imported 3 points from spiti.gpx' }).waitFor();
+    assert.equal(await page.getByRole('combobox', { name: 'Start', exact: true }).inputValue(), 'Shimla Mall Road');
+    assert.equal(await page.getByLabel('Stop 1 type').inputValue(), 'fuel');
+    await page.getByText('431 km', { exact: true }).waitFor();
+    await page.screenshot({ path: 'test-results/route-import-desktop.png' });
+    await page.getByRole('button', { name: 'Save route' }).click();
+    await page.waitForURL(url => url.pathname === '/app/trips/' + tripId);
+    assert.deepEqual(calls.saveRoute.p_waypoints.map(w => [w.id, w.waypoint_type, w.name]), [[null, 'origin', 'Shimla Mall Road'], [null, 'fuel', 'Rampur'], [null, 'destination', 'Kaza']]);
+    flags = [];
     await page.getByRole('button', { name: 'Delete trip' }).click();
     await page.getByRole('alertdialog').waitFor();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete trip' }).click();
@@ -193,7 +217,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no horizontal scroll at phone width');
     await page.screenshot({ path: 'test-results/trip-planner-mobile.png', fullPage: true });
     assert.deepEqual(errors, []);
-    console.log(`Trip planner browser checks passed: list filters, create with search/stops/route preview/limits, view, edit, GPX download, route editor, delete, phone layout; ${calls.geocode} searches, ${calls.directions} route requests; no page errors.`);
+    console.log(`Trip planner browser checks passed: list filters, create with search/stops/route preview/limits, view, edit, GPX download, route editor, GPX import (Pro gate), delete, phone layout; ${calls.geocode} searches, ${calls.directions} route requests; no page errors.`);
   } catch (error) {
     if (page) { fs.mkdirSync('test-results', { recursive: true }); await page.screenshot({ path: 'test-results/trip-planner-failure.png', fullPage: true }); }
     throw error;

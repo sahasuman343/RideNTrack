@@ -78,6 +78,18 @@ jobs:
       - name: Browser site foundation checks
         if: success()
         run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-foundation.cjs
+      - name: Browser trip people checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-people.cjs
+      - name: Browser trip money and journal checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-money.cjs
+      - name: Browser location sharing checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-share.cjs
+      - name: Browser profile and club checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-profile-clubs.cjs
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v4

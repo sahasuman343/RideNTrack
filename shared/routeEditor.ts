@@ -1,4 +1,5 @@
-import type { RoutePoint } from './route';
+import type { RoutePoint, RouteWaypointType } from './route';
+import { parseGpx } from './gpx';
 
 type LineString = { type: 'LineString'; coordinates: number[][] };
 export type SavedRoute = { geometry: LineString; distance: number; duration: number };
@@ -43,29 +44,29 @@ export function buildSaveTripRouteArgs(
   };
 }
 
-const xml = (value: string) => value.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] as string));
-const coord = (n: number) => (Math.round(n * 1e6) / 1e6).toString();
-
 /**
- * A GPX 1.1 file for navigation apps and GPS units: every route point as a
- * waypoint, plus the road line as a track when one has been calculated.
+ * Turns a GPX file into route points for the editor. Named waypoints win, then
+ * a planned route, then a recorded track. The first point becomes the start,
+ * the last the end, and long lists are thinned evenly to fit `maxPoints`.
  */
-export function tripRouteToGpx(trip: { name: string }, points: (Pick<RoutePoint, 'name' | 'latitude' | 'longitude'> & { waypoint_type: string })[], geometry?: LineString | null): string {
-  const name = xml(trip.name.trim() || 'rideNtrack trip');
-  const wpts = points.map(p => `  <wpt lat="${coord(p.latitude)}" lon="${coord(p.longitude)}"><name>${xml(p.name)}</name><type>${xml(p.waypoint_type)}</type></wpt>`);
-  const line = geometry?.coordinates?.filter(c => Number.isFinite(c[0]) && Number.isFinite(c[1])) ?? [];
-  const track = line.length >= 2
-    ? [`  <trk><name>${name}</name><trkseg>`, ...line.map(c => `    <trkpt lat="${coord(c[1])}" lon="${coord(c[0])}"/>`), '  </trkseg></trk>']
-    : [];
-  return [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<gpx version="1.1" creator="rideNtrack" xmlns="http://www.topografix.com/GPX/1/1">',
-    `  <metadata><name>${name}</name></metadata>`,
-    ...wpts,
-    ...track,
-    '</gpx>',
-    '',
-  ].join('\n');
+export function gpxToRoutePoints(xmlText: string, maxPoints: number): { name?: string; points: RoutePoint[]; source: 'waypoints' | 'route' | 'track'; total: number; warnings: string[] } {
+  const parsed = parseGpx(xmlText);
+  const choice = parsed.waypoints.length >= 2 ? { list: parsed.waypoints, source: 'waypoints' as const, label: 'Waypoint' }
+    : parsed.routePoints.length >= 2 ? { list: parsed.routePoints, source: 'route' as const, label: 'Route point' }
+    : parsed.trackPoints.length >= 2 ? { list: parsed.trackPoints, source: 'track' as const, label: 'Track point' }
+    : null;
+  if (!choice) throw new Error('This file has no route in it. A GPX file needs at least two waypoints, route points or track points.');
+  const cap = Math.max(2, maxPoints);
+  const list = choice.list.length <= cap ? choice.list
+    : Array.from({ length: cap }, (_, i) => choice.list[i === cap - 1 ? choice.list.length - 1 : Math.round(i * (choice.list.length - 1) / (cap - 1))]);
+  const last = list.length - 1;
+  const points = list.map((p, i) => {
+    const generic = /^(WPT|RTEPT|TRKPT) \d+$/.test(p.name);
+    const type: RouteWaypointType = i === 0 ? 'origin' : i === last ? 'destination'
+      : p.waypoint_type === 'origin' || p.waypoint_type === 'destination' ? 'stop' : p.waypoint_type;
+    return { ...p, sequence: i, waypoint_type: type, name: generic ? `${choice.label} ${i + 1}` : p.name };
+  });
+  return { name: parsed.name, points, source: choice.source, total: choice.list.length, warnings: parsed.warnings };
 }
 
 /** A safe file name for a trip download. */

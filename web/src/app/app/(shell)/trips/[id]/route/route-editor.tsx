@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
-  buildSaveTripRouteArgs, fetchDrivingRoute, formatRouteDistance, formatRouteDuration, routeCoordinates,
+  buildSaveTripRouteArgs, fetchDrivingRoute, gpxToRoutePoints, PLAN_LIMITS, formatRouteDistance, formatRouteDuration, routeCoordinates,
   validateRoutePoints, EDITABLE_WAYPOINT_TYPES, WAYPOINT_META,
   type PlaceResult, type Ride, type RoutePoint, type RouteWaypointType, type TripDay, type TripWaypoint,
 } from '@ridentrack/shared';
@@ -51,6 +51,8 @@ export default function RouteEditor({ tripId }: { tripId: string }) {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [routeState, setRouteState] = useState<{ key: string; route: RouteResult | null; error: string | null }>({ key: '', route: null, error: null });
 
   useEffect(() => {
@@ -111,6 +113,24 @@ export default function RouteEditor({ tripId }: { tripId: string }) {
   const isLeader = !!trip && trip.admin_id === session?.user.id;
 
   function edit(fn: (p: Point[]) => Point[]) { setPoints(fn); setDirty(true); setError(null); }
+
+  const canImport = PLAN_LIMITS[tier].supportsGpxImport;
+  async function importGpx(file: File) {
+    setImportNote(null); setError(null);
+    if (file.size > 5 * 1024 * 1024) { setError('That file is over 5 MB. Export a shorter route, or just the waypoints.'); return; }
+    try {
+      const result = gpxToRoutePoints(await file.text(), limit);
+      setPoints(result.points.map((p, i) => ({
+        key: crypto.randomUUID(), id: null, kind: p.waypoint_type, tripDayId: null, notes: p.notes ?? null, optional: false,
+        place: { id: 'gpx-' + i, name: p.name, address: p.name, longitude: p.longitude, latitude: p.latitude },
+      })));
+      setDirty(true);
+      const thinned = result.total > result.points.length ? `, thinned from ${result.total} to fit your plan` : '';
+      setImportNote(`Imported ${result.points.length} points from ${file.name}${thinned}. Check them on the map, then save to replace the current route.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'This file could not be read as GPX.');
+    }
+  }
   function setPlace(key: string, place: PlaceResult | null) { edit(ps => ps.map(p => p.key === key ? { ...p, place } : p)); }
   function addStop() {
     if (points.length >= limit) { setError(`Your ${tier === 'free' ? 'Free' : 'Pro Tourer'} plan allows up to ${limit} route points, including start and end.`); return; }
@@ -187,10 +207,19 @@ export default function RouteEditor({ tripId }: { tripId: string }) {
             );
           })}
         </ol>
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" onClick={addStop} className="text-sm font-semibold text-accent hover:underline">+ Add a stop</button>
           <span className="text-xs text-faint">{points.length} of {limit} route points</span>
+          <span className="ml-auto">
+            <input ref={fileInput} type="file" accept=".gpx,application/gpx+xml" className="sr-only" tabIndex={-1} aria-hidden
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importGpx(f); }} />
+            <button type="button" className="btn btn-ghost px-3 py-1.5 text-xs"
+              onClick={() => { if (canImport) fileInput.current?.click(); else { setError(null); setImportNote('Importing GPX files is part of Pro Tourer. You can upgrade in the rideNtrack app.'); } }}>
+              Import GPX
+            </button>
+          </span>
         </div>
+        {importNote && <p role="status" className="notice mt-4">{importNote}</p>}
 
         {error && <p role="alert" className="notice notice-error mt-6">{error}</p>}
         <div className="mt-6 flex flex-wrap gap-3">
