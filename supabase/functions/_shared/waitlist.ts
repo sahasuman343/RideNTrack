@@ -6,10 +6,16 @@
 export const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 export const RESEND_URL = 'https://api.resend.com/emails';
 
-/** The caller's IP as the edge sees it: first entry of x-forwarded-for, else cf-connecting-ip / x-real-ip. */
+/**
+ * The caller's IP. cf-connecting-ip is set by the platform's edge and can't be
+ * forged; x-forwarded-for's first entry is whatever the caller sent, so it is
+ * only a last resort.
+ */
 export function clientIp(headers: { get(name: string): string | null }): string {
-  const forwarded = headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || headers.get('cf-connecting-ip')?.trim() || headers.get('x-real-ip')?.trim() || 'unknown';
+  return headers.get('cf-connecting-ip')?.trim()
+    || headers.get('x-real-ip')?.trim()
+    || headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || 'unknown';
 }
 
 /** Salted SHA-256 of the IP, hex. The database only ever sees this, never the IP. */

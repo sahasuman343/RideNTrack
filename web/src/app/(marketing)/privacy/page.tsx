@@ -36,7 +36,8 @@ export default function PrivacyPolicyPage() {
         </ul>
         <h3>Waitlist</h3>
         <ul>
-          <li>If you join the waitlist: your email address, the name you give (optional), and when you joined. We use it only to tell you about the launch and the waitlist offer. Ask us and we will remove it.</li>
+          <li>If you join the waitlist: your email address, the name you give (optional), when you joined and when you confirmed your email. We use it only to tell you about the launch and the waitlist offer. Ask us and we will remove it.</li>
+          <li>To stop abuse of the waitlist, we keep a one-way scrambled code made from your network address for one day. We can’t turn it back into the address.</li>
         </ul>
         <h3>Device and usage</h3>
         <ul>
@@ -68,6 +69,8 @@ export default function PrivacyPolicyPage() {
           <li><strong>Open-Meteo</strong>: current weather. It receives the coordinates of the trip’s start or end, not who you are.</li>
           <li><strong>Expo</strong>: delivers push notifications to your phone.</li>
           <li><strong>Vercel</strong>: hosts this website.</li>
+          <li><strong>Cloudflare Turnstile</strong>: checks that a waitlist signup comes from a person, not a bot. It receives your network address and browser details when you use the waitlist form.</li>
+          <li><strong>Resend</strong>: sends the waitlist confirmation email. It receives your email address.</li>
         </ul>
         <p>Some features are not switched on yet. When they are, they will use: Google Play and the App Store, through RevenueCat, for in-app purchases; Razorpay for paying club ride registration fees; an SMS provider for texts sent by the server; and an analytics provider that receives the same usage events described above. We will update this policy when any of them goes live.</p>
 

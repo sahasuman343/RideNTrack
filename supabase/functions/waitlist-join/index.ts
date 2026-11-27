@@ -66,7 +66,11 @@ Deno.serve(async req => {
       headers: { authorization: `Bearer ${resendKey}`, 'content-type': 'application/json' },
       body: JSON.stringify(message),
     }).catch(() => null);
-    if (!sent?.ok) return json({ error: 'Couldn’t send the confirmation email. Try again in a few minutes.' }, 502);
+    if (!sent?.ok) {
+      // Let the next try send a fresh link instead of waiting out the cooldown.
+      await admin.rpc('waitlist_send_failed', { p_email: email });
+      return json({ error: 'Couldn’t send the confirmation email. Try again in a few minutes.' }, 502);
+    }
   }
   // Same answer whether the email was new, waiting or already confirmed, so the
   // form never reveals who is on the list.

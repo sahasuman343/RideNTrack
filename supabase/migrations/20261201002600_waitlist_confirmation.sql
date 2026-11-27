@@ -10,6 +10,8 @@
 --     itself) to 5 tries an hour, and all signups to 300 an hour.
 --   * A signup counts only after its email is confirmed through the link the
 --     function emails. The launch offer goes to the first 10 who confirm.
+--   * Both functions take a transaction lock, so a burst of parallel calls
+--     can't slip past the rate limit or hand out more than 10 places.
 
 BEGIN;
 
@@ -49,6 +51,8 @@ BEGIN
   IF p_ip_hash IS NULL OR length(p_ip_hash) < 16 THEN
     RAISE EXCEPTION 'Missing network id' USING ERRCODE = '22023';
   END IF;
+  -- One caller at a time, so the counts below include every earlier attempt.
+  PERFORM pg_advisory_xact_lock(hashtext('public.join_waitlist'));
   IF (SELECT count(*) FROM public.waitlist_attempts WHERE ip_hash = p_ip_hash AND at > now() - interval '1 hour') >= 5
      OR (SELECT count(*) FROM public.waitlist_attempts WHERE at > now() - interval '1 hour') >= 300 THEN
     RAISE EXCEPTION 'Too many tries. Wait a while and try again' USING ERRCODE = '53400';
@@ -83,6 +87,19 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.join_waitlist(text, text, text) FROM PUBLIC, anon, authenticated;
 
+-- Service role only: the confirmation email didn't send. Drops the unsent
+-- link and its 10-minute cooldown, so trying again sends a fresh one.
+CREATE OR REPLACE FUNCTION public.waitlist_send_failed(p_email text)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.waitlist_signups SET confirm_token = NULL, confirm_sent_at = NULL
+   WHERE email = lower(btrim(coalesce(p_email, ''))) AND confirmed_at IS NULL;
+$$;
+REVOKE ALL ON FUNCTION public.waitlist_send_failed(text) FROM PUBLIC, anon, authenticated;
+
 -- The link in the email. Links work for 7 days; confirming twice is fine.
 CREATE OR REPLACE FUNCTION public.confirm_waitlist(p_token text)
 RETURNS jsonb
@@ -97,6 +114,8 @@ BEGIN
   IF v_row.position IS NULL THEN RETURN jsonb_build_object('status', 'invalid'); END IF;
   IF v_row.confirmed_at IS NULL THEN
     IF v_row.confirm_sent_at < now() - interval '7 days' THEN RETURN jsonb_build_object('status', 'expired'); END IF;
+    -- One confirmation at a time, so the count below sees every earlier one.
+    PERFORM pg_advisory_xact_lock(hashtext('public.confirm_waitlist'));
     UPDATE public.waitlist_signups SET confirmed_at = clock_timestamp() WHERE position = v_row.position RETURNING * INTO v_row;
   END IF;
   -- Places go in the order people confirmed.
@@ -122,6 +141,7 @@ GRANT EXECUTE ON FUNCTION public.waitlist_places_left() TO anon, authenticated;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     GRANT EXECUTE ON FUNCTION public.join_waitlist(text, text, text) TO service_role;
+    GRANT EXECUTE ON FUNCTION public.waitlist_send_failed(text) TO service_role;
   END IF;
 END $$;
 

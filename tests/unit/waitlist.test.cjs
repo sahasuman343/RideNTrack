@@ -8,6 +8,8 @@ const headers = obj => ({ get: k => obj[k.toLowerCase()] ?? null });
 test('client IP comes from the first forwarded entry', () => {
   assert.equal(wl.clientIp(headers({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' })), '203.0.113.9');
   assert.equal(wl.clientIp(headers({ 'cf-connecting-ip': '198.51.100.2' })), '198.51.100.2');
+  // A forged x-forwarded-for can't override the platform's own header.
+  assert.equal(wl.clientIp(headers({ 'x-forwarded-for': '1.2.3.4', 'cf-connecting-ip': '198.51.100.2' })), '198.51.100.2');
   assert.equal(wl.clientIp(headers({})), 'unknown');
 });
 

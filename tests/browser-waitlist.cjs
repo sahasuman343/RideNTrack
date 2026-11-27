@@ -116,18 +116,26 @@ const API = 'https://ridentrack-test.supabase.co';
     await ctx2.close();
     turnstileWorks = true;
 
-    // The emailed link: confirmed early, confirmed later, expired, broken.
+    // The emailed link: opening it changes nothing until the button is pressed.
     const token = 'ab'.repeat(32);
+    const confirmBtn = () => page.getByRole('button', { name: 'Confirm my email' });
+    const confirmsBefore = calls.filter(c => c.name === 'confirm_waitlist').length;
     await page.goto(origin + '/waitlist/confirm?token=' + token);
+    await confirmBtn().waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(calls.filter(c => c.name === 'confirm_waitlist').length, confirmsBefore, 'opening the link must not confirm');
+    assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow');
+    await confirmBtn().click();
     await page.getByRole('status').filter({ hasText: 'You’re one of the first 10.' }).waitFor();
     assert.deepEqual(calls.filter(c => c.name === 'confirm_waitlist').pop().body, { p_token: token });
-    assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, nofollow');
     await page.screenshot({ path: 'test-results/marketing/waitlist-confirmed-360.png' });
     confirmReply = { status: 200, json: { status: 'confirmed', early: false } };
     await page.goto(origin + '/waitlist/confirm?token=' + token);
+    await confirmBtn().click();
     await page.getByRole('status').filter({ hasText: 'You’re on the list.' }).waitFor();
     confirmReply = { status: 200, json: { status: 'expired' } };
     await page.goto(origin + '/waitlist/confirm?token=' + token);
+    await confirmBtn().click();
     await page.getByRole('alert').filter({ hasText: 'This link has expired.' }).waitFor();
     const confirmCalls = calls.filter(c => c.name === 'confirm_waitlist').length;
     await page.goto(origin + '/waitlist/confirm?token=nope');

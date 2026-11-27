@@ -10,6 +10,8 @@ DO $$ BEGIN
   IF has_function_privilege('anon', 'public.join_waitlist(text,text,text)', 'EXECUTE') THEN RAISE EXCEPTION 'anon can call join_waitlist'; END IF;
   IF has_function_privilege('authenticated', 'public.join_waitlist(text,text,text)', 'EXECUTE') THEN RAISE EXCEPTION 'riders can call join_waitlist'; END IF;
   IF to_regprocedure('public.join_waitlist(text,text)') IS NOT NULL THEN RAISE EXCEPTION 'old join_waitlist still exists'; END IF;
+  IF has_function_privilege('anon', 'public.waitlist_send_failed(text)', 'EXECUTE') THEN RAISE EXCEPTION 'anon can call waitlist_send_failed'; END IF;
+  IF has_function_privilege('authenticated', 'public.waitlist_send_failed(text)', 'EXECUTE') THEN RAISE EXCEPTION 'riders can call waitlist_send_failed'; END IF;
 END $$;
 
 -- As the Edge Function (superuser here stands in for the service role).
@@ -100,3 +102,15 @@ BEGIN
 END $$;
 DELETE FROM public.waitlist_signups;
 DELETE FROM public.waitlist_attempts;
+
+-- The email didn't send: the unsent link is dropped and trying again sends a new one at once.
+DO $$
+DECLARE t1 text; t2 text;
+BEGIN
+  t1 := public.join_waitlist('bounce@example.test', NULL, repeat('e', 64))->>'token';
+  IF t1 IS NULL THEN RAISE EXCEPTION 'no first token'; END IF;
+  PERFORM public.waitlist_send_failed('Bounce@Example.test');
+  IF (public.confirm_waitlist(t1))->>'status' <> 'invalid' THEN RAISE EXCEPTION 'unsent link still works'; END IF;
+  t2 := public.join_waitlist('bounce@example.test', NULL, repeat('e', 64))->>'token';
+  IF t2 IS NULL OR t2 = t1 THEN RAISE EXCEPTION 'retry after a failed send got no new link'; END IF;
+END $$;

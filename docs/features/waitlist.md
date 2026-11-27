@@ -14,8 +14,12 @@ The first 10 people who **confirm their email** get Pro free for 3 months.
 3. The function emails a confirmation link through Resend:
    `https://ridentrack.app/waitlist/confirm?token=…`. The link works for 7 days.
    Asking again after 10 minutes sends a fresh link, and the old one stops working.
-4. `/waitlist/confirm` calls `confirm_waitlist(token)`. Places go in the order
-   people confirm. `waitlist_places_left()` counts only confirmed emails.
+4. `/waitlist/confirm` shows a **Confirm my email** button and calls
+   `confirm_waitlist(token)` only when it is pressed, because email scanners
+   open links on their own. Places go in the order people confirm.
+   `waitlist_places_left()` counts only confirmed emails.
+5. If Resend rejects the email, the function calls `waitlist_send_failed(email)`
+   so the next try sends a fresh link straight away.
 
 The form always answers "Check your email". It never says whether an address
 is already on the list. Signups can't be made straight through the API.
