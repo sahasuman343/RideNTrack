@@ -76,21 +76,21 @@ const session = {
     await page.getByLabel('Type it again').fill('abc');
     await page.getByRole('button', { name: 'Save new password' }).click();
     await page.getByRole('alert').filter({ hasText: 'at least 6 characters' }).waitFor();
-    await page.getByLabel('New password').fill('kunzum-la-4551');
-    await page.getByLabel('Type it again').fill('kunzum-la-4552');
+    await page.getByLabel('New password').fill('test-only-fixture-2');
+    await page.getByLabel('Type it again').fill('test-only-fixture-3');
     await page.getByRole('button', { name: 'Save new password' }).click();
     await page.getByRole('alert').filter({ hasText: 'don’t match' }).waitFor();
     assert.equal(calls.user.length, 0, 'nothing saved until the form is valid');
 
     updateStatus = 422;
-    await page.getByLabel('Type it again').fill('kunzum-la-4551');
+    await page.getByLabel('Type it again').fill('test-only-fixture-2');
     await page.getByRole('button', { name: 'Save new password' }).click();
     await page.getByRole('alert').filter({ hasText: 'haven’t used' }).waitFor();
 
     updateStatus = 200;
     await page.getByRole('button', { name: 'Save new password' }).click();
     await page.getByRole('status').filter({ hasText: 'Password saved' }).waitFor();
-    assert.equal(calls.user.at(-1).password, 'kunzum-la-4551');
+    assert.equal(calls.user.at(-1).password, 'test-only-fixture-2');
     await page.screenshot({ path: 'test-results/marketing/reset-saved-1280.png' });
 
     // A link with no usable session says so and offers a new one.
