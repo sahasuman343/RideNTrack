@@ -36,12 +36,25 @@ supabase link --project-ref "$SUPABASE_PROJECT_REF"
 history="$(supabase migration list --linked)"
 echo "$history"
 
+# Versions recorded on the remote: the REMOTE column of `migration list`.
+remote_versions="$(sed 's/│/|/g' <<<"$history" | awk -F'|' 'NF >= 3 { gsub(/[[:space:]]/, "", $2); if ($2 ~ /^[0-9]+$/) print $2 }' | sort -u)"
+
 revert="" applied="" pending_after=""
-if grep -q '20261004062839' <<<"$history"; then
+if grep -qx '20261004062839' <<<"$remote_versions"; then
   if [ "$target" = dev ]; then
     revert="$OLD_RENAMED"; applied="$(seq -f '%03g' 37 64 | tr '\n' ' ')"; first_new=65
+    expected="$(seq -f '%03g' 1 36; tr ' ' '\n' <<<"$OLD_RENAMED")"
   else
     revert="$LIVE_STRAY"; applied="$(seq -f '%03g' 1 38 | tr '\n' ' ')"; first_new=39
+    expected="$(tr ' ' '\n' <<<"$LIVE_STRAY")"
+  fi
+  # Rewrite the history only when it is exactly the known old state; anything
+  # else (a push that stopped halfway, extra versions) needs a person to look.
+  if [ "$(sed '/^$/d' <<<"$expected" | sort -u)" != "$remote_versions" ]; then
+    echo "::error::The $target migration history isn't the expected old state, so it won't be rewritten automatically." >&2
+    echo "Expected:"; sed '/^$/d' <<<"$expected" | sort -u | tr '\n' ' '; echo
+    echo "Found:";    tr '\n' ' ' <<<"$remote_versions"; echo
+    exit 1
   fi
   pending_after="$(ls supabase/migrations | awk -F_ -v n="$first_new" '$1+0 >= n')"
 fi
