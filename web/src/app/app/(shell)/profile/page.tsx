@@ -97,8 +97,9 @@ export default function ProfilePage() {
       <button type="button" onClick={() => { setEditing(null); setNotice(null); }} className="btn hover:bg-raise">Cancel</button>
     </div>
   );
+  // One section at a time, so opening another never drops unsaved changes.
   const editButton = (s: ProfileSection, label: string) => editing !== s && (
-    <button type="button" onClick={() => edit(s)} className="btn btn-ghost px-3 py-1.5 text-xs" aria-label={label}>Edit</button>
+    <button type="button" onClick={() => edit(s)} disabled={editing !== null} className="btn btn-ghost px-3 py-1.5 text-xs disabled:opacity-40" aria-label={label}>Edit</button>
   );
   const row = (label: string, value: React.ReactNode) => (
     <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-line py-2.5 last:border-0">
@@ -309,7 +310,14 @@ function DeleteAccount({ userId, onClose, onDeleted }: { userId: string; onClose
     if (typed !== 'DELETE' || busy) return;
     setBusy(true); setError(null);
     const { error: rpcError } = await supabase.rpc('delete_user_account', { p_expected_user_id: userId });
-    if (rpcError) { setBusy(false); setError('Your account was not deleted. ' + (rpcError.message || 'Try again.')); return; }
+    if (rpcError) {
+      setBusy(false);
+      const club = /club/i.test(rpcError.message || '') || rpcError.code === '23503';
+      setError(club
+        ? 'Your account was not deleted. Accounts that started a club cannot be deleted from here yet.'
+        : 'Your account was not deleted. ' + (rpcError.message || 'Try again.'));
+      return;
+    }
     await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     onDeleted();
   }

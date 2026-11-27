@@ -38,3 +38,14 @@ test('only changed columns are written; range and coordinates', () => {
   assert.equal(p.parseCoordinates('95', '78'), null);
   assert.equal(p.parseCoordinates('', '78'), null);
 });
+
+test('fortnightly club rides keep their weeks once a planned date has passed', () => {
+  const clubs = loader()('shared/clubs.ts');
+  const series = { recurrence_rule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU', planned_dates: [], template_ride_id: 'r1' };
+  // The template rode on Sun 1 Nov 2026, so the series rides 15 and 29 Nov, never 8 or 22 Nov.
+  const anchor = clubs.seriesAnchor(series, [{ id: 'r1', start_date: '2026-11-01' }]);
+  assert.equal(anchor, '2026-11-01');
+  assert.equal(clubs.nextUnplannedDate(series, '2026-11-09', anchor), '2026-11-15');
+  assert.equal(clubs.nextUnplannedDate(series, '2026-11-16', anchor), '2026-11-29');
+  assert.equal(clubs.seriesAnchor({ ...series, planned_dates: ['2026-12-13', '2026-11-29'] }, []), '2026-11-29');
+});

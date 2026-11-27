@@ -22,6 +22,7 @@ let profile = { id: userId, username: 'suman', display_name: 'Suman', phone: nul
 let places = [{ id: 'p1', user_id: userId, name: 'Kunzum La', category: 'pass', latitude: 32.3949, longitude: 77.6371, address: null, notes: 'Cold by 4 pm', created_at: new Date().toISOString() }];
 let failPlaces = true;
 let failDelete = true;
+let deleteError = { code: 'P0001', message: 'Account identity was not deleted' };
 const patches = [];
 const calls = {};
 let myClubs = [];
@@ -69,7 +70,7 @@ const clubs = {
       if (rpc === 'get_user_saved_places') return failPlaces ? fail('timeout', 500) : route.fulfill({ json: places });
       if (rpc === 'add_saved_place') { places = [{ id: 'p' + (places.length + 1), user_id: userId, name: body.p_name, category: body.p_category, latitude: body.p_latitude, longitude: body.p_longitude, address: body.p_address, notes: body.p_notes, created_at: new Date().toISOString() }, ...places]; return route.fulfill({ json: places[0].id }); }
       if (rpc === 'delete_saved_place') { places = places.filter(p => p.id !== body.p_place_id); return route.fulfill({ json: null }); }
-      if (rpc === 'delete_user_account') return failDelete ? fail('Account identity was not deleted') : route.fulfill({ json: null });
+      if (rpc === 'delete_user_account') return failDelete ? route.fulfill({ status: 409, json: { ...deleteError, details: null, hint: null } }) : route.fulfill({ json: null });
       if (rpc === 'get_my_clubs') return route.fulfill({ json: myClubs });
       if (rpc === 'create_club') { if (body.p_slug === 'taken-club') return fail('That club link is taken. Try another.'); return route.fulfill({ json: clubId }); }
       if (rpc === 'get_club') { const c = clubs[body.p_slug]; return route.fulfill({ json: c ? c() : null }); }
@@ -102,6 +103,7 @@ const clubs = {
 
     // Rider: bad phone is refused locally; a good save writes only what changed.
     await page.getByRole('button', { name: 'Edit rider details' }).click();
+    assert.equal(await page.getByRole('button', { name: 'Edit motorcycle' }).isDisabled(), true, 'one section at a time');
     await page.getByLabel('Phone').fill('call me');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Check the phone number' }).waitFor();
@@ -162,6 +164,10 @@ const clubs = {
     await dialog.getByRole('button', { name: 'Delete account' }).click();
     await dialog.getByRole('alert').filter({ hasText: 'Your account was not deleted' }).waitFor();
     assert.deepEqual(calls.delete_user_account.at(-1), { p_expected_user_id: userId });
+    // A club creator's account is held by the club; say so plainly.
+    deleteError = { code: '23503', message: 'update or delete on table "users" violates foreign key constraint "clubs_created_by_fkey" on table "clubs"' };
+    await dialog.getByRole('button', { name: 'Delete account' }).click();
+    await dialog.getByRole('alert').filter({ hasText: 'Accounts that started a club cannot be deleted from here yet' }).waitFor();
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'detached' });
 

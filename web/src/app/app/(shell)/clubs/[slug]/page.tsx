@@ -3,12 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  buildRecurrenceRule, canManageClub, clubRoleLabel, describeRecurrence, memberHistoryText, nextUnplannedDate,
+  buildRecurrenceRule, canManageClub, clubRoleLabel, describeRecurrence, memberHistoryText, nextUnplannedDate, seriesAnchor,
   type ClubMemberRow, type ClubRole, type ClubView, type RecurrenceRule, type Weekday,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { useRequiredSession } from '@/lib/planner';
 import { clubDate } from '@/lib/clubs';
+import { useFlags } from '@/lib/flags';
 
 const DAYS: { code: Weekday; label: string }[] = [
   { code: 'MO', label: 'Mon' }, { code: 'TU', label: 'Tue' }, { code: 'WE', label: 'Wed' }, { code: 'TH', label: 'Thu' },
@@ -29,6 +30,7 @@ export default function ClubPage() {
   const session = useRequiredSession();
   const router = useRouter();
   const userId = session?.user.id;
+  const flags = useFlags(userId);
   const [view, setView] = useState<ClubView | null>(null);
   const [state, setState] = useState<Load>('loading');
   const [joinCode, setJoinCode] = useState<string | null>(null);
@@ -69,6 +71,14 @@ export default function ClubPage() {
 
   if (state === 'loading' || !session) {
     return <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 lg:py-12"><div role="status" aria-label="Loading the club" className="space-y-3"><div className="h-12 w-72 animate-pulse rounded bg-surface" /><div className="h-40 animate-pulse rounded bg-surface" /></div></main>;
+  }
+  if (!flags.clubs) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8 lg:py-12">
+        <Link href="/app/clubs" className="text-sm text-muted hover:text-fg">← Clubs</Link>
+        <p className="notice mt-6">Clubs are not available on your account yet.</p>
+      </main>
+    );
   }
   if (state !== 'ready' || !view) {
     return (
@@ -169,7 +179,7 @@ export default function ClubPage() {
               ) : (
                 <ul className="mt-3 space-y-2">
                   {view.series.map(s => {
-                    const next = nextUnplannedDate(s, today);
+                    const next = nextUnplannedDate(s, today, seriesAnchor(s, view.rides));
                     return (
                       <li key={s.id} className="panel flex flex-wrap items-center justify-between gap-3 p-4">
                         <div className="min-w-0">
@@ -235,7 +245,7 @@ export default function ClubPage() {
                 );
               })}
             </ul>
-            {past.length > 0 && <p className="mt-3 text-sm text-muted">{past.length} ride{past.length === 1 ? '' : 's'} finished together · {past.reduce((n, r) => n + (r.distance_km || 0), 0).toLocaleString('en-IN')} km</p>}
+            {past.length > 0 && <p className="mt-3 text-sm text-muted">{view.rides.length >= 30 ? 'Recently: ' : ''}{past.length} ride{past.length === 1 ? '' : 's'} finished together · {past.reduce((n, r) => n + (r.distance_km || 0), 0).toLocaleString('en-IN')} km</p>}
             <div className="mt-6">
               {confirmLeave ? (
                 <div role="group" aria-label={`Leave ${club.name}?`} className="notice flex flex-wrap items-center gap-3">
