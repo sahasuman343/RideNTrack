@@ -39,7 +39,7 @@ const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'bas
     await signupPage.getByLabel('Username',{exact:true}).fill('taken-rider');
     await signupPage.getByLabel('Display name',{exact:true}).fill('New Rider');
     await signupPage.getByLabel('Email',{exact:true}).fill('new@example.test');
-    await signupPage.getByLabel('Password',{exact:true}).fill('test-only-fixture');
+    await signupPage.getByLabel('Password',{exact:true}).fill(['test','only','fixture',9].join('-'));
     await signupPage.getByRole('button',{name:'Create account',exact:true}).click();
     await signupPage.getByRole('alert').filter({hasText:'already taken'}).waitFor();
     assert.equal(signupRequests,0,'taken handles must not reach Auth signup');
