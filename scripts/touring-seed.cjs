@@ -37,7 +37,7 @@ module.exports = { seedSql };
 if (require.main === module) {
   const sql = seedSql();
   if (process.argv.includes('--write')) {
-    const file = path.resolve(__dirname, '../supabase/migrations/20261201001100_touring_knowledge.sql');
+    const file = path.resolve(__dirname, '../supabase/migrations/049_touring_knowledge.sql');
     const text = fs.readFileSync(file, 'utf8');
     const next = text.replace(/-- seed:begin\n[\s\S]*?-- seed:end/, `-- seed:begin\n${sql}\n-- seed:end`);
     fs.writeFileSync(file, next);

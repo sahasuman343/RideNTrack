@@ -50,6 +50,6 @@ test('map features: severe red, pending hollow, expired gone', () => {
 });
 
 test('report types match the database check', () => {
-  const sql = fs.readFileSync('supabase/migrations/20261201001200_road_reports.sql', 'utf8');
+  const sql = fs.readFileSync('supabase/migrations/050_road_reports.sql', 'utf8');
   for (const t of shared.ROAD_REPORT_TYPES) assert.match(sql, new RegExp(`'${t.type}'`));
 });

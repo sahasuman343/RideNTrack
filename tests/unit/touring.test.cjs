@@ -93,6 +93,6 @@ test('seed data is sane and the migration carries it', () => {
     assert.ok(!p.verified_at, `${p.id} must not claim verification in seed`);
   }
   const { seedSql } = require(path.resolve('scripts/touring-seed.cjs'));
-  const migration = fs.readFileSync('supabase/migrations/20261201001100_touring_knowledge.sql', 'utf8');
+  const migration = fs.readFileSync('supabase/migrations/049_touring_knowledge.sql', 'utf8');
   assert.ok(migration.includes(seedSql()), 'run node scripts/touring-seed.cjs --write');
 });

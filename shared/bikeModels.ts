@@ -4,7 +4,7 @@
  * profile so fuel planning works without the rider knowing these numbers.
  * Figures are approximate and the rider can still edit them.
  * The motorcycle_models table is seeded from this list (see migration
- * 20261201000500); a unit test keeps the two in step.
+ * 043); a unit test keeps the two in step.
  */
 
 export type BikeCategory = 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter';

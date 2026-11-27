@@ -35,7 +35,7 @@ Status: beta, off by default. Two flags:
   the ride screen is open (25 Hz).
 - `mobile/src/hooks/ride/useCrashDetection.ts`: countdown, haptics, speech,
   telemetry, escalation through `useSosWorkflow().escalateCrash`.
-- `supabase/migrations/20261201000900_crash_detection.sql`: alert types,
+- `supabase/migrations/047_crash_detection.sql`: alert types,
   `crash_telemetry` with RLS, research consent, family trigger.
 
 ## Native module (F7-b, not in the build yet)

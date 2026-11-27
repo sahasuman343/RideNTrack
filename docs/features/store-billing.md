@@ -19,7 +19,7 @@ prices with "In-app purchases open soon" and no buy buttons.
 3. RevenueCat calls `supabase/functions/revenuecat-webhook`. The pure mapping
    lives in `supabase/functions/_shared/billing.ts` (unit tested).
 4. The webhook calls `apply_billing_tier` / `apply_billing_pass`
-   (migration 20261201000400). Both are idempotent on the RevenueCat event id
+   (migration 042). Both are idempotent on the RevenueCat event id
    (`billing_events`) and only the service role can run them.
 
 Product ids: `ridentrack_pro_monthly`, `ridentrack_pro_annual`,

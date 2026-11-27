@@ -4,7 +4,7 @@ Decision 2: MSG91 is the default SMS provider (Gupshup is wired as the
 alternative). Indian SMS needs DLT registration, so every message is a fixed
 template with variables.
 
-- Queue: `outbound_messages` (migration 20261201000200). Nothing in the app
+- Queue: `outbound_messages` (migration 040). Nothing in the app
   sends SMS directly; database functions call `enqueue_outbound_message`,
   which applies daily caps, per-ride caps and a 10-minute duplicate guard
   (SOS templates skip the per-user and per-ride caps but not the global cap).

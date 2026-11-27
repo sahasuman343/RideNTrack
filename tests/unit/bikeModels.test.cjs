@@ -27,7 +27,7 @@ test('search finds by partial make and model words', () => {
 });
 
 test('migration seed matches the shared catalogue', () => {
-  const sql = fs.readFileSync(path.resolve(__dirname, '../../supabase/migrations/20261201000500_motorcycle_models.sql'), 'utf8');
+  const sql = fs.readFileSync(path.resolve(__dirname, '../../supabase/migrations/043_motorcycle_models.sql'), 'utf8');
   for (const b of bikes.BIKE_MODELS) assert.ok(sql.includes(`('${b.id}', `), `missing ${b.id}`);
   assert.equal((sql.match(/^  \('/gm) || []).length, bikes.BIKE_MODELS.length);
 });
