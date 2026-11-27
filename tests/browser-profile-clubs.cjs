@@ -51,9 +51,13 @@ const clubs = {
   let browser, page;
   try {
     for (let i = 0; i < 60; i++) { try { if ((await fetch(origin)).ok) break; } catch {} await new Promise(r => setTimeout(r, 500)); }
-    browser = await chromium.launch();
+    browser = await chromium.launch({ args: ['--enable-webgl', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
     await context.addCookies([sessionCookie(session)]);
+    await context.route('https://api.mapbox.com/**', r => r.request().url().includes('/styles/')
+      ? r.fulfill({ json: { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0c0c0e' } }] } })
+      : r.fulfill({ json: {} }));
+    await context.route('https://events.mapbox.com/**', r => r.fulfill({ status: 204 }));
     await context.route('https://ridentrack-test.supabase.co/**', route => {
       const req = route.request(); const url = req.url();
       const rpc = (url.match(/\/rpc\/([a-z_]+)/) || [])[1];
@@ -78,6 +82,8 @@ const clubs = {
         if (req.method() === 'PATCH') { const b = req.postDataJSON(); patches.push(b); profile = { ...profile, ...b }; }
         return route.fulfill({ json: profile });
       }
+      // The trip that "Plan <date>" opens.
+      if (url.includes('/rest/v1/rides')) return route.fulfill({ json: { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'Sunday dawn ride · 29 Nov', ride_code: 'DAWN01', admin_id: userId, origin: 'Pune', destination: 'Sinhagad', origin_coords: [73.85, 18.52], destination_coords: [73.76, 18.37], status: 'planned', trip_type: 'weekend', visibility: 'public', start_date: day(2), created_at: new Date().toISOString() } });
       if (url.includes('/auth/v1/user')) return route.fulfill({ json: session.user });
       if (url.includes('/auth/v1/logout')) return route.fulfill({ status: 204 });
       return route.fulfill({ json: [] });
@@ -215,6 +221,7 @@ const clubs = {
     // Planning the next date opens the new trip.
     await page.getByRole('button', { name: /^Plan / }).click();
     await page.waitForURL('**/app/trips/dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+    await page.getByRole('heading', { name: 'Sunday dawn ride · 29 Nov' }).waitFor();
     assert.equal(calls.schedule_series_ride.at(-1).p_series_id, 's1');
 
     // Visitor view: no roster, join needs the code; a wrong code is reported.
