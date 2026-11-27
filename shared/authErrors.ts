@@ -29,7 +29,16 @@ export interface AuthErrorLike {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const USERNAME_RE = /^[a-z0-9_.]{3,30}$/i;
-export const MIN_PASSWORD = 6;
+/** Matches Supabase Auth: minimum length 8, letters and digits required. */
+export const MIN_PASSWORD = 8;
+export const PASSWORD_RULE = `At least ${MIN_PASSWORD} characters, with letters and numbers.`;
+
+/** What is wrong with a new password, or null when it meets the rule. */
+export function passwordProblem(password: string): string | null {
+  if (password.length < MIN_PASSWORD) return `Use at least ${MIN_PASSWORD} characters.`;
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return 'Use both letters and numbers.';
+  return null;
+}
 
 export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
@@ -55,7 +64,10 @@ export function validateSignUp(input: {
   if (!input.email.trim()) errors.email = 'Enter your email.';
   else if (!isValidEmail(input.email)) errors.email = 'That email looks incomplete.';
   if (!input.password) errors.password = 'Choose a password.';
-  else if (input.password.length < MIN_PASSWORD) errors.password = `At least ${MIN_PASSWORD} characters.`;
+  else {
+    const problem = passwordProblem(input.password);
+    if (problem) errors.password = problem;
+  }
   return errors;
 }
 

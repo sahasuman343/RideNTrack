@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MIN_PASSWORD } from '@ridentrack/shared';
+import { MIN_PASSWORD, PASSWORD_RULE, passwordProblem } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import AuthFrame from '@/components/auth-frame';
 
@@ -34,7 +34,8 @@ export default function ResetPasswordPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    if (password.length < MIN_PASSWORD) { setError(`Use at least ${MIN_PASSWORD} characters.`); return; }
+    const problem = passwordProblem(password);
+    if (problem) { setError(problem); return; }
     if (password !== confirm) { setError('The two passwords don’t match.'); return; }
     setBusy(true); setError('');
     const { error: updateError } = await supabase.auth.updateUser({ password });
@@ -67,7 +68,7 @@ export default function ResetPasswordPage() {
           <div>
             <label htmlFor="new-password" className="field-label">New password</label>
             <input id="new-password" type="password" autoComplete="new-password" minLength={MIN_PASSWORD} value={password} onChange={e => setPassword(e.target.value)} className="field" required aria-describedby="new-password-hint" />
-            <p id="new-password-hint" className="mt-1.5 text-xs text-muted">At least {MIN_PASSWORD} characters. It works in the app and on the web.</p>
+            <p id="new-password-hint" className="mt-1.5 text-xs text-muted">{PASSWORD_RULE} It works in the app and on the web.</p>
           </div>
           <div>
             <label htmlFor="confirm-password" className="field-label">Type it again</label>

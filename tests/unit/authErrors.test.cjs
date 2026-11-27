@@ -4,7 +4,7 @@ const { loader } = require('./loader.cjs');
 
 const shared = loader()('shared/types.ts');
 // Built at runtime so secret scanners don't read fixtures as credentials.
-const pw = ['fixture', 'value'].join('-');
+const pw = ['fixture', 'value', '7'].join('-');
 
 test('wrong password points at the password field and offers a retry', () => {
   const p = shared.authProblem({ code: 'invalid_credentials', message: 'Invalid login credentials' }, 'sign_in');
@@ -58,4 +58,13 @@ test('sign up with an already registered email (hidden by Supabase) throws user_
     shared.registerAccount(client, { email: 'asha@example.test', password: pw, username: 'asha', displayName: 'Asha' }),
     (err) => err.code === 'user_already_exists',
   );
+});
+
+test('new passwords need 8+ characters with letters and numbers (matches Supabase Auth)', () => {
+  assert.equal(shared.MIN_PASSWORD, 8);
+  assert.equal(shared.passwordProblem('ab1'), 'Use at least 8 characters.');
+  assert.equal(shared.passwordProblem('abcdefgh'), 'Use both letters and numbers.');
+  assert.equal(shared.passwordProblem('12345678'), 'Use both letters and numbers.');
+  assert.equal(shared.passwordProblem(['ride', 'safe', '24'].join('')), null);
+  assert.equal(shared.validateSignUp({ email: 'a@b.co', password: 'abcdefgh', username: 'asha', displayName: 'A' }).password, 'Use both letters and numbers.');
 });
