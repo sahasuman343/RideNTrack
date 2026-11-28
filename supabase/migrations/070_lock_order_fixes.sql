@@ -13,7 +13,8 @@
 --    outbound_enqueue lock before it writes the arrival row, so every path
 --    takes that lock first. The family text is also sent inside its own
 --    block: if it fails, the location fix is still saved. Alerts get the
---    same guard, so a missed check-in or crash alert is never lost.
+--    same guard, so a missed check-in or crash alert is never lost, and so
+--    does ride start, so a ride always starts.
 
 CREATE OR REPLACE FUNCTION public.apply_registration_payment(p_event_id text, p_registration_id uuid, p_status text, p_payment_id text, p_amount_paise integer)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -128,3 +129,23 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION public.family_on_alert() FROM PUBLIC, anon, authenticated;
+
+-- And for ride start: a failed family text never stops a ride from starting.
+CREATE OR REPLACE FUNCTION public.family_on_ride_started()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE r record;
+BEGIN
+  IF NEW.status = 'active' AND OLD.status IS DISTINCT FROM 'active' THEN
+    FOR r IN SELECT user_id FROM public.ride_participants
+              WHERE ride_id = NEW.id AND is_active AND attendance_status NOT IN ('absent', 'declined') LOOP
+      BEGIN
+        PERFORM public.notify_family(NEW.id, r.user_id, 'family_ride_started', '{}'::jsonb, 'family_start:' || NEW.id::text);
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'family_on_ride_started: family text not queued: %', SQLERRM;
+      END;
+    END LOOP;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE EXECUTE ON FUNCTION public.family_on_ride_started() FROM PUBLIC, anon, authenticated;
