@@ -12,7 +12,8 @@
 --    one arrival row and wait for the other. The trigger now takes the
 --    outbound_enqueue lock before it writes the arrival row, so every path
 --    takes that lock first. The family text is also sent inside its own
---    block: if it fails, the location fix is still saved.
+--    block: if it fails, the location fix is still saved. Alerts get the
+--    same guard, so a missed check-in or crash alert is never lost.
 
 CREATE OR REPLACE FUNCTION public.apply_registration_payment(p_event_id text, p_registration_id uuid, p_status text, p_payment_id text, p_amount_paise integer)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -107,3 +108,23 @@ BEGIN
 END;
 $$;
 REVOKE EXECUTE ON FUNCTION public.family_on_location() FROM PUBLIC, anon, authenticated;
+
+-- Same guard for alerts: a missed check-in or a detected crash is saved even
+-- if the family text for it cannot be queued.
+CREATE OR REPLACE FUNCTION public.family_on_alert()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.type NOT IN ('check_in_missed', 'crash_detected') THEN RETURN NEW; END IF;
+  BEGIN
+    IF NEW.type = 'check_in_missed' THEN
+      PERFORM public.notify_family(NEW.ride_id, NEW.user_id, 'family_check_in_missed', jsonb_build_object('minutes', '2'), 'family_checkin:' || NEW.id::text);
+    ELSE
+      PERFORM public.notify_family(NEW.ride_id, NEW.user_id, 'family_crash', '{}'::jsonb, 'family_crash:' || NEW.id::text);
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'family_on_alert: family text not queued: %', SQLERRM;
+  END;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.family_on_alert() FROM PUBLIC, anon, authenticated;
