@@ -8,6 +8,14 @@ template with variables.
   sends SMS directly; database functions call `enqueue_outbound_message`,
   which applies daily caps, per-ride caps and a 10-minute duplicate guard
   (SOS templates skip the per-user and per-ride caps but not the global cap).
+  Migration 065 adds abuse limits, all tunable in `outbound_limits`:
+  SOS-class texts are capped at `sos_per_user_daily` (30) per rider, any one
+  number receives at most `per_recipient_daily` (12) texts a day from all
+  senders, and the last `sos_global_reserve` (300) of the global daily budget
+  is kept for SOS-class texts only.
+- Family contacts are still self-declared with consent, not verified by OTP.
+  The per-number cap limits what a bad actor can do; add OTP verification if
+  abuse shows up after launch.
 - Sender: `supabase/functions/send-outbound-message`, triggered by a database
   webhook on INSERT and by a periodic `{ "sweep": true }` call. It retries up
   to 3 times.
