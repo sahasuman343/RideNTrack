@@ -16,16 +16,18 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  canCreateMoreTrips, PLAN_LIMITS, PAYMENT_CONFIG,
+  canCreateMoreTrips, PLAN_LIMITS, priceText,
   fetchDrivingRoute, routeCoordinates,
 } from '@ridentrack/shared';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useEffectiveTier } from '../../src/hooks/useEffectiveTier';
 import * as Location from 'expo-location';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
 import CalendarPickerModal, { formatDateNice, formatYMD } from '../../src/components/CalendarPickerModal';
 import { Icon, Dialog } from '../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../src/icons';
+import { useStorePrices } from '../../src/hooks/useStorePrices';
 
 type Place = { id: string; name: string; address: string; longitude: number; latitude: number };
 type WaypointKind = 'stop' | 'fuel' | 'food' | 'rest' | 'sightseeing' | 'repair';
@@ -316,9 +318,11 @@ export default function CreateRideScreen() {
 
   const [loading, setLoading] = useState(false);
   const { user, profile } = useAuth();
-  const tier = profile?.subscription_tier ?? 'free';
+  const tier = useEffectiveTier();
   const routePointLimit = PLAN_LIMITS[tier].maxWaypointsPerTrip;
   const router = useRouter();
+  const storePrices = useStorePrices();
+  const proMonthly = priceText('pro_monthly', storePrices.prices, storePrices.region, '/month');
   const insets = useSafeAreaInsets();
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -328,17 +332,32 @@ export default function CreateRideScreen() {
   const isDraftClearedRef = useRef(false);
   const isCreatingRef = useRef(false);
 
+  /** Back to an empty trip. The Create tab stays mounted, so state must be cleared by hand. */
+  const resetForm = () => {
+    setCurrentStep(1);
+    setName('');
+    setOrigin(null);
+    setDestination(null);
+    setStartDate('');
+    setEndDate('');
+    setPreviewRoute(null);
+    setShowCustomizations(false);
+    setTripType('group');
+    setDescription('');
+    setMeetup(null);
+    setStops([]);
+    setStay(null);
+    setStayType('hotel');
+    setCheckIn('');
+    setCheckOut('');
+    setStayPrice('');
+  };
+
   // Load autosaved draft scoped to active user on mount / account switch
   useEffect(() => {
     if (!user?.id) {
       // Clear form when logged out
-      setName('');
-      setOrigin(null);
-      setDestination(null);
-      setStartDate('');
-      setEndDate('');
-      setStops([]);
-      setStay(null);
+      resetForm();
       return;
     }
 
@@ -577,7 +596,7 @@ export default function CreateRideScreen() {
         Alert.alert(
           tier === 'free' ? 'RideNTrack Free Plan Limit' : 'RideNTrack Plan Limit',
           tier === 'free'
-            ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer (₹${PAYMENT_CONFIG.monthlyPlanPriceInr}/month) for more trips and route points.`
+            ? `The Free plan includes up to ${PLAN_LIMITS.free.maxActiveTrips} active trips. Upgrade to Pro Tourer${proMonthly ? ` (${proMonthly})` : ''} for more trips and route points.`
             : `Your Pro Tourer plan has reached its ${PLAN_LIMITS.pro_tourer.maxActiveTrips}-trip active limit. Complete or archive an existing trip first.`,
           [
             { text: 'Manage Trips', onPress: () => router.push('/(tabs)') },
@@ -682,6 +701,9 @@ export default function CreateRideScreen() {
       const scopedKey = `${DRAFT_STORAGE_KEY}_${user.id}`;
       await AsyncStorage.removeItem(scopedKey).catch(() => {});
       await AsyncStorage.removeItem(DRAFT_STORAGE_KEY).catch(() => {});
+      // The next trip starts empty; autosave stays paused until the form is cleared.
+      resetForm();
+      setTimeout(() => { isDraftClearedRef.current = false; }, 0);
 
       setActiveDialog({
         visible: true,

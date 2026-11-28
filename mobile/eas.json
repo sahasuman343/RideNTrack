@@ -7,10 +7,11 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "environment": "development",
+      "channel": "development",
       "env": {
         "APP_VARIANT": "development"
-      }
+      },
+      "environment": "development"
     },
     "development-apk": {
       "distribution": "internal",
@@ -19,6 +20,7 @@
         "buildType": "apk"
       },
       "environment": "development",
+      "channel": "development",
       "env": {
         "APP_VARIANT": "development"
       }
@@ -30,6 +32,7 @@
         "buildType": "apk"
       },
       "environment": "preview",
+      "channel": "preview",
       "env": {
         "APP_VARIANT": "production"
       }
@@ -39,9 +42,11 @@
         "buildType": "app-bundle"
       },
       "autoIncrement": true,
+      "channel": "production",
       "env": {
         "APP_VARIANT": "production"
-      }
+      },
+      "environment": "production"
     }
   },
   "submit": {

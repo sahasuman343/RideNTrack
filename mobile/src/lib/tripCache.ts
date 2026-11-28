@@ -26,7 +26,21 @@ async function openDatabase() {
     '  ride_id TEXT,' +
     '  payload TEXT NOT NULL,' +
     '  updated_at TEXT NOT NULL' +
-    ');'
+    ');' +
+    // F5: which offline map packs belong to which trip, and for which route.
+    'CREATE TABLE IF NOT EXISTS offline_packs (' +
+    '  name TEXT PRIMARY KEY,' +
+    '  ride_id TEXT NOT NULL,' +
+    '  route_hash TEXT NOT NULL,' +
+    '  box_index INTEGER NOT NULL,' +
+    '  status TEXT NOT NULL,' +
+    '  percent REAL NOT NULL DEFAULT 0,' +
+    '  bytes INTEGER NOT NULL DEFAULT 0,' +
+    '  updated_at TEXT NOT NULL' +
+    ');' +
+    'CREATE INDEX IF NOT EXISTS idx_offline_packs_ride ON offline_packs (ride_id);' +
+    // F6: small per-ride values that must survive with no signal (SOS recipients).
+    'CREATE TABLE IF NOT EXISTS ride_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);'
   );
   return db;
 }
@@ -98,6 +112,8 @@ export async function clearAllCachedTripsForUser(userId: string): Promise<void> 
   try {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM trip_cache WHERE user_id = ? OR id LIKE ?', userId, `${userId}#%`);
+    // SOS recipient lists hold private emergency numbers; drop them on sign-out.
+    await db.runAsync("DELETE FROM ride_kv WHERE key LIKE 'sos-recipients:%'");
   } catch {
     /* ignore */
   }
@@ -109,5 +125,67 @@ export async function clearAllCachedTrips(): Promise<void> {
     await db.runAsync('DELETE FROM trip_cache');
   } catch {
     /* ignore */
+  }
+}
+
+export interface OfflinePackRow {
+  name: string;
+  ride_id: string;
+  route_hash: string;
+  box_index: number;
+  status: 'complete' | 'active' | 'inactive' | 'error';
+  percent: number;
+  bytes: number;
+}
+
+export async function saveOfflinePackRow(row: OfflinePackRow): Promise<void> {
+  try {
+    const db = await getDatabase();
+    await db.runAsync(
+      'INSERT OR REPLACE INTO offline_packs (name, ride_id, route_hash, box_index, status, percent, bytes, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      row.name, row.ride_id, row.route_hash, row.box_index, row.status, row.percent, row.bytes, new Date().toISOString(),
+    );
+  } catch { /* the pack itself still exists in Mapbox's store */ }
+}
+
+export async function getOfflinePackRows(rideId: string): Promise<OfflinePackRow[]> {
+  try {
+    const db = await getDatabase();
+    return await db.getAllAsync<OfflinePackRow>('SELECT name, ride_id, route_hash, box_index, status, percent, bytes FROM offline_packs WHERE ride_id = ? ORDER BY box_index', rideId);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteOfflinePackRows(rideId: string): Promise<void> {
+  try {
+    const db = await getDatabase();
+    await db.runAsync('DELETE FROM offline_packs WHERE ride_id = ?', rideId);
+  } catch { /* ignore */ }
+}
+
+/** F5: keep the ride's route on the phone so the live map works with no signal. */
+export async function saveCachedRoute(rideId: string, userId: string | null | undefined, geometry: Ride['route_geometry']): Promise<void> {
+  if (!geometry) return;
+  const cached = await getCachedTrip(rideId, userId);
+  if (cached) {
+    await saveCachedTrip(rideId, { ...cached, trip: { ...cached.trip, route_geometry: geometry } }, userId);
+  }
+}
+
+export async function saveRideValue(key: string, value: unknown): Promise<void> {
+  try {
+    const db = await getDatabase();
+    await db.runAsync('INSERT OR REPLACE INTO ride_kv (key, value, updated_at) VALUES (?, ?, ?)', key, JSON.stringify(value), new Date().toISOString());
+  } catch { /* best effort */ }
+}
+
+export async function getRideValue<T>(key: string): Promise<T | null> {
+  try {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM ride_kv WHERE key = ?', key);
+    return row ? (JSON.parse(row.value) as T) : null;
+  } catch {
+    return null;
   }
 }

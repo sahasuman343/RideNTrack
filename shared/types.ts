@@ -12,9 +12,14 @@ export interface User {
   fuel_tank_capacity_liters?: number | null;
   mileage_km_per_liter?: number | null;
   fuel_reserve_liters?: number | null;
+  motorcycle_model_id?: string | null;
   motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
   blood_group?: string | null;
   share_ice_with_ride?: boolean;
+  /** Opt-in: riders on the same live ride may receive this number for SOS texts. */
+  share_phone_with_ride?: boolean;
+  /** F7: consent for the sensor recorder to keep motion samples. */
+  crash_research_consent_at?: string | null;
   ice_consent_at?: string | null;
   subscription_tier?: 'free' | 'pro_tourer';
 }
@@ -45,6 +50,8 @@ export interface Ride {
   start_date?: string | null;
   end_date?: string | null;
   estimated_distance_meters?: number | null;
+  /** F15: the club this ride belongs to. */
+  club_id?: string | null;
   estimated_duration_seconds?: number | null;
   route_deviation_threshold_meters?: number;
   rider_behind_threshold_meters?: number;
@@ -229,7 +236,7 @@ export interface Alert {
   ride_id: string;
   user_id: string;
   display_name: string;
-  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement';
+  type: 'emergency' | 'break' | 'fuel' | 'mechanical' | 'route_deviation' | 'rider_behind' | 'regroup' | 'announcement' | 'check_in_missed' | 'possible_crash' | 'crash_cancelled' | 'crash_detected';
   message?: string;
   /** Null when an SOS was sent before the phone ever got a GPS fix. */
   lat: number | null;
@@ -299,6 +306,10 @@ export const ALERT_LABELS: Record<AlertType, string> = {
   rider_behind: '🏍️ Rider Behind',
   regroup: '📢 Regroup Now',
   announcement: '📢 Captain Announcement',
+  check_in_missed: '⏱️ Missed Check-in',
+  possible_crash: '⚠️ Possible Crash',
+  crash_cancelled: '✅ Rider Is OK',
+  crash_detected: '🚨 Crash Detected',
 };
 
 export type RiderLiveStatus = 'riding' | 'stopped' | 'disconnected' | 'completed';
@@ -357,8 +368,9 @@ export function mergeAlerts(previous: Alert[], incoming: Alert[]): Alert[] {
 
 export { watchRide, classifyRiderFreshness, formatLastSeenAgo, fetchRideMessages, sendRideMessage, type Connection, type RiderFreshness } from './live';
 export { registerAccount, UsernameUnavailableError } from './registration';
+export * from './authErrors';
 
-export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system';
+export type RideMessageType = 'text' | 'quick_reply' | 'pinned_info' | 'system' | 'voice';
 
 export interface RideMessage {
   id: string;
@@ -370,6 +382,13 @@ export interface RideMessage {
   attachment_url?: string | null;
   is_pinned: boolean;
   created_at: string;
+  /** F8: id the phone gave the message, so retries never duplicate it. */
+  client_id?: string | null;
+  /** F8: when the rider wrote it (created_at is when it reached the server). */
+  client_created_at?: string | null;
+  /** F12: clip in the ride-voice bucket and its length. */
+  voice_path?: string | null;
+  voice_duration_ms?: number | null;
 }
 
 export const QUICK_REPLY_PRESETS = [
@@ -419,3 +438,33 @@ export * from './navigation';
 
 
 
+export * from './attention';
+export * from './status';
+export * from './rideAttention';
+export * from './analytics';
+export * from './flags';
+export * from './readiness';
+export * from './bikeModels';
+export * from './captainFlow';
+export * from './family';
+export * from './spectator';
+export * from './battery';
+export * from './corridor';
+export * from './sos';
+export * from './crash';
+export * from './chat';
+export * from './lockScreen';
+export * from './touringKnowledge';
+export * from './roadReports';
+export * from './voice';
+export * from './i18n';
+export * from './performance';
+export * from './crashTuning';
+export * from './referrals';
+export * from './clubs';
+export * from './registrations';
+export * from './headset';
+export * from './tripPlanner';
+export * from './routeEditor';
+export * from './webLocationShare';
+export * from './profileForm';

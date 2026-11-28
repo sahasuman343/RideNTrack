@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { FlatList, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { classifyRiderFreshness, formatLastSeenAgo, getRiderLiveStatus, type LocationUpdate, type RideIceContact } from '@ridentrack/shared';
+import { classifyRiderFreshness, getRiderLiveStatus, riderPresence, type LocationUpdate, type RideIceContact } from '@ridentrack/shared';
 import { useRideTheme } from '../../theme';
 
 interface Props {
@@ -31,7 +31,9 @@ export const RiderRoster = React.memo(function RiderRoster({ points, userId, rid
         const status = getRiderLiveStatus(point, rideStatus, now);
         const isCompleted = rideStatus === 'completed';
         const freshness = classifyRiderFreshness(point.timestamp, now);
-        const lastSeenBadge = formatLastSeenAgo(point.timestamp, now);
+        // Shared words: "4 min ago", then "In dead zone" after ten minutes.
+        const presence = riderPresence(point.timestamp, now);
+        const lastSeenBadge = presence.label;
         const ice = iceByRider[point.user_id];
         const disconnected = !isCompleted && (status.status === 'disconnected' || freshness !== 'live');
         return (
@@ -44,7 +46,7 @@ export const RiderRoster = React.memo(function RiderRoster({ points, userId, rid
                 <Text style={styles.text}>{point.display_name}{point.user_id === userId ? ' · you' : ''}</Text>
                 <View style={[styles.pill, disconnected && styles.pillDisconnected]}><Text style={styles.pillText}>{isCompleted || freshness === 'live' ? status.label : lastSeenBadge}</Text></View>
               </View>
-              <Text style={styles.muted}>{disconnected ? status.lastSeenText || lastSeenBadge : isCompleted ? 'Ride completed' : 'Live location'}</Text>
+              <Text style={styles.muted}>{disconnected ? presence.sentence : isCompleted ? 'Ride completed' : 'Live location'}</Text>
               {!!ice && (
                 <View style={styles.iceRow}>
                   <Text style={styles.iceText} numberOfLines={1}>ICE{ice.blood_group ? ` · ${ice.blood_group}` : ''}{ice.emergency_contact ? ` · ${ice.emergency_contact}` : ''}</Text>

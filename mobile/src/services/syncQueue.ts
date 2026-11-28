@@ -1,5 +1,6 @@
+import { voiceClipPath, VOICE_BUCKET } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
-import { getQueueCounts, getQueuedAlerts, getQueuedLocations, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
+import { getQueueCounts, getQueuedAlerts, getQueuedLocations, getQueuedMessages, getQueuedRoadReports, clearQueuedItems, pruneQueue } from '../lib/offlineQueue';
 
 // Queued items older than this are not useful to the group and would only
 // grow the device database on a phone that stays offline for weeks.
@@ -15,6 +16,22 @@ function isPermanentRejection(error: { code?: string | null } | null | undefined
 }
 
 let running: Promise<void> | null = null;
+
+/** 'ok' when the clip is in storage (now or from an earlier try), 'gone' when the local file is lost. */
+async function uploadVoiceClip(path: string, localUri: string): Promise<'ok' | 'retry' | 'gone'> {
+  let body: ArrayBuffer;
+  try {
+    body = await (await fetch(localUri)).arrayBuffer();
+  } catch {
+    return 'gone';
+  }
+  const { error } = await supabase.storage.from(VOICE_BUCKET).upload(path, body, { contentType: 'audio/mp4', upsert: false });
+  if (!error || /exists|duplicate/i.test(error.message)) return 'ok';
+  return 'retry';
+}
+
+/** Chat messages the server refused for good (shown as Failed with a retry). */
+export const rejectedMessageIds = new Set<string>();
 const LOCATION_BATCH_SIZE = 100;
 // Bound each pass so background sync does not monopolize the JS thread or
 // radio. The next connectivity/app-state cycle continues from the queue head.
@@ -32,7 +49,7 @@ async function flush() {
   if (!userId) return;
   await pruneQueue(MAX_QUEUE_AGE_MS).catch(() => {});
   const counts = await getQueueCounts(userId);
-  if (counts.locations === 0 && counts.alerts === 0) return;
+  if (counts.locations === 0 && counts.alerts === 0 && !counts.messages && !counts.roadReports) return;
 
   let alertError: string | null = null;
   const alerts = await getQueuedAlerts(userId);
@@ -66,6 +83,47 @@ async function flush() {
         await clearQueuedItems(userId, [alert.id]);
       }
       alertError = firstError;
+    }
+  }
+
+  // F8: chat written offline. client_id makes a retry after a lost
+  // acknowledgement a no-op on the server.
+  let messageError: string | null = null;
+  if (counts.messages) {
+    const messages = await getQueuedMessages(userId);
+    for (const m of messages) {
+      // F12: a voice note uploads its clip first; the row then points at it.
+      let voice: { voice_path: string; voice_duration_ms: number } | null = null;
+      if (m.voice) {
+        const path = voiceClipPath(m.ride_id, m.user_id, m.id);
+        const uploaded = await uploadVoiceClip(path, m.voice.local_uri);
+        if (uploaded === 'retry') { messageError ||= 'Voice note upload failed'; continue; }
+        if (uploaded === 'gone') { await clearQueuedItems(userId, [m.id]); rejectedMessageIds.add(m.id); continue; }
+        voice = { voice_path: path, voice_duration_ms: Math.round(m.voice.duration_ms) };
+      }
+      const { error } = await supabase.from('ride_messages').upsert({
+        client_id: m.id, ride_id: m.ride_id, sender_id: m.user_id, body: m.body,
+        message_type: m.message_type, client_created_at: m.created_at, ...(voice ?? {}),
+      }, { onConflict: 'client_id', ignoreDuplicates: true });
+      if (!error) { await clearQueuedItems(userId, [m.id]); continue; }
+      if (isPermanentRejection(error)) {
+        // e.g. the rider left the ride; keep it out of the queue but let the chat show it as failed.
+        await clearQueuedItems(userId, [m.id]);
+        rejectedMessageIds.add(m.id);
+        continue;
+      }
+      messageError ||= error.message;
+    }
+  }
+
+  // F11: road reports. The queue id is the report id, so retries are no-ops;
+  // a rate limit or a ride the rider left will never pass, so drop those.
+  if (counts.roadReports) {
+    for (const r of await getQueuedRoadReports(userId)) {
+      const { error } = await supabase.rpc('create_road_report', {
+        p_id: r.id, p_type: r.type, p_lat: r.lat, p_lng: r.lng, p_note: r.note, p_ride_id: r.ride_id,
+      });
+      if (!error || isPermanentRejection(error) || error.code === 'P0001') await clearQueuedItems(userId, [r.id]);
     }
   }
 
@@ -104,4 +162,5 @@ async function flush() {
     await clearQueuedItems(userId, batch.map(item => item.id!));
   }
   if (alertError) throw new Error('Some alerts remain queued: ' + alertError);
+  if (messageError) throw new Error('Some messages remain queued: ' + messageError);
 }

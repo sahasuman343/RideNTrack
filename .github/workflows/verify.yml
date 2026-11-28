@@ -14,6 +14,8 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: https://ridentrack-test.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: test-only-placeholder
       NEXT_PUBLIC_MAPBOX_TOKEN: pk.test-only-placeholder
+      # Cloudflare's public always-pass test key; the browser test mocks the widget.
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +43,7 @@ jobs:
             --publish 127.0.0.1:5432:5432 \
             --env POSTGRES_PASSWORD --env POSTGRES_DB=ridentrack_test \
             --health-cmd 'pg_isready -U postgres' \
-            --health-interval 2s --health-timeout 5s --health-retries 30 postgres:16
+            --health-interval 2s --health-timeout 5s --health-retries 30 postgres:17
           for attempt in {1..30}; do
             if [ "$(docker inspect --format '{{.State.Health.Status}}' ridentrack-test-db)" = healthy ]; then
               exit 0
@@ -58,17 +60,47 @@ jobs:
             psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f "$migration"
           done
           psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f tests/db-regression.sql
+          for db_test in tests/db/*.sql; do
+            psql -h localhost -U postgres -d ridentrack_test -v ON_ERROR_STOP=1 -f "$db_test"
+          done
       - name: Production web build
         if: always()
         run: npm --workspace=web run build
       - name: Browser tools
         if: success()
         run: |
-          npm install --prefix "$RUNNER_TEMP/ridentrack-browser-tools" --ignore-scripts playwright@1.56.1
+          npm install --prefix "$RUNNER_TEMP/ridentrack-browser-tools" --ignore-scripts playwright@1.56.1 axe-core@4.13.0
           node "$RUNNER_TEMP/ridentrack-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Browser map checks
         if: success()
         run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser.cjs
+      - name: Browser trip planner checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-trips.cjs
+      - name: Browser site foundation checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-foundation.cjs
+      - name: Browser trip people checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-people.cjs
+      - name: Browser trip money and journal checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-money.cjs
+      - name: Browser location sharing checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-share.cjs
+      - name: Browser profile and club checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-profile-clubs.cjs
+      - name: Browser marketing page checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-marketing.cjs
+      - name: Browser password reset checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-password-reset.cjs
+      - name: Browser waitlist checks
+        if: success()
+        run: NODE_PATH="$RUNNER_TEMP/ridentrack-browser-tools/node_modules" node tests/browser-waitlist.cjs
       - name: Browser screenshots
         if: always()
         uses: actions/upload-artifact@v4

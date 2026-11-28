@@ -45,7 +45,11 @@ import {
   type TripExpenseSummary,
   type AttendanceStatus,
   ATTENDANCE_STATUS_LABELS,
+  estimateBattery,
 } from '@ridentrack/shared';
+import { useOfflineSync } from '../../src/hooks/useOfflineSync';
+import { useTouringKnowledge } from '../../src/hooks/useTouringKnowledge';
+import { TouringKnowledgeCard } from '../../src/components/trip/TouringKnowledgeCard';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette, radius, spacing, typography } from '../../src/theme';
@@ -75,93 +79,19 @@ import { ATTENDANCE_ICONS, CHECKLIST_ICONS, EXPENSE_ICONS, ROLE_ICONS, weatherIc
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-type Trip = {
-  id: string;
-  name: string;
-  description?: string | null;
-  origin: string;
-  destination: string;
-  origin_coords?: [number, number] | null;
-  destination_coords?: [number, number] | null;
-  status: string;
-  trip_type?: string;
-  start_date?: string | null;
-  end_date?: string | null;
-  estimated_distance_meters?: number | null;
-  estimated_duration_seconds?: number | null;
-  expense_currency: string;
-  ride_code: string;
-  admin_id: string;
-  route_deviation_threshold_meters: number;
-  rider_behind_threshold_meters: number;
-  visibility?: 'private' | 'invite_only' | 'public';
-  max_participants?: number | null;
-  ride_rules?: string | null;
-};
-
-type Waypoint = {
-  id: string;
-  sequence: number;
-  waypoint_type: string;
-  name: string;
-  address?: string;
-  latitude: number;
-  longitude: number;
-  provider_place_id?: string | null;
-  notes?: string;
-  trip_day_id?: string | null;
-};
-
-type Day = {
-  id: string;
-  day_number: number;
-  trip_date?: string;
-  title?: string;
-  notes?: string;
-};
-
-type Regroup = {
-  id: string;
-  name: string;
-  latitude: number;
-  longitude: number;
-  sequence: number;
-  target_arrival: string | null;
-  notes: string | null;
-  arrived_count: number;
-  my_arrived: boolean;
-  status?: string;
-  closed_at?: string | null;
-};
-
-type RiderFuelSpec = {
-  user_id: string;
-  display_name: string;
-  fuel_tank_capacity_liters: number | string | null;
-  mileage_km_per_liter: number | string | null;
-  fuel_reserve_liters: number | string | null;
-};
-type Rider = {
-  user_id: string;
-  display_name: string;
-  role: RideParticipantRole;
-  is_active: boolean;
-  last_seen: string | null;
-  attendance_status?: AttendanceStatus;
-  motorcycle_model?: string;
-};
-
-type Stay = {
-  id: string;
-  name: string;
-  stay_type: string;
-  address?: string;
-  check_in?: string;
-  check_out?: string;
-  price_amount?: number;
-  price_currency: string;
-  trip_day_id?: string | null;
-};
+import type { Trip, Waypoint, Day, Regroup, RiderFuelSpec, Rider, Stay } from '../../src/components/trip/types';
+import { makeTripStyles as makeStyles } from '../../src/components/trip/tripStyles';
+import { TripLiveRadar } from '../../src/components/trip/TripLiveRadar';
+import { PackReadinessList, RideReadyCard } from '../../src/components/trip/RideReadyCard';
+import { useFamilyContacts } from '../../src/hooks/useFamilyContacts';
+import { useBatteryLevel } from '../../src/hooks/useBatteryLevel';
+import { useOfflineMaps } from '../../src/hooks/useOfflineMaps';
+import { FamilyContactsSheet } from '../../src/components/trip/FamilyContactsSheet';
+import { useRideReadiness } from '../../src/hooks/useRideReadiness';
+import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { InviteCard } from '../../src/components/InviteCard';
+import { ClubRideRow } from '../../src/components/club/ClubRideRow';
+import { RegistrationCard } from '../../src/components/trip/RegistrationCard';
 
 export default function TripWorkspaceScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
@@ -412,7 +342,44 @@ export default function TripWorkspaceScreen() {
     return base;
   }, [trip?.estimated_distance_meters, trip?.start_date, trip?.end_date, trip?.estimated_duration_seconds, trip?.trip_type, stages, days, fuelPlan, weatherPoints, packFuelPlan]);
 
+  // F10: curated fuel stops and advisories along this trip (cached for offline).
+  const tripOnline = useOfflineSync().isOnline;
+  const touring = useTouringKnowledge({
+    rideId: trip?.id,
+    routeCoords: (trip as { route_geometry?: { geometry?: { coordinates?: number[][] } } } | null)?.route_geometry?.geometry?.coordinates,
+    startDate: trip?.start_date,
+    packSafeRangeKm: packFuelPlan.limitingRider?.safeRangeKm ?? null,
+    online: tripOnline,
+  });
+
   const isAdmin = !!user && trip?.admin_id === user.id;
+  // R5: one Ride ready card replaces scattered setup prompts.
+  const family = useFamilyContacts();
+  const languagesFlag = useFlag('languages');
+  const { levelPercent: batteryLevel } = useBatteryLevel();
+  // F4: one sentence, from the rider's role and the planned riding time.
+  const batteryFootnote = useMemo(() => {
+    if (!trip) return null;
+    const role = isAdmin ? 'captain' : roster.find(r => r.user_id === user?.id)?.role ?? null;
+    const dayHours = trip.estimated_duration_seconds ? Math.min(12, (trip.estimated_duration_seconds / 3600) * 1.3) : 8;
+    return `Battery: ${estimateBattery({ role, hours: Math.max(1, Math.round(dayHours)), levelPercent: batteryLevel }).sentence}`;
+  }, [trip, isAdmin, roster, user?.id, batteryLevel]);
+  const [familySheetVisible, setFamilySheetVisible] = useState(false);
+  const readinessHandlers = useMemo(() => ({
+    edit_emergency_contact: () => router.push('/(tabs)/profile'),
+    edit_phone: () => router.push('/(tabs)/profile'),
+    open_bike_picker: () => router.push('/(tabs)/profile'),
+    add_family_contact: () => setFamilySheetVisible(true),
+    download_offline_maps: () => void offlineMapsRef.current(),
+  }), [router]);
+  const offline = useOfflineMaps(trip);
+  const offlineMapsRef = useRef(offline.download);
+  offlineMapsRef.current = offline.download;
+  const readiness = useRideReadiness(id, {
+    familyContactsCount: family.loaded ? family.contacts.length : null,
+    offlineMaps: offline.state,
+    offlineMapsDetail: offline.error ?? offline.badge?.detail ?? null,
+  }, readinessHandlers);
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -1520,6 +1487,17 @@ export default function TripWorkspaceScreen() {
           <View style={styles.heroOverlayContent}>
             <View style={styles.heroTopRow}>
               <StatusBadge status={trip.status} />
+              {offline.badge && trip.status !== 'completed' ? (
+                <TouchableOpacity
+                  style={[styles.heroActionBtn, { marginLeft: 'auto', marginRight: 8, backgroundColor: offline.badge.tone === 'ok' ? theme.green : 'rgba(0,0,0,0.55)' }]}
+                  onPress={() => { if (offline.state !== 'ready' && offline.state !== 'downloading') void offline.download(); }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${offline.badge.label}. ${offline.badge.detail}`}
+                >
+                  <Icon name={offline.badge.tone === 'ok' ? 'cloud-done-outline' : 'cloud-download-outline'} size="xs" color={theme.onAccent} />
+                  <Text style={styles.heroActionBtnText}>{offline.badge.label}</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={styles.heroActionBtn}
                 onPress={() => void exportGpxFile()}
@@ -1595,52 +1573,48 @@ export default function TripWorkspaceScreen() {
 
         {/* ================= LIVE TRACKER VIEW ================= */}
         {activeTab === 'live' && canShowLiveTracker && (
-          <View style={styles.liveRadarContainer}>
-            <Card style={styles.liveRadarCard} variant="raised">
-              <View style={styles.liveRadarHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <LiveDot pulse={isTripOngoing} />
-                  <Text style={styles.liveRadarTitle}>
-                    {isTripOngoing ? 'LIVE SATELLITE RADAR' : 'LIVE TRACKING PREPARATION'}
-                  </Text>
-                </View>
-                <StatusBadge status={trip.status} />
-              </View>
-
-              <Text style={styles.liveRadarDescription}>
-                {isTripOngoing
-                  ? 'Active group telemetry is syncing. Tap below to enter dedicated helmet & glove-operable Ride Mode.'
-                  : 'Planned trip route locked. Start tracking when your motorcycle hits the highway.'}
-              </Text>
-
-              <RouteLine
-                origin={trip.origin}
-                destination={trip.destination}
-                stopsCount={waypoints.length}
-                style={{ marginVertical: 14 }}
-              />
-
-              <View style={styles.liveRadarStatsRow}>
-                <View style={styles.liveRadarStat}>
-                  <Text style={styles.liveRadarStatValue}>{activeRosterCount} / {roster.length}</Text>
-                  <Text style={styles.liveRadarStatLabel}>RIDERS ONLINE</Text>
-                </View>
-                <View style={styles.liveRadarStat}>
-                  <Text style={styles.liveRadarStatValue}>{distance}</Text>
-                  <Text style={styles.liveRadarStatLabel}>TOTAL EXPEDITION</Text>
-                </View>
-                <View style={styles.liveRadarStat}>
-                  <Text style={styles.liveRadarStatValue}>{waypoints.length}</Text>
-                  <Text style={styles.liveRadarStatLabel}>WAYPOINTS</Text>
-                </View>
-              </View>
-            </Card>
-          </View>
+          <TripLiveRadar
+            styles={styles}
+            trip={trip}
+            isTripOngoing={isTripOngoing}
+            activeRosterCount={activeRosterCount}
+            rosterCount={roster.length}
+            distance={distance}
+            waypointCount={waypoints.length}
+          />
         )}
 
         {/* ================= DETAILS SECTION ================= */}
         {(activeTab === 'details' || !canShowLiveTracker) && (
           <>
+            {(trip.status === 'planned' || isTripOngoing) && (
+              <RideReadyCard items={readiness.items} summary={readiness.summary} onFix={item => void readiness.fix(item)} footnote={batteryFootnote} />
+            )}
+            <RegistrationCard rideId={trip.id} isCaptain={isAdmin} planned={trip.status === 'planned'} />
+            {isAdmin && <ClubRideRow rideId={trip.id} clubId={trip.club_id} onChanged={() => void load()} />}
+            {trip.status === 'completed' && (
+              <InviteCard source="recap" ride={{ name: trip.name, distanceKm: trip.estimated_distance_meters ? trip.estimated_distance_meters / 1000 : null }} />
+            )}
+            <TouringKnowledgeCard
+              route={touring.route}
+              fuel={touring.fuel}
+              advisories={touring.advisories}
+              packSafeRangeKm={packFuelPlan.limitingRider?.safeRangeKm ?? null}
+            />
+            {isAdmin && trip.status === 'planned' && roster.length > 1 && (
+              <PackReadinessList rideId={trip.id} roster={roster} />
+            )}
+            <FamilyContactsSheet
+              visible={familySheetVisible}
+              onClose={() => setFamilySheetVisible(false)}
+              bottomInset={insets.bottom}
+              contacts={family.contacts}
+              onSave={family.save}
+              onRemove={family.remove}
+              onPause={family.setPaused}
+              onSetLanguage={languagesFlag ? family.setLanguage : undefined}
+            />
+
             {/* Participants & Formation Roster Section */}
             <Card style={styles.cardSection}>
               <View style={styles.sectionHeaderRow}>
@@ -2811,276 +2785,3 @@ export default function TripWorkspaceScreen() {
     </View>
   );
 }
-
-const makeStyles = (c: RidePalette) => StyleSheet.create({
-  screenWrapper: { flex: 1, backgroundColor: c.background },
-  topHeader: { backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border },
-  topHeaderInner: { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
-  backButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
-  topHeaderTitleContainer: { flex: 1, marginHorizontal: 8 },
-  topHeaderEyebrow: { color: c.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
-  topHeaderTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
-  topHeaderRight: { width: 44, alignItems: 'flex-end', justifyContent: 'center' },
-
-  container: { flex: 1, backgroundColor: c.background },
-  content: { padding: 16 },
-
-  center: { flex: 1, backgroundColor: c.background, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
-  title: { color: c.text, fontSize: 24, fontWeight: '800' },
-  muted: { color: c.muted, fontSize: 13, lineHeight: 19 },
-  mutedSmall: { color: c.muted, fontSize: 11, lineHeight: 16 },
-  link: { color: c.accent, fontSize: 12, fontWeight: '700', marginTop: 4 },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
-  linkText: { color: c.accent, ...typography.titleMd, fontSize: 12 },
-  inlineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-
-  heroCoverWrapper: { borderRadius: 16, overflow: 'hidden', backgroundColor: c.surface, position: 'relative' },
-  heroOverlayContent: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 14, justifyContent: 'space-between', backgroundColor: '#00000044' },
-  heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  heroActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#00000099', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: '#ffffff22' },
-  heroActionBtnText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
-  heroBottomBlock: { gap: 2 },
-  heroEyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  heroEyebrowText: { color: c.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  heroDot: { color: c.muted, fontSize: 10 },
-  heroEyebrowMuted: { color: '#FFFFFF99', fontSize: 10, fontWeight: '700' },
-  heroTripName: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
-  heroRouteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  heroRouteText: { color: '#FFFFFFEE', fontSize: 13, fontWeight: '700', flexShrink: 1 },
-  heroRouteArrow: { color: c.accent, fontSize: 14, fontWeight: '800' },
-
-  telemetryStrip: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1, borderColor: c.border },
-  telemetryCol: { flex: 1 },
-  telemetryDivider: { width: 1, height: 28, backgroundColor: c.border, marginHorizontal: 12 },
-  telemetryLabel: { color: c.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  telemetryValue: { color: c.text, fontSize: 15, fontWeight: '800', marginTop: 2 },
-  telemetrySub: { color: c.muted, fontSize: 11, fontWeight: '600' },
-
-  stickySwitcherContainer: { marginVertical: 12 },
-  segmentedWrapper: { flexDirection: 'row', backgroundColor: c.surface, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: c.border },
-  segmentBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  segmentBtnActive: { backgroundColor: c.accent },
-  segmentBtnText: { color: c.muted, fontSize: 13, fontWeight: '800' },
-  segmentBtnTextActive: { color: c.onAccent },
-  liveSegmentInner: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-
-  liveRadarContainer: { marginVertical: 8 },
-  liveRadarCard: { padding: 16, borderRadius: 16 },
-  liveRadarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  liveRadarTitle: { color: c.text, fontSize: 13, fontWeight: '800', letterSpacing: 0.8 },
-  liveRadarDescription: { color: c.muted, fontSize: 13, lineHeight: 19, marginTop: 8 },
-  liveRadarStatsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.border },
-  liveRadarStat: { alignItems: 'center' },
-  liveRadarStatValue: { color: c.text, fontSize: 15, fontWeight: '800' },
-  liveRadarStatLabel: { color: c.muted, fontSize: 9, fontWeight: '700', marginTop: 2 },
-  launchRideModeBtn: { backgroundColor: c.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
-  launchRideModeBtnText: { color: c.onAccent, fontSize: 14, fontWeight: '800' },
-
-  cardSection: { padding: 16, borderRadius: 16, marginTop: 12 },
-  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  sectionTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
-  sectionSubtitle: { color: c.muted, fontSize: 12, marginTop: 2 },
-  counterBadge: { backgroundColor: c.surfaceRaised, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  counterBadgeText: { color: c.muted, fontSize: 10, fontWeight: '800' },
-  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.greenSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.xs },
-  greenPulseDot: { width: 6, height: 6, borderRadius: radius.round, backgroundColor: c.green },
-  activePillText: { color: c.green, fontSize: 10, fontWeight: '800' },
-
-
-
-  collapsedRosterContainer: { marginTop: 6 },
-  collapsedRosterTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  collapsedRosterSummary: { flex: 1 },
-  collapsedRosterTitle: { color: c.text, fontSize: 14, fontWeight: '800' },
-  collapsedRosterSub: { color: c.muted, fontSize: 12, marginTop: 2 },
-  expandRosterBtn: { marginTop: 12, backgroundColor: c.surfaceRaised, borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
-  expandRosterBtnText: { color: c.accent, fontSize: 11, fontWeight: '800' },
-
-  expandedRosterContainer: { marginTop: 6 },
-  searchBarBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.background, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: c.border, height: 42, marginBottom: 10 },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, color: c.text, fontSize: 13 },
-  searchClear: { padding: 4 },
-  rosterList: { gap: 8 },
-  riderRowItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, backgroundColor: c.surfaceRaised, borderRadius: 12 },
-  riderRowAlert: { borderColor: c.danger, borderWidth: 1 },
-  riderRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  riderRowMeta: { flex: 1 },
-  riderRowNameLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  riderName: { color: c.text, fontSize: 13, fontWeight: '700', flexShrink: 1 },
-  leaderPill: { backgroundColor: c.accentSoft, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
-  leaderPillText: { color: c.accent, fontSize: 9, fontWeight: '800' },
-  sweepPill: { backgroundColor: c.surface, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
-  sweepPillText: { color: c.tertiary, fontSize: 9, fontWeight: '800' },
-  alertPill: { backgroundColor: c.dangerSoft, paddingHorizontal: 5, paddingVertical: 1, borderRadius: radius.xs },
-  alertPillText: { color: c.danger, fontSize: 9, fontWeight: '800' },
-  riderBikeText: { color: c.muted, fontSize: 11, marginTop: 2 },
-  riderRowRight: { alignItems: 'flex-end', gap: 4 },
-  riderStatusText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  manageRiderBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: c.border },
-  manageRiderBtnText: { color: c.muted, fontSize: 10, fontWeight: '700' },
-  collapseRosterBtn: { marginTop: 10, alignItems: 'center', paddingVertical: 8 },
-  collapseRosterBtnText: { color: c.accent, fontSize: 11, fontWeight: '800' },
-
-  rsvpBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border },
-  rsvpTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 6 },
-  rsvpButtonsRow: { flexDirection: 'row', gap: 6 },
-  rsvpBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 4, paddingVertical: 8, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceRaised },
-  rsvpBtnSelected: { backgroundColor: c.accent, borderColor: c.accent },
-  rsvpBtnText: { color: c.text, fontSize: 11, fontWeight: '700' },
-
-  navigateNextBtn: { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: c.accentSoft, borderWidth: 1, borderColor: c.accent, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center', marginVertical: 8 },
-  navigateNextBtnText: { flexShrink: 1, color: c.accent, fontSize: 12, fontWeight: '800' },
-
-  itineraryHeader: { color: c.text, fontSize: 14, fontWeight: '800', marginVertical: 6 },
-  dayBlock: { borderTopWidth: 1, borderTopColor: c.border, paddingVertical: 12 },
-  dayBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  dayBlockTitle: { color: c.text, fontSize: 14, fontWeight: '800' },
-  addStageBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: c.accent, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  addStageBtnText: { color: c.accent, fontSize: 10, fontWeight: '800' },
-  stageSectionHeader: { color: c.muted, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 8, marginBottom: 4 },
-  dayStopRow: { paddingVertical: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dayStopText: { color: c.text, fontSize: 12, flex: 1 },
-  dayStayText: { color: c.accent, fontSize: 11, fontWeight: '700', marginTop: 2 },
-
-  allStopsSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.border },
-  waypointRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.border },
-  waypointMarker: { width: 24, height: 24, borderRadius: 12, backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' },
-  waypointMarkerText: { color: c.accent, fontSize: 10, fontWeight: '800' },
-  waypointType: { color: c.accent, fontSize: 9, fontWeight: '800' },
-  waypointName: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 1 },
-
-  stayItem: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: c.border },
-  stayName: { color: c.text, fontSize: 13, fontWeight: '700' },
-
-  intelBlock: { marginBottom: 14 },
-  intelTitle: { color: c.text, fontSize: 13, fontWeight: '800', marginBottom: 8 },
-  fuelRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 10, marginBottom: 8 },
-  fuelStat: { alignItems: 'center' },
-  fuelStatValue: { color: c.text, fontSize: 14, fontWeight: '800' },
-  fuelStatLabel: { color: c.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 2 },
-  fuelCostText: { color: c.accent, fontSize: 11, fontWeight: '700', marginBottom: 4 },
-  weatherCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 10 },
-  advisoryItem: { borderRadius: 10, padding: 10, marginBottom: 6, borderWidth: 1 },
-  advisoryTitle: { color: c.text, fontSize: 12, fontWeight: '800', marginBottom: 2 },
-  advisoryDesc: { color: c.muted, fontSize: 11, lineHeight: 16 },
-  advisoryWarning: { backgroundColor: c.accentSoft, borderColor: c.danger },
-  advisoryCaution: { backgroundColor: c.warningSoft, borderColor: c.warning },
-  advisoryInfo: { backgroundColor: c.surfaceRaised, borderColor: c.border },
-
-  statusBadge: { borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
-  statusText: { color: c.onAccent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  checklistItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
-  checklistItemDone: { opacity: 0.85 },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: c.muted, alignItems: 'center', justifyContent: 'center' },
-  checkboxChecked: { backgroundColor: c.accent, borderColor: c.accent },
-  checklistTitle: { flex: 1, color: c.text, fontSize: 13, fontWeight: '700' },
-  checklistTitleDone: { textDecorationLine: 'line-through', color: c.muted },
-
-  riderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
-  pointName: { color: c.text, fontSize: 13, fontWeight: '700' },
-
-  expenseSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceRaised, borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12 },
-  expenseSummaryBlock: { alignItems: 'center', flex: 1 },
-  expenseSummaryValue: { color: c.text, fontSize: 15, fontWeight: '900' },
-  expenseSummaryLabel: { color: c.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 },
-  expenseSummaryDivider: { width: 1, height: 26, backgroundColor: c.border },
-  settlementContainer: { backgroundColor: c.accentSoft, borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: c.accent },
-  settlementTitle: { color: c.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 6 },
-  settlementRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 2 },
-  settlementFrom: { color: c.text, fontSize: 12, fontWeight: '700' },
-  settlementArrow: { color: c.muted, fontSize: 11 },
-  settlementTo: { color: c.text, fontSize: 12, fontWeight: '700' },
-  settlementAmount: { color: c.accent, fontSize: 12, fontWeight: '900', marginLeft: 'auto' },
-  expenseItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: c.surfaceRaised, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: c.border },
-  expenseItemTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
-  expenseItemAmount: { color: c.accent, fontSize: 13, fontWeight: '900' },
-  deleteExpenseBtn: { padding: 4 },
-  expenseErrorBox: { backgroundColor: c.dangerSoft, borderColor: c.danger, borderWidth: 1, borderRadius: radius.sm, padding: 10, marginTop: 8 },
-  expenseErrorText: { flex: 1, color: c.danger, fontSize: 12, fontWeight: '700' },
-  expenseRetryText: { color: c.danger, fontSize: 11, fontWeight: '800', marginTop: 4 },
-  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 },
-  categoryPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: c.background, borderWidth: 1, borderColor: c.border },
-  categoryPillActive: { backgroundColor: c.accentSoft, borderColor: c.accent },
-  categoryPillText: { color: c.text, fontSize: 11, fontWeight: '700' },
-  categoryPillTextActive: { color: c.accent, fontWeight: '800' },
-  splitUserRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: c.border },
-  splitUserName: { color: c.text, fontSize: 12, fontWeight: '600' },
-
-  adminActionsCard: { padding: 8, marginTop: 12 },
-  actions: { flexDirection: 'row', gap: 8, marginVertical: 6 },
-  primary: { flex: 1, backgroundColor: c.accent, borderRadius: 10, padding: 12, alignItems: 'center' },
-  primaryText: { color: c.onAccent, fontWeight: '800', fontSize: 12 },
-  secondary: { borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 12 },
-  secondaryText: { color: c.text, fontWeight: '700', fontSize: 12 },
-  primaryWide: { flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: c.accent, borderRadius: 11, padding: 13, alignItems: 'center', marginTop: 10 },
-  dangerButton: { borderWidth: 1, borderColor: c.danger, backgroundColor: c.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 },
-  dangerText: { color: c.danger, fontWeight: '900', fontSize: 12 },
-  error: { color: c.danger, marginTop: 12, textAlign: 'center' },
-
-  // Dedicated Sticky Bottom Bar
-  stickyBottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 50,
-    backgroundColor: c.surface + 'FA',
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-  },
-  stickyBottomInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    maxWidth: 600,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  tacticalSosBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: c.surfaceRaised,
-    borderWidth: 1,
-    borderColor: c.danger + '66',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tacticalSosLabel: { color: c.danger, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginTop: 2 },
-  primaryRouteLauncherBtn: {
-    flex: 1,
-    height: 64,
-    borderRadius: radius.md,
-    backgroundColor: c.accent,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-  },
-  routeLauncherLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  primaryRouteLauncherText: { color: c.onAccent, fontSize: 16, fontWeight: '900', letterSpacing: 0.4 },
-
-  // Stage card & modal styles
-  stageCard: { backgroundColor: c.background, borderColor: c.border, borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 6 },
-  stageHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
-  stageTitle: { color: c.text, fontSize: 13, fontWeight: '800' },
-  stageEndpoints: { color: c.muted, fontSize: 11, marginTop: 2 },
-  stageMetaText: { color: c.accent, fontSize: 10, fontWeight: '700', marginTop: 3 },
-  stageStatusPill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
-  stageStatusText: { fontSize: 10, fontWeight: '800' },
-  stageNotes: { color: c.text, fontSize: 11, lineHeight: 15, marginTop: 6, fontStyle: 'italic' },
-  stageActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
-  remove: { color: c.danger, fontSize: 11, fontWeight: '700' },
-  label: { color: c.text, fontSize: 11, fontWeight: '700', marginTop: 10, marginBottom: 5 },
-  input: { backgroundColor: c.background, borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 11, color: c.text, marginTop: 6, fontSize: 13 },
-  row: { flexDirection: 'row', gap: 10 },
-  half: { flex: 1 },
-  editModal: { maxHeight: '90%', backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
-  smallButton: { borderWidth: 1, borderColor: c.border, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6 },
-  smallButtonText: { color: c.accent, fontSize: 10, fontWeight: '700' },
-  roleSelected: { borderColor: c.accent, backgroundColor: c.accentSoft },
-  editorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-});

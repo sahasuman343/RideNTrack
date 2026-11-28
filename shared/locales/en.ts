@@ -1,0 +1,113 @@
+/**
+ * English strings. Keys are grouped by screen. Placeholders use {name}.
+ * Every key here must exist in hi.ts (a unit test checks keys and placeholders).
+ */
+export const en = {
+  // Shared status words (R1). Keep them short: they sit under chat bubbles and SOS steps.
+  'status.sending': 'Sending',
+  'status.sent': 'Sent',
+  'status.sent_by_sms': 'Sent by SMS',
+  'status.waiting_for_signal': 'Waiting for signal',
+  'status.failed': 'Failed',
+
+  // SOS (F6)
+  'sos.title': 'Emergency',
+  'sos.title_sent': 'SOS sent',
+  'sos.intro': 'Alerts your pack with your location and opens one text to {who}.',
+  'sos.intro_nobody': 'your emergency contact',
+  'sos.send': 'Send SOS',
+  'sos.offline_text': 'No signal: tap Send to text {count} people',
+  'sos.offline_text_one': 'No signal: tap Send to text 1 person',
+  'sos.offline_save': 'No signal: save SOS for the pack',
+  'sos.open_messages_again': 'Open Messages again',
+  'sos.text_people': 'Text {count} people',
+  'sos.text_person': 'Text 1 person',
+  'sos.add_contact': 'Add an emergency contact',
+  'sos.call_112': 'Call 112',
+  'sos.call_contact': 'Call contact',
+  'sos.highway_help': 'Highway help and nearby mechanics (1033)',
+  'sos.step_pack': 'Alert to your pack',
+  'sos.step_server': 'Text from RideNTrack to {who}',
+  'sos.step_texts': 'Text from your phone to {who}',
+  'sos.step_texts_nobody': 'Text from your phone',
+  'sos.nobody_yet': 'nobody yet',
+  'sos.status_next': 'Next',
+  'sos.status_tap_send': 'Tap Send in Messages',
+  'sos.status_add_contact': 'Add an emergency contact',
+  'sos.status_no_messages': 'Could not open Messages',
+
+  // Crash countdown (F7)
+  'crash.title': 'Are you OK?',
+  'crash.body': 'It looks like you may have crashed. At zero your pack is alerted and your contacts get a text.',
+  'crash.ok': "I'm OK",
+  'crash.help': 'Get help now',
+  'crash.spoken': 'Are you OK? Tap anywhere on your phone to cancel.',
+  'attention.tap_anywhere': 'Tap anywhere',
+
+  // Chat (F8, F12)
+  'chat.title': 'Trip chat',
+  'chat.placeholder': 'Message your pack…',
+  'chat.placeholder_offline': 'Message your pack (sends when signal returns)',
+  'chat.empty': 'No messages yet. Quick replies below work with gloves on, and with no signal.',
+  'chat.retry': 'Tap to retry',
+  'chat.hold_to_talk': 'Hold to talk',
+  'chat.release_to_send': 'Release to send · {time}',
+
+  // Road reports (F11)
+  'road.title': 'What is here?',
+  'road.kicker': 'REPORT THE ROAD',
+  'road.pinned': 'Pinned to where you are now. Riders passing in the next 48 hours see it.',
+  'road.no_fix': 'Waiting for a GPS fix to pin the report.',
+  'road.offline': 'No signal: it is shared when signal returns.',
+  'road.still_there': 'Still there',
+  'road.pick': 'Pick what it is',
+
+  // Tabs and profile
+  'tabs.home': 'Home',
+  'tabs.trips': 'Trips',
+  'tabs.profile': 'Profile',
+  'profile.language': 'Language',
+  'profile.language_hint': 'Ride screen, SOS and chat. Family texts follow each contact\'s own language.',
+
+  // F13 additions
+  'common.close': 'Close',
+  'common.cancel': 'Cancel',
+  'sos.call_contact_a11y': 'Call emergency contact',
+  'chat.save_failed': 'Could not save the message on this phone.',
+  'chat.play_voice': 'Play voice note, {time}',
+  'chat.failed_a11y': 'Message failed. Tap to try again.',
+  'chat.message_state': 'Message {state}',
+  'chat.send': 'Send message',
+  'chat.queue': 'Queue message until signal returns',
+  'chat.close': 'Close trip chat',
+  'chat.pinned': 'PINNED INFO',
+  'voice.mic_permission': 'Allow the microphone to send voice notes.',
+  'voice.too_short': 'Hold the button while you talk.',
+  'voice.mic_failed': 'Could not start the microphone.',
+  'voice.save_failed': 'Could not save the voice note.',
+  'road.kicker_view': 'ROAD REPORT',
+  'road.hide': 'Hide for this ride',
+  'road.note_placeholder': 'Optional: e.g. left lane blocked, passable slowly',
+  'road.report_type': 'Report: {type}',
+  'road.type.landslide': 'Landslide or debris',
+  'road.type.closure': 'Road closed',
+  'road.type.water_crossing': 'Water crossing',
+  'road.type.snow_ice': 'Snow or black ice',
+  'road.type.accident': 'Accident',
+  'road.type.pothole': 'Bad potholes',
+  'road.type.animals': 'Animals on the road',
+  'road.type.police_check': 'Police check',
+  'road.type.fuel_out': 'Fuel station dry',
+  'road.type.other': 'Something else',
+  'attention.tap_anywhere_a11y': '{title}. Tap anywhere to cancel.',
+  'profile.language_phone': 'Phone setting',
+  'chat.summary_failed': '{count} messages could not be sent. Tap to try again.',
+  'chat.summary_failed_one': '1 message could not be sent. Tap to try again.',
+  'chat.summary_no_signal': 'No signal. Messages you write now go when signal returns.',
+  'chat.summary_sending': 'Sending {count} messages…',
+  'chat.summary_sending_one': 'Sending 1 message…',
+  'chat.summary_waiting': '{count} messages waiting for signal. They go on their own.',
+  'chat.summary_waiting_one': '1 message waiting for signal. It goes on its own.',
+} as const;
+
+export type MessageKey = keyof typeof en;

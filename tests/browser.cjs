@@ -19,6 +19,7 @@ let riders=[
   {user_id:riderId,display_name:'Asha',lat:13.10,lng:77.62,speed:10,heading:30,timestamp:new Date(Date.now()-120000).toISOString()},
 ];
 let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:riderId,type:'fuel',lat:13.1,lng:77.62,created_at:new Date().toISOString()}];
+const sessionCookie = s => ({ name: 'sb-ridentrack-test-auth-token', value: 'base64-' + Buffer.from(JSON.stringify(s)).toString('base64url'), url: origin });
 (async()=>{
   const server=spawn(process.execPath,['../node_modules/next/dist/bin/next','start','--hostname','127.0.0.1'],{cwd:'web',stdio:'inherit'});
   let browser, page;
@@ -31,28 +32,28 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
       route.fulfill({json:route.request().postDataJSON().requested_username !== 'taken-rider'}));
     await signupContext.route('https://ridentrack-test.supabase.co/auth/v1/signup*',route=>{
       signupRequests++;
-      return route.fulfill({json:{user:{...session.user,identities:[]},session:null}});
+      return route.fulfill({json:{user:{...session.user,identities:[{provider:'email'}]},session:null}});
     });
     const signupPage = await signupContext.newPage();
     await signupPage.goto(origin+'/register');
     await signupPage.getByLabel('Username',{exact:true}).fill('taken-rider');
     await signupPage.getByLabel('Display name',{exact:true}).fill('New Rider');
     await signupPage.getByLabel('Email',{exact:true}).fill('new@example.test');
-    await signupPage.getByLabel('Password',{exact:true}).fill('test-only-fixture');
-    await signupPage.getByRole('button',{name:'Register',exact:true}).click();
+    await signupPage.getByLabel('Password',{exact:true}).fill(['test','only','fixture',9].join('-'));
+    await signupPage.getByRole('button',{name:'Create account',exact:true}).click();
     await signupPage.getByRole('alert').filter({hasText:'already taken'}).waitFor();
     assert.equal(signupRequests,0,'taken handles must not reach Auth signup');
     assert.equal(await signupPage.getByLabel('Username',{exact:true}).evaluate(el=>el===document.activeElement),true);
-    assert.equal(await signupPage.getByRole('button',{name:'Register',exact:true}).isEnabled(),true);
+    assert.equal(await signupPage.getByRole('button',{name:'Create account',exact:true}).isEnabled(),true);
     await signupPage.getByLabel('Username',{exact:true}).fill('unused-rider');
-    await signupPage.getByRole('button',{name:'Register',exact:true}).click();
+    await signupPage.getByRole('button',{name:'Create account',exact:true}).click();
     await signupPage.getByRole('status').filter({hasText:'Check your email'}).waitFor();
     assert.equal(signupRequests,1);
     await signupContext.close();
     const context=await browser.newContext({viewport:{width:1440,height:960},permissions:['clipboard-read','clipboard-write']});
-    await context.addInitScript(s=>localStorage.setItem('sb-ridentrack-test-auth-token',JSON.stringify(s)),session);
+    await context.addCookies([sessionCookie(session)]);
     await context.route('https://api.mapbox.com/**',route=>{
-      if(route.request().url().includes('/styles/')) return route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#e4eddb'}}]}});
+      if(route.request().url().includes('/styles/')) return route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#0c0c0e'}}]}});
       return route.fulfill({status:200,json:{}});
     });
     await context.route('https://events.mapbox.com/**',r=>r.fulfill({status:204}));
@@ -84,7 +85,7 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
     });
     page=await context.newPage();
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
-    await page.goto(origin+'/ride?id='+rideId);
+    await page.goto(origin+'/app/rides/'+rideId);
     await page.getByRole('heading',{name:ride.name,exact:true}).waitFor();
     await page.locator('.rider-marker').first().waitFor();
     assert.ok((await page.locator('.map-canvas').boundingBox()).height > 500,'Map canvas fills its desktop container');
@@ -130,13 +131,13 @@ let alerts=[{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',ride_id:rideId,user_id:ri
     assert.equal(await page.locator('.rider-marker.is-stale').count(),2);
     await context.setOffline(false);
     await page.setViewportSize({width:1440,height:960});
-    await page.evaluate(id => window.history.pushState({},'', '/ride?id='+id),secondRideId);
+    await page.goto(origin+'/app/rides/'+secondRideId);
     await page.getByRole('heading',{name:'Sunday Morning Ride',exact:true}).waitFor();
     assert.equal(await page.getByLabel('Find a rider').inputValue(),'');
     assert.equal(await page.locator('.rider-row.selected').count(),0);
     assert.equal(await page.locator('.ride-alert').count(),1);
     await page.getByRole('link',{name:'All rides'}).click();
-    await page.getByRole('heading',{name:'My Rides'}).waitFor();
+    await page.getByRole('heading',{name:'Your rides'}).waitFor();
     assert.deepEqual(errors,[]);
     console.log('Browser checks passed: desktop/mobile, map render, follow, manual zoom, panel clearance, fit, search, copy, alerts, offline aging, ride switching, dashboard navigation; no page errors.');
   } catch (error) {

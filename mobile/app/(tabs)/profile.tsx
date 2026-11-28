@@ -15,12 +15,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/hooks/useAuth';
+import { BikeModelPicker } from '../../src/components/profile/BikeModelPicker';
 import { useRideTheme, useRideThemeSettings, RidePalette, radius, spacing } from '../../src/theme';
 import { useSwipeTab } from '../../src/hooks/useSwipeTab';
+import { useFlag } from '../../src/hooks/useFeatureFlags';
+import { openMedicalIdSetup, useLockScreenCardSetting } from '../../src/services/lockScreenCard';
 import { supabase } from '../../src/lib/supabase';
 import { type UserSavedPlace, type SavedPlaceCategory, SAVED_PLACE_CATEGORIES, type RiderAnalytics } from '@ridentrack/shared';
 import { Icon, SheetModal } from '../../src/components/ui';
 import { SAVED_PLACE_ICONS } from '../../src/icons';
+import { LanguagePicker } from '../../src/components/profile/LanguagePicker';
+import { InviteCard } from '../../src/components/InviteCard';
+import { HeadsetCard } from '../../src/components/profile/HeadsetCard';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -38,9 +44,26 @@ export default function ProfileScreen() {
   const [emergencyContact, setEmergencyContact] = useState(profile?.emergency_contact || '');
   const [bloodGroup, setBloodGroup] = useState(profile?.blood_group || '');
   const [shareIceWithRide, setShareIceWithRide] = useState(Boolean(profile?.share_ice_with_ride));
+  const [sharePhoneWithRide, setSharePhoneWithRide] = useState(Boolean(profile?.share_phone_with_ride));
+  const phoneSharingFlag = useFlag('rider_phone_numbers');
+  const sensorRecorderFlag = useFlag('sensor_recorder');
+  const lockScreenFlag = useFlag('lock_screen_card');
+  const languagesFlag = useFlag('languages');
+  const headsetFlag = useFlag('headset_autostart');
+  const [lockCardOn, setLockCardOn] = useLockScreenCardSetting();
+  const [researchBusy, setResearchBusy] = useState(false);
+  const researchConsent = Boolean(profile?.crash_research_consent_at);
+  const setResearchConsent = useCallback(async (on: boolean) => {
+    setResearchBusy(true);
+    const { error } = await supabase.rpc('set_crash_research_consent', { p_on: on });
+    setResearchBusy(false);
+    if (error) { Alert.alert('Could not save', error.message); return; }
+    await reloadProfile();
+  }, [reloadProfile]);
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
   const [make, setMake] = useState(profile?.motorcycle_make || '');
   const [model, setModel] = useState(profile?.motorcycle_model || '');
+  const [modelId, setModelId] = useState<string | null>(profile?.motorcycle_model_id ?? null);
   const [category, setCategory] = useState<NonNullable<NonNullable<typeof profile>['motorcycle_category']> | ''>(profile?.motorcycle_category ?? '');
   const [tankCapacity, setTankCapacity] = useState(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
   const [mileage, setMileage] = useState(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
@@ -162,9 +185,11 @@ export default function ProfileScreen() {
     setEmergencyContact(profile?.emergency_contact || '');
     setBloodGroup(profile?.blood_group || '');
     setShareIceWithRide(Boolean(profile.share_ice_with_ride));
+    setSharePhoneWithRide(Boolean(profile.share_phone_with_ride));
     setAvatarUrl(profile?.avatar_url || '');
     setMake(profile?.motorcycle_make || '');
     setModel(profile?.motorcycle_model || '');
+    setModelId(profile?.motorcycle_model_id ?? null);
     setCategory(profile.motorcycle_category ?? '');
     setTankCapacity(profile?.fuel_tank_capacity_liters ? String(profile.fuel_tank_capacity_liters) : '');
     setMileage(profile?.mileage_km_per_liter ? String(profile.mileage_km_per_liter) : '');
@@ -219,9 +244,11 @@ export default function ProfileScreen() {
         emergency_contact: emergencyContact.trim() || null,
         blood_group: bloodGroup.trim().toUpperCase() || null,
         share_ice_with_ride: shareIceWithRide,
+        ...(phoneSharingFlag ? { share_phone_with_ride: sharePhoneWithRide } : {}),
       } : {
         motorcycle_make: make.trim() || null,
         motorcycle_model: model.trim() || null,
+        motorcycle_model_id: modelId,
         motorcycle_category: category || null,
         fuel_tank_capacity_liters: tankNum,
         mileage_km_per_liter: mileageNum,
@@ -588,6 +615,10 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <InviteCard source="profile" />
+        {languagesFlag && <LanguagePicker />}
+        {headsetFlag && <HeadsetCard />}
+
         {/* Sign Out & Delete Account Actions */}
         <View style={styles.accountActionsContainer}>
           <TouchableOpacity
@@ -644,6 +675,22 @@ export default function ProfileScreen() {
             <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholder="Your name" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Phone number</Text>
             <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+91..." placeholderTextColor={theme.subtle} />
+            {phoneSharingFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Riders on my ride can text me in an SOS</Text>
+                  <Text style={styles.hint}>Your number goes only to people on the same live ride, and only when someone presses SOS. Off by default.</Text>
+                </View>
+                <Switch
+                  value={sharePhoneWithRide}
+                  onValueChange={setSharePhoneWithRide}
+                  disabled={!phone.trim()}
+                  accessibilityLabel="Share my phone number with riders on my ride for SOS texts"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
             <Text style={styles.fieldLabel}>Profile photo URL</Text>
             <TextInput style={styles.input} value={avatarUrl} onChangeText={setAvatarUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={theme.subtle} />
             </>}
@@ -659,13 +706,65 @@ export default function ProfileScreen() {
               </View>
               <Switch value={shareIceWithRide} onValueChange={setShareIceWithRide} trackColor={{ false: theme.border, true: theme.green }} thumbColor={theme.onAccent} />
             </View>
+            {lockScreenFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Show on my lock screen while riding</Text>
+                  <Text style={styles.hint}>
+                    Anyone holding this phone can read your blood group, emergency contact and the ride captain's number, without unlocking it. Only while you share your location on a ride.
+                  </Text>
+                  {Platform.OS === 'ios' && (
+                    <TouchableOpacity onPress={openMedicalIdSetup} accessibilityRole="link">
+                      <Text style={[styles.hint, { color: theme.accent, fontWeight: '700' }]}>Also set up Medical ID in the Health app</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Switch
+                  value={lockCardOn}
+                  onValueChange={on => void setLockCardOn(on)}
+                  accessibilityLabel="Show emergency details on the lock screen while riding"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
+            {sensorRecorderFlag && (
+              <View style={styles.iceConsentRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Help tune crash detection</Text>
+                  <Text style={styles.hint}>
+                    Saves a few seconds of motion data around hard braking and bumps while you ride, never your messages or photos. Turning it off deletes what was saved.
+                  </Text>
+                </View>
+                <Switch
+                  value={researchConsent}
+                  disabled={researchBusy}
+                  onValueChange={on => void setResearchConsent(on)}
+                  accessibilityLabel="Share motion data to help tune crash detection"
+                  trackColor={{ false: theme.border, true: theme.green }}
+                  thumbColor={theme.onAccent}
+                />
+              </View>
+            )}
             </>}
             {section === 'bike' && <>
             <Text style={[styles.fieldLabel, { marginTop: 18, color: theme.accent }]}>MOTORCYCLE PROFILE</Text>
+            <BikeModelPicker
+              selectedId={modelId}
+              onPick={bike => {
+                setModelId(bike.id);
+                setMake(bike.make);
+                setModel(bike.model);
+                setCategory(bike.category);
+                setTankCapacity(String(bike.tankLiters));
+                setMileage(String(bike.mileageKmpl));
+                setReserve(String(bike.reserveLiters));
+              }}
+            />
             <Text style={styles.fieldLabel}>Make / Manufacturer</Text>
-            <TextInput style={styles.input} value={make} onChangeText={setMake} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
+            <TextInput style={styles.input} value={make} onChangeText={v => { setMake(v); setModelId(null); }} placeholder="e.g. Royal Enfield, KTM, Triumph, BMW" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Model</Text>
-            <TextInput style={styles.input} value={model} onChangeText={setModel} placeholder="e.g. Himalayan 450, 390 Adventure" placeholderTextColor={theme.subtle} />
+            <TextInput style={styles.input} value={model} onChangeText={v => { setModel(v); setModelId(null); }} placeholder="e.g. Himalayan 450, 390 Adventure" placeholderTextColor={theme.subtle} />
             <Text style={styles.fieldLabel}>Motorcycle category</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
               {(['adventure', 'tourer', 'cruiser', 'sport', 'commuter', 'scooter'] as const).map(cat => (

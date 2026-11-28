@@ -6,11 +6,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRideTheme } from '../../src/theme';
 import { ActiveRideBanner } from '../../src/components/ActiveRideBanner';
+import { useT } from '../../src/hooks/useLocale';
 
 export default function TabsLayout() {
   const { session, loading } = useAuth();
   const theme = useRideTheme();
   const insets = useSafeAreaInsets();
+  const t = useT();
   if (loading) return null;
   if (!session) return <Redirect href="/(auth)/login" />;
 
@@ -47,7 +49,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: t('tabs.home'),
           headerShown: false,
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, focused }) => (
@@ -58,7 +60,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="trips"
         options={{
-          title: 'Trips',
+          title: t('tabs.trips'),
           headerShown: false,
           tabBarLabel: 'Trips',
           tabBarIcon: ({ color, focused }) => (
@@ -69,7 +71,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: t('tabs.profile'),
           headerShown: false,
           tabBarLabel: 'Profile',
           tabBarIcon: ({ color, focused }) => (

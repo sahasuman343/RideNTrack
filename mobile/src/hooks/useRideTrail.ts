@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import {
   EMPTY_TRAIL,
+  MAX_TRAIL_POINTS,
   appendTrailPoint,
   mergeTrailHistory,
   type LocationUpdate,
@@ -10,7 +11,8 @@ import {
 import { supabase } from '../lib/supabase';
 
 /** Owns persisted-history loading and incremental trail accumulation. */
-export function useRideTrail(rideId: string, userId?: string, position?: LocationUpdate | null) {
+/** F14: low-end phones keep fewer trail points on the map; distance is unaffected. */
+export function useRideTrail(rideId: string, userId?: string, position?: LocationUpdate | null, maxPoints = MAX_TRAIL_POINTS) {
   const [trail, setTrail] = useState<RideTrail>(EMPTY_TRAIL);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -22,16 +24,16 @@ export function useRideTrail(rideId: string, userId?: string, position?: Locatio
     void supabase.rpc('get_my_ride_trail', { p_ride_id: rideId }).then(({ data, error }) => {
       if (cancelled) return;
       if (error) { setLoadError(error.message); return; }
-      if (data) setTrail(live => mergeTrailHistory(data as TrailHistory, live));
+      if (data) setTrail(live => mergeTrailHistory(data as TrailHistory, live, maxPoints));
     });
     return () => { cancelled = true; };
-  }, [rideId, userId]);
+  }, [rideId, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (position && Number.isFinite(position.lng) && Number.isFinite(position.lat)) {
-      setTrail(previous => appendTrailPoint(previous, position));
+      setTrail(previous => appendTrailPoint(previous, position, maxPoints));
     }
-  }, [position]);
+  }, [position, maxPoints]);
 
   const geoJson = useMemo(() => trail.coords.length < 2 ? null : {
     type: 'Feature' as const,

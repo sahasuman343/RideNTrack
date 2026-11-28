@@ -15,6 +15,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../src/lib/supabase';
 import { useAuth } from '../../../src/hooks/useAuth';
+import { useEffectiveTier } from '../../../src/hooks/useEffectiveTier';
 import { useRideTheme, RidePalette, radius, spacing } from '../../../src/theme';
 import { Icon } from '../../../src/components/ui';
 import { WAYPOINT_ICONS } from '../../../src/icons';
@@ -90,8 +91,8 @@ type DayPickerConfig = {
 export default function RouteEditorScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user, profile } = useAuth();
-  const routePointLimit = PLAN_LIMITS[profile?.subscription_tier ?? 'free'].maxWaypointsPerTrip;
+  const { user } = useAuth();
+  const routePointLimit = PLAN_LIMITS[useEffectiveTier()].maxWaypointsPerTrip;
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const camera = useRef<any>(null);

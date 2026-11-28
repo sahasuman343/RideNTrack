@@ -3,16 +3,24 @@ import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { createClient } from '@supabase/supabase-js';
+import { createChunkedStore } from './chunkedStore';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// Long sessions are split across several SecureStore keys (audit finding 11).
+const secureChunks = createChunkedStore({
+  getItem: key => SecureStore.getItemAsync(key),
+  setItem: (key, value) => SecureStore.setItemAsync(key, value),
+  removeItem: key => SecureStore.deleteItemAsync(key),
+});
 
 const SecureStoreAdapter = {
   getItem: async (key: string): Promise<string | null> => {
     if (Platform.OS === 'web') {
       return AsyncStorage.getItem(key);
     }
-    const secureValue = await SecureStore.getItemAsync(key);
+    const secureValue = await secureChunks.getItem(key);
     if (secureValue !== null) {
       return secureValue;
     }
@@ -20,7 +28,7 @@ const SecureStoreAdapter = {
     const legacyValue = await AsyncStorage.getItem(key);
     if (legacyValue !== null) {
       try {
-        await SecureStore.setItemAsync(key, legacyValue);
+        await secureChunks.setItem(key, legacyValue);
         // Delete legacy entry only after successful write to SecureStore
         await AsyncStorage.removeItem(key).catch(() => {});
       } catch (err) {
@@ -36,7 +44,7 @@ const SecureStoreAdapter = {
       return AsyncStorage.setItem(key, value);
     }
     // Surface any native storage errors directly to preserve intended auth error handling
-    await SecureStore.setItemAsync(key, value);
+    await secureChunks.setItem(key, value);
     // Remove any remaining legacy AsyncStorage entry after successful SecureStore write
     await AsyncStorage.removeItem(key).catch(() => {});
   },
@@ -46,7 +54,7 @@ const SecureStoreAdapter = {
     }
     // Clear both SecureStore and legacy AsyncStorage on sign-out
     await Promise.allSettled([
-      SecureStore.deleteItemAsync(key),
+      secureChunks.removeItem(key),
       AsyncStorage.removeItem(key),
     ]);
   },

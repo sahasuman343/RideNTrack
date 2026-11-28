@@ -4,7 +4,7 @@
     "slug": "ridentrack",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/RnT_logo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "ridentrack",
     "plugins": [
@@ -36,7 +36,19 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "RideNTrack uses the microphone only while you hold the talk button, to send a voice note to your ride group."
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "RideNTrack uses motion sensors during a ride to notice a possible crash and ask if you are OK."
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
@@ -55,8 +67,8 @@
       "package": "com.ridentrack.app",
       "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#1a1a2e",
-        "foregroundImage": "./assets/RnT_logo.png",
+        "backgroundColor": "#0c1428",
+        "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -71,7 +83,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/RnT_logo.png",
+      "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
     "extra": {
@@ -80,6 +92,14 @@
         "projectId": "91502983-9cb8-45db-b01a-f1c296405a2c"
       }
     },
-    "owner": "sahasuman343"
+    "owner": "sahasuman343",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/91502983-9cb8-45db-b01a-f1c296405a2c",
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    }
   }
 }

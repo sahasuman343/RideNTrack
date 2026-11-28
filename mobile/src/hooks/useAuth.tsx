@@ -6,7 +6,7 @@ import { syncQueue } from '../services/syncQueue';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
-import { registerAccount } from '@ridentrack/shared';
+import { registerAccount, type ReferralSource } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
@@ -16,7 +16,7 @@ interface AuthContextType {
   loading: boolean;
   profileError: boolean;
   reloadProfile: () => Promise<void>;
-  signUp: (email: string, password: string, username: string, displayName: string) => Promise<boolean>;
+  signUp: (email: string, password: string, username: string, displayName: string, referral?: { code: string | null; source: ReferralSource } | null) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
@@ -27,12 +27,14 @@ interface AuthContextType {
     avatar_url?: string | null;
     motorcycle_make?: string | null;
     motorcycle_model?: string | null;
+    motorcycle_model_id?: string | null;
     fuel_tank_capacity_liters?: number | null;
     mileage_km_per_liter?: number | null;
     fuel_reserve_liters?: number | null;
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
     blood_group?: string | null;
     share_ice_with_ride?: boolean;
+    share_phone_with_ride?: boolean;
   }) => Promise<void>;
 }
 
@@ -119,8 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return promise;
   }
 
-  async function signUp(email: string, password: string, username: string, displayName: string) {
-    const data = await registerAccount(supabase, { email, password, username, displayName });
+  async function signUp(email: string, password: string, username: string, displayName: string, referral?: { code: string | null; source: ReferralSource } | null) {
+    const data = await registerAccount(supabase, { email, password, username, displayName, referralCode: referral?.code ?? null, referralSource: referral?.source ?? null });
     if (data?.session) {
       setSession(data.session);
       if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);
@@ -154,6 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     motorcycle_category?: 'adventure' | 'tourer' | 'cruiser' | 'sport' | 'commuter' | 'scooter' | null;
     blood_group?: string | null;
     share_ice_with_ride?: boolean;
+    share_phone_with_ride?: boolean;
   }) {
     const userId = activeUserId.current;
     if (!userId || profile?.id !== userId) throw new Error('Load your rider profile before making changes.');

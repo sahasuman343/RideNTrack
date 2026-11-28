@@ -19,7 +19,9 @@ Other profiles: `development` (dev client for `npx expo start`, development envi
 
 ## Notes
 
-- GitHub only shows "Run workflow" for a manual workflow once the file is on the default branch (`main`).
+- GitHub only shows "Run workflow" for a manual workflow once the file is on the default branch
+  (`main`). Until PR #15 is merged, the dev workflow cannot be started from the Actions tab.
 - First dev build: EAS creates a signing key for `com.ridentrack.app.dev` (accept it). Push
   notifications in the dev app need FCM credentials for that package (`eas credentials`).
 - Dev Supabase Auth: add `ridentrack-dev://**` to the redirect URLs.
+- Dev database: `deploy-dev-supabase.yml` applies migrations to RideNTrack-dev on pushes that change `supabase/`.
