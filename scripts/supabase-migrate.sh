@@ -37,7 +37,7 @@ history="$(supabase migration list --linked)"
 echo "$history"
 
 # Versions recorded on the remote: the REMOTE column of `migration list`.
-remote_versions="$(sed 's/│/|/g' <<<"$history" | awk -F'|' 'NF >= 3 { gsub(/[[:space:]]/, "", $2); if ($2 ~ /^[0-9]+$/) print $2 }' | sort -u)"
+remote_versions="$(sed 's/│/|/g' <<<"$history" | awk -F'|' 'NF >= 3 { gsub(/[[:space:]`]/, "", $2); if ($2 ~ /^[0-9]+$/) print $2 }' | sort -u)"
 
 revert="" applied="" pending_after=""
 if grep -qx '20261004062839' <<<"$remote_versions"; then
