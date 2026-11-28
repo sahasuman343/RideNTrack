@@ -45,6 +45,13 @@ BEGIN
   v := public.enqueue_outbound_message(NULL, u2, '+910000026001', 'family_reached_stay', '{}', 'tally-key-7');
   IF (SELECT status FROM public.outbound_messages WHERE id = v) <> 'queued' THEN RAISE EXCEPTION 'old tallies still counted'; END IF;
   IF EXISTS (SELECT 1 FROM public.outbound_deleted_tally) THEN RAISE EXCEPTION 'old tallies not dropped'; END IF;
+
+  -- The scheduled purge drops old tallies even when nothing is queued.
+  INSERT INTO public.outbound_deleted_tally (created_at, recipient_hash) VALUES (now() - interval '25 hours', 'x'), (now(), 'y');
+  PERFORM public.purge_old_location_history(7);
+  IF (SELECT array_agg(recipient_hash) FROM public.outbound_deleted_tally) IS DISTINCT FROM ARRAY['y'] THEN
+    RAISE EXCEPTION 'scheduled purge did not drop old tallies';
+  END IF;
 END $$;
 ROLLBACK;
 DO $$ BEGIN

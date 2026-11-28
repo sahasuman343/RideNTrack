@@ -18,7 +18,8 @@ template with variables.
   last day (send time, ride, SHA-256 hash of the number) in
   `outbound_deleted_tally`. The global, per-number and per-ride caps count
   these tallies, so deleting an account and signing up again does not reset
-  them. Tallies are dropped after a day.
+  them. Tallies are dropped after a day, by the next enqueue or the
+  scheduled `purge-location-history` run, whichever comes first.
 - Family contacts are still self-declared with consent, not verified by OTP.
   The per-number cap limits what a bad actor can do; add OTP verification if
   abuse shows up after launch.

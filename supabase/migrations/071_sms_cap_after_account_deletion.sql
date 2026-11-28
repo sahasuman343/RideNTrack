@@ -132,3 +132,27 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.enqueue_outbound_message(uuid, uuid, text, text, jsonb, text, text, text) FROM PUBLIC, anon, authenticated;
 
+
+-- Tallies must not outlive their day even when nothing new is queued, so
+-- the scheduled purge-location-history job drops them too.
+CREATE OR REPLACE FUNCTION public.purge_old_location_history(p_retention_days integer DEFAULT 7)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_deleted bigint;
+BEGIN
+  IF p_retention_days < 7 OR p_retention_days > 3650 THEN
+    RAISE EXCEPTION 'Retention must be between 7 and 3650 days';
+  END IF;
+  DELETE FROM public.location_updates lu
+   WHERE lu."timestamp" < now() - make_interval(days => p_retention_days)
+     AND NOT public.ride_has_pro_access(lu.ride_id);
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  DELETE FROM public.outbound_deleted_tally WHERE created_at <= now() - interval '1 day';
+  RETURN v_deleted;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.purge_old_location_history(integer) FROM PUBLIC, anon, authenticated;
