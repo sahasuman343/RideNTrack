@@ -30,10 +30,12 @@ interface Props {
   resending?: boolean;
   /** Shown for next === 'go_sign_in'. */
   onGoSignIn?: () => void;
+  /** Shown for next === 'go_register'. */
+  onGoRegister?: () => void;
 }
 
 /** A styled dialog for a sign-in or sign-up problem, with the next step as its main button. */
-export function AuthProblemDialog({ problem, onClose, onResend, resending, onGoSignIn }: Props) {
+export function AuthProblemDialog({ problem, onClose, onResend, resending, onGoSignIn, onGoRegister }: Props) {
   const theme = useRideTheme();
   if (!problem) return null;
   const { color, bg } = tone(problem.kind, theme);
@@ -45,6 +47,9 @@ export function AuthProblemDialog({ problem, onClose, onResend, resending, onGoS
   } else if (problem.next === 'go_sign_in' && onGoSignIn) {
     actions.push({ text: 'Sign in instead', onPress: onGoSignIn, variant: 'primary' });
     actions.push({ text: 'Use another email', onPress: onClose, variant: 'ghost' });
+  } else if (problem.next === 'go_register' && onGoRegister) {
+    actions.push({ text: 'Create an account', onPress: onGoRegister, variant: 'primary' });
+    actions.push({ text: 'Not now', onPress: onClose, variant: 'ghost' });
   } else {
     actions.push({ text: problem.next === 'retry' ? 'Try again' : 'OK', onPress: onClose, variant: 'primary' });
   }

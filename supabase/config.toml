@@ -20,3 +20,7 @@ verify_jwt = false
 
 [functions.waitlist-join]
 verify_jwt = false
+
+# Supabase Auth "Send SMS" hook; checks the Standard Webhooks signature itself.
+[functions.auth-send-sms]
+verify_jwt = false

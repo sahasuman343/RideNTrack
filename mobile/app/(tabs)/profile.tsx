@@ -27,6 +27,7 @@ import { SAVED_PLACE_ICONS } from '../../src/icons';
 import { LanguagePicker } from '../../src/components/profile/LanguagePicker';
 import { InviteCard } from '../../src/components/InviteCard';
 import { HeadsetCard } from '../../src/components/profile/HeadsetCard';
+import { PhoneSignInCard } from '../../src/components/profile/PhoneSignInCard';
 
 export default function ProfileScreen() {
   const { user, profile, profileError, reloadProfile, signOut, deleteAccount, updateProfile } = useAuth();
@@ -615,6 +616,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <PhoneSignInCard />
         <InviteCard source="profile" />
         {languagesFlag && <LanguagePicker />}
         {headsetFlag && <HeadsetCard />}

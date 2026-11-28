@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { authProblem, validateSignIn, type AuthField, type AuthProblem } from '@ridentrack/shared';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
-import { AuthInput, AuthProblemDialog, useResendConfirmation } from '../../src/components/auth';
+import { AuthInput, AuthProblemDialog, PhoneCodeForm, PHONE_LOGIN_ENABLED, SignInMethodSwitch, useResendConfirmation, type SignInMethod } from '../../src/components/auth';
 
 // Password reset happens on the website, which works the same for app and web accounts.
 const WEB_BASE = process.env.EXPO_PUBLIC_WEB_URL || 'https://ridentrack.app';
@@ -15,8 +15,9 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<AuthField, string>>>({});
   const [problem, setProblem] = useState<AuthProblem | null>(null);
+  const [method, setMethod] = useState<SignInMethod>('email');
   const passwordRef = useRef<TextInput>(null);
-  const { signIn } = useAuth();
+  const { signIn, sendPhoneCode, verifyPhoneSignIn } = useAuth();
   const { resend, resending } = useResendConfirmation();
   const router = useRouter();
   const theme = useRideTheme();
@@ -61,6 +62,15 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.form}>
+          {PHONE_LOGIN_ENABLED && <SignInMethodSwitch value={method} onChange={setMethod} />}
+          {method === 'phone' ? (
+            <PhoneCodeForm
+              mode="sign_in"
+              onSend={(phone) => sendPhoneCode(phone)}
+              onVerify={async (phone, code) => { await verifyPhoneSignIn(phone, code); router.replace('/(tabs)'); }}
+              onProblem={setProblem}
+            />
+          ) : <>
           <AuthInput
             label="Email"
             icon="mail-outline"
@@ -102,6 +112,7 @@ export default function LoginScreen() {
           <TouchableOpacity onPress={() => void Linking.openURL(`${WEB_BASE}/forgot-password`)} style={styles.link} accessibilityRole="link" accessibilityHint="Opens the rideNtrack website">
             <Text style={styles.linkMuted}>Forgot your password? <Text style={styles.linkText}>Reset it</Text></Text>
           </TouchableOpacity>
+          </>}
 
           <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={styles.link} accessibilityRole="link">
             <Text style={styles.linkMuted}>New to RideNTrack? <Text style={styles.linkText}>Create an account</Text></Text>
@@ -114,6 +125,7 @@ export default function LoginScreen() {
         onClose={() => setProblem(null)}
         onResend={handleResend}
         resending={resending}
+        onGoRegister={() => { setProblem(null); router.push({ pathname: '/(auth)/register', params: { method: 'phone' } }); }}
       />
     </KeyboardAvoidingView>
   );

@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { safeNextPath } from '@/lib/next-path';
 import AuthFrame from '@/components/auth-frame';
+import PhoneCodeForm, { PHONE_LOGIN_ENABLED, SignInMethodSwitch, type SignInMethod } from '@/components/phone-code-form';
+import { sendSignInCode, verifyPhoneCode } from '@ridentrack/shared';
 
 export default function LoginPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const query = use(searchParams);
@@ -14,6 +16,8 @@ export default function LoginPage({ searchParams }: { searchParams: Promise<{ [k
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [method, setMethod] = useState<SignInMethod>('email');
+  const [needsAccount, setNeedsAccount] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -41,6 +45,23 @@ export default function LoginPage({ searchParams }: { searchParams: Promise<{ [k
 
   return (
     <AuthFrame eyebrow="Welcome back" title={<>Sign <em>in</em></>}>
+      {PHONE_LOGIN_ENABLED && <SignInMethodSwitch value={method} onChange={m => { setMethod(m); setError(''); setNeedsAccount(false); }} />}
+      {method === 'phone' ? (
+        <>
+          {error && (
+            <div role="alert" className="notice notice-error mb-4">
+              {error}
+              {needsAccount && <> <Link href="/register?method=phone" className="underline">Create an account with your phone</Link></>}
+            </div>
+          )}
+          <PhoneCodeForm
+            mode="sign_in"
+            onSend={phone => { setError(''); setNeedsAccount(false); return sendSignInCode(supabase, phone); }}
+            onVerify={async (phone, code) => { await verifyPhoneCode(supabase, phone, code); router.replace(next); }}
+            onProblem={p => { setError(p.message); setNeedsAccount(p.next === 'go_register'); }}
+          />
+        </>
+      ) : (
       <form onSubmit={handleLogin} className="space-y-4" noValidate={false}>
         {error && <div id="login-error" role="alert" className="notice notice-error">{error}</div>}
         <div>
@@ -56,6 +77,7 @@ export default function LoginPage({ searchParams }: { searchParams: Promise<{ [k
         </div>
         <button type="submit" disabled={loading} className="btn btn-primary w-full py-3">{loading ? 'Signing in…' : 'Sign in'}</button>
       </form>
+      )}
       <p className="mt-6 text-sm text-muted">
         New to rideNtrack? <Link href="/register" className="text-accent underline-offset-4 hover:underline">Create an account</Link>
       </p>
