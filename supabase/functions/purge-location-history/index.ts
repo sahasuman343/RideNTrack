@@ -16,7 +16,8 @@ type Admin = ReturnType<typeof createClient>;
  */
 async function removeQueuedStorageFiles(admin: Admin): Promise<number> {
   const { data: rows, error } = await admin.rpc('claim_storage_cleanup', { p_limit: 500 });
-  if (error || !Array.isArray(rows) || rows.length === 0) return 0;
+  if (error) throw new Error(`claim_storage_cleanup failed: ${error.message}`);
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
   const byBucket = new Map<string, { id: number; object_name: string }[]>();
   for (const row of rows as { id: number; bucket: string; object_name: string }[]) {
     const list = byBucket.get(row.bucket) ?? [];
@@ -31,7 +32,10 @@ async function removeQueuedStorageFiles(admin: Admin): Promise<number> {
       if (!removeError) done.push(...chunk.map(r => r.id));
     }
   }
-  if (done.length > 0) await admin.rpc('finish_storage_cleanup', { p_ids: done });
+  if (done.length > 0) {
+    const { error: finishError } = await admin.rpc('finish_storage_cleanup', { p_ids: done });
+    if (finishError) throw new Error(`finish_storage_cleanup failed: ${finishError.message}`);
+  }
   return done.length;
 }
 
@@ -46,6 +50,11 @@ Deno.serve(async request => {
   });
   const { data, error } = await admin.rpc('purge_old_location_history', { p_retention_days: days });
   if (error) return new Response(error.message, { status: 500 });
-  const files = await removeQueuedStorageFiles(admin);
+  let files: number;
+  try {
+    files = await removeQueuedStorageFiles(admin);
+  } catch (err) {
+    return new Response(err instanceof Error ? err.message : String(err), { status: 500 });
+  }
   return Response.json({ deleted: data, retention_days: days, storage_files_removed: files });
 });

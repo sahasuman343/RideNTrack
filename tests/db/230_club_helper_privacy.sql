@@ -28,8 +28,8 @@ BEGIN
 
   PERFORM set_config('request.jwt.claim.sub', 'f2300000-0000-4000-8000-000000000002', true);
   PERFORM public.join_club('helper-privacy', NULL);
-  IF public.club_role(v_club, auth.uid()) <> 'member' THEN RAISE EXCEPTION 'member cannot read own role'; END IF;
-  IF public.club_role(v_club, 'f2300000-0000-4000-8000-000000000001') <> 'owner' THEN RAISE EXCEPTION 'member cannot see the roster role'; END IF;
+  IF public.club_role(v_club, auth.uid()) IS DISTINCT FROM 'member' THEN RAISE EXCEPTION 'member cannot read own role'; END IF;
+  IF public.club_role(v_club, 'f2300000-0000-4000-8000-000000000001') IS DISTINCT FROM 'owner' THEN RAISE EXCEPTION 'member cannot see the roster role'; END IF;
 END $$;
 RESET ROLE;
 
@@ -38,13 +38,13 @@ DO $$
 DECLARE v_club uuid := current_setting('test.chp_club')::uuid; v_ride uuid := current_setting('test.chp_ride')::uuid; v jsonb;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '', true);
-  IF public.club_role(v_club, 'f2300000-0000-4000-8000-000000000001') <> 'owner' THEN RAISE EXCEPTION 'service role lost club_role'; END IF;
+  IF public.club_role(v_club, 'f2300000-0000-4000-8000-000000000001') IS DISTINCT FROM 'owner' THEN RAISE EXCEPTION 'service role lost club_role'; END IF;
   INSERT INTO public.ride_participants (ride_id, user_id, role, is_active)
   VALUES (v_ride, 'f2300000-0000-4000-8000-000000000003', 'rider', true)
   ON CONFLICT DO NOTHING;
   UPDATE public.rides SET registration_fee_paise = 50000 WHERE id = v_ride;
   v := public.begin_ride_registration(v_ride, 'f2300000-0000-4000-8000-000000000003');
-  IF v->>'status' <> 'pending' THEN RAISE EXCEPTION 'private ride member could not register: %', v; END IF;
+  IF v->>'status' IS DISTINCT FROM 'pending' THEN RAISE EXCEPTION 'private ride member could not register: %', v; END IF;
   DELETE FROM public.ride_registrations WHERE ride_id = v_ride;
   DELETE FROM public.rides WHERE id = v_ride;
   DELETE FROM public.clubs WHERE id = v_club;

@@ -113,6 +113,14 @@ BEGIN
      AND (storage.foldername(o.name))[1] ~ '^[0-9a-f-]{36}$'
      AND NOT EXISTS (SELECT 1 FROM public.rides r WHERE r.id::text = (storage.foldername(o.name))[1])
   ON CONFLICT (bucket, object_name) DO NOTHING;
+  -- Voice clips recorded by riders whose account is already gone.
+  INSERT INTO public.storage_cleanup_queue (bucket, object_name, reason)
+  SELECT o.bucket_id, o.name, 'orphaned'
+    FROM storage.objects o
+   WHERE o.bucket_id = 'ride-voice'
+     AND (storage.foldername(o.name))[2] ~ '^[0-9a-f-]{36}$'
+     AND NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id::text = (storage.foldername(o.name))[2])
+  ON CONFLICT (bucket, object_name) DO NOTHING;
   INSERT INTO public.storage_cleanup_queue (bucket, object_name, reason)
   SELECT o.bucket_id, o.name, 'orphaned'
     FROM storage.objects o

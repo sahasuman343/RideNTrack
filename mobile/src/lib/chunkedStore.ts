@@ -8,6 +8,8 @@
  * ...) and switches the marker only after every chunk is saved, so an
  * interrupted write leaves the previous value readable instead of a mix of
  * both. Chunks are sized in UTF-8 bytes, which is what the platform limits.
+ * Operations on one key run one at a time, so a read never sees a generation
+ * that a concurrent write is replacing, and two writes never interleave.
  */
 export interface KeyValueStore {
   getItem(key: string): Promise<string | null>;
@@ -60,6 +62,17 @@ export function splitByUtf8Bytes(value: string, maxBytes: number): string[] {
 }
 
 export function createChunkedStore(store: KeyValueStore, chunkBytes = DEFAULT_CHUNK_BYTES): KeyValueStore {
+  const queues = new Map<string, Promise<unknown>>();
+  /** Runs fn after every earlier operation on the same key has settled. */
+  function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = queues.get(key) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tail = run.catch(() => {});
+    queues.set(key, tail);
+    void tail.then(() => { if (queues.get(key) === tail) queues.delete(key); });
+    return run;
+  }
+
   async function removeGeneration(key: string, marker: Marker | null) {
     if (!marker) return;
     for (let i = 0; i < marker.count; i++) {
@@ -67,42 +80,56 @@ export function createChunkedStore(store: KeyValueStore, chunkBytes = DEFAULT_CH
     }
   }
 
-  return {
-    async getItem(key) {
-      const head = await store.getItem(key);
-      const marker = parseMarker(head);
-      if (!marker) return head;
-      const parts: string[] = [];
-      for (let i = 0; i < marker.count; i++) {
-        const part = await store.getItem(chunkKey(key, marker.generation, i));
-        // A missing chunk means the value is damaged: treat it as signed out.
-        if (part === null) return null;
-        parts.push(part);
-      }
-      return parts.join('');
-    },
+  async function read(key: string): Promise<string | null> {
+    const head = await store.getItem(key);
+    const marker = parseMarker(head);
+    if (!marker) return head;
+    const parts: string[] = [];
+    for (let i = 0; i < marker.count; i++) {
+      const part = await store.getItem(chunkKey(key, marker.generation, i));
+      // A missing chunk means the value is damaged: treat it as signed out.
+      if (part === null) return null;
+      parts.push(part);
+    }
+    return parts.join('');
+  }
 
-    async setItem(key, value) {
-      const previous = parseMarker(await store.getItem(key).catch(() => null));
-      const chunks = splitByUtf8Bytes(value, chunkBytes);
-      if (chunks.length <= 1 && !value.startsWith(MARKER)) {
-        await store.setItem(key, value);
-        await removeGeneration(key, previous);
-        return;
-      }
-      const generation = previous ? (previous.generation + 1) % 1000 : 0;
+  async function write(key: string, value: string): Promise<void> {
+    // If the current marker can't be read, stop: guessing a generation could
+    // overwrite the chunks of the session that is still in use.
+    const previous = parseMarker(await store.getItem(key));
+    const chunks = splitByUtf8Bytes(value, chunkBytes);
+    if (chunks.length <= 1 && !value.startsWith(MARKER)) {
+      await store.setItem(key, value);
+      await removeGeneration(key, previous);
+      return;
+    }
+    const generation = previous ? (previous.generation + 1) % 1000 : 0;
+    const staged = { generation, count: 0 };
+    try {
       for (let i = 0; i < chunks.length; i++) {
         await store.setItem(chunkKey(key, generation, i), chunks[i]);
+        staged.count = i + 1;
       }
       // Only now does the new value become visible; the old one stays intact until here.
       await store.setItem(key, `${MARKER}${generation}:${chunks.length}`);
-      await removeGeneration(key, previous);
-    },
+    } catch (err) {
+      // Leave no fragments of the failed write behind (they'd survive sign-out).
+      await removeGeneration(key, staged.count > 0 ? staged : null);
+      throw err;
+    }
+    await removeGeneration(key, previous);
+  }
 
-    async removeItem(key) {
-      const marker = parseMarker(await store.getItem(key).catch(() => null));
-      await store.removeItem(key);
-      await removeGeneration(key, marker);
-    },
+  async function remove(key: string): Promise<void> {
+    const marker = parseMarker(await store.getItem(key).catch(() => null));
+    await store.removeItem(key);
+    await removeGeneration(key, marker);
+  }
+
+  return {
+    getItem: key => serial(key, () => read(key)),
+    setItem: (key, value) => serial(key, () => write(key, value)),
+    removeItem: key => serial(key, () => remove(key)),
   };
 }

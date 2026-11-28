@@ -78,3 +78,41 @@ test('a missing chunk reads as signed out, not a corrupt session', async () => {
   raw.data.delete('k.0.1');
   assert.equal(await store.getItem('k'), null);
 });
+
+test('a failed rewrite leaves no staged chunks behind', async () => {
+  const raw = memoryStore();
+  const store = createChunkedStore(raw, 10);
+  await store.setItem('k', 'o'.repeat(30));
+  const before = new Set(raw.data.keys());
+  raw.failAfterWrites(2);
+  await assert.rejects(store.setItem('k', 'n'.repeat(30)));
+  assert.deepEqual(new Set(raw.data.keys()), before);
+});
+
+test('a marker that cannot be read stops the write', async () => {
+  const raw = memoryStore();
+  const store = createChunkedStore(raw, 10);
+  await store.setItem('k', 'o'.repeat(30));
+  const getItem = raw.getItem;
+  raw.getItem = async k => { if (k === 'k') throw new Error('keystore busy'); return getItem(k); };
+  await assert.rejects(store.setItem('k', 'n'.repeat(30)));
+  raw.getItem = getItem;
+  assert.equal(await store.getItem('k'), 'o'.repeat(30));
+});
+
+test('overlapping reads and writes on one key never see a mixed or missing value', async () => {
+  const raw = memoryStore();
+  // Slow storage, so operations would interleave without serialisation.
+  const slow = {
+    getItem: async k => { await new Promise(r => setTimeout(r, 1)); return raw.getItem(k); },
+    setItem: async (k, v) => { await new Promise(r => setTimeout(r, 1)); return raw.setItem(k, v); },
+    removeItem: async k => { await new Promise(r => setTimeout(r, 1)); return raw.removeItem(k); },
+  };
+  const store = createChunkedStore(slow, 10);
+  const a = 'a'.repeat(40), b = 'b'.repeat(40);
+  await store.setItem('k', a);
+  const results = await Promise.all([store.setItem('k', b), store.getItem('k'), store.setItem('k', a), store.getItem('k')]);
+  assert.equal(results[1], b);
+  assert.equal(results[3], a);
+  assert.equal(await store.getItem('k'), a);
+});

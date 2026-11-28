@@ -19,7 +19,8 @@ BEGIN
   SELECT user_id INTO v_next FROM public.club_members
    WHERE club_id = OLD.club_id
    ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, joined_at, user_id
-   LIMIT 1;
+   LIMIT 1
+   FOR UPDATE;
   IF v_next IS NOT NULL THEN
     UPDATE public.club_members SET role = 'owner' WHERE club_id = OLD.club_id AND user_id = v_next;
   END IF;

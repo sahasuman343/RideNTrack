@@ -62,6 +62,8 @@ BEGIN
   -- The third partial refund brings the total to the full fee.
   IF public.apply_registration_payment('evt_r2', v_id, 'refunded', 'pay_1', 50000) <> 'refunded' THEN RAISE EXCEPTION 'refunds did not add up to a full refund'; END IF;
   IF (SELECT is_active FROM public.ride_participants WHERE ride_id = v_ride AND user_id = 'f1600000-0000-4000-8000-000000000002') THEN RAISE EXCEPTION 'refunded rider still on the ride'; END IF;
+  -- A replayed "paid" event can't undo the refund.
+  IF public.apply_registration_payment('evt_2_replay', v_id, 'paid', 'pay_1', 150000) <> 'already_refunded' THEN RAISE EXCEPTION 'replayed payment undid the refund'; END IF;
   -- Pay again so the rest of the test has a paid rider.
   UPDATE public.ride_registrations SET status = 'pending' WHERE id = v_id;
   DELETE FROM public.ride_registration_refunds WHERE registration_id = v_id;

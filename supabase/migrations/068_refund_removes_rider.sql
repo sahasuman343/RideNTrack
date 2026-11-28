@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS public.ride_registration_refunds (
 );
 CREATE INDEX IF NOT EXISTS idx_registration_refunds_reg ON public.ride_registration_refunds (registration_id);
 ALTER TABLE public.ride_registration_refunds ENABLE ROW LEVEL SECURITY;
+-- The refund webhook can look a registration up by its payment.
+CREATE INDEX IF NOT EXISTS idx_ride_registrations_payment ON public.ride_registrations (payment_id) WHERE payment_id IS NOT NULL;
 REVOKE ALL ON public.ride_registration_refunds FROM anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.apply_registration_payment(p_event_id text, p_registration_id uuid, p_status text, p_payment_id text, p_amount_paise integer)
@@ -42,6 +44,11 @@ BEGIN
       RETURN 'partial_refund';
     END IF;
   END IF;
+  -- A replayed "paid" never brings back a registration that was refunded.
+  IF g.status = 'refunded' AND p_status = 'paid' THEN
+    UPDATE public.ride_registrations SET last_event_id = p_event_id, updated_at = now() WHERE id = g.id;
+    RETURN 'already_refunded';
+  END IF;
   -- A late "failed" never overwrites a payment that went through.
   IF g.status = 'paid' AND p_status IN ('failed', 'cancelled') THEN RETURN 'already_paid'; END IF;
   UPDATE public.ride_registrations SET
@@ -52,7 +59,9 @@ BEGIN
     INSERT INTO public.ride_participants (ride_id, user_id) VALUES (g.ride_id, g.user_id)
     ON CONFLICT (ride_id, user_id) DO UPDATE SET is_active = true;
   ELSIF p_status = 'refunded' AND g.status = 'paid'
-        AND (SELECT status FROM public.rides WHERE id = g.ride_id) = 'planned'
+        -- FOR SHARE waits for a start_ride in progress, so a refund can't
+        -- remove a rider from a ride that has just started.
+        AND (SELECT status FROM public.rides WHERE id = g.ride_id FOR SHARE) = 'planned'
         AND NOT public.is_ride_leadership(g.ride_id, g.user_id) THEN
     UPDATE public.ride_participants SET is_active = false WHERE ride_id = g.ride_id AND user_id = g.user_id;
   END IF;
