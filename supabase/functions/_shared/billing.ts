@@ -25,6 +25,8 @@ export interface RevenueCatEvent {
   entitlement_ids?: string[] | null;
   expiration_at_ms?: number | null;
   transaction_id?: string | null;
+  /** On CANCELLATION: CUSTOMER_SUPPORT means the store refunded it. */
+  cancel_reason?: string | null;
   environment?: 'SANDBOX' | 'PRODUCTION';
   subscriber_attributes?: Record<string, { value: string }>;
 }
@@ -41,6 +43,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_TYPES = new Set(['INITIAL_PURCHASE', 'RENEWAL', 'PRODUCT_CHANGE', 'UNCANCELLATION', 'SUBSCRIPTION_EXTENDED', 'TEMPORARY_ENTITLEMENT_GRANT']);
 // CANCELLATION only stops auto-renew; access continues until EXPIRATION.
 const ENDING_TYPES = new Set(['EXPIRATION']);
+
+/** A refund ends access now; a plain auto-renew cancel runs to the period end. */
+function isRefund(event: RevenueCatEvent): boolean {
+  return event.type === 'REFUND' || (event.type === 'CANCELLATION' && event.cancel_reason === 'CUSTOMER_SUPPORT');
+}
 
 export function billingActionFor(event: RevenueCatEvent, nowMs: number = Date.now()): BillingAction {
   const userId = event.app_user_id;
@@ -66,7 +73,7 @@ export function billingActionFor(event: RevenueCatEvent, nowMs: number = Date.no
       const live = !(event.expiration_at_ms && event.expiration_at_ms < nowMs);
       return { kind: 'set_club_plan', userId, clubId, active: live, expiresAt };
     }
-    if (ENDING_TYPES.has(event.type) || event.type === 'REFUND') return { kind: 'set_club_plan', userId, clubId, active: false, expiresAt };
+    if (ENDING_TYPES.has(event.type) || isRefund(event)) return { kind: 'set_club_plan', userId, clubId, active: false, expiresAt };
     return { kind: 'ignore', reason: `club_event_${event.type}` };
   }
 
@@ -79,6 +86,6 @@ export function billingActionFor(event: RevenueCatEvent, nowMs: number = Date.no
     if (event.expiration_at_ms && event.expiration_at_ms < nowMs) return { kind: 'set_tier', userId, tier: 'free', expiresAt };
     return { kind: 'set_tier', userId, tier: 'pro_tourer', expiresAt };
   }
-  if (ENDING_TYPES.has(event.type) || event.type === 'REFUND') return { kind: 'set_tier', userId, tier: 'free', expiresAt };
+  if (ENDING_TYPES.has(event.type) || isRefund(event)) return { kind: 'set_tier', userId, tier: 'free', expiresAt };
   return { kind: 'ignore', reason: `event_${event.type}` };
 }

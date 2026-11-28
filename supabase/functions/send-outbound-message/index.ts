@@ -1,7 +1,7 @@
 // Supabase Edge Function: deliver queued outbound messages (server SMS).
 // Invoked by a Database Webhook on INSERT into public.outbound_messages, and
 // optionally on a schedule ({"sweep": true}) to retry anything left queued.
-// Setup, secrets and DLT registration: docs/features/outbound-messaging.md
+// Setup, secrets and DLT registration: docs/features/outbound-sms.md
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { buildSendRequest, isOutboundTemplate, providerFromEnv, type ProviderEnv } from '../_shared/outbound.ts';
 

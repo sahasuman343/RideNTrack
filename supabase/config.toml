@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.waitlist-join]
 verify_jwt = false
+
+[functions.send-outbound-message]
+verify_jwt = false

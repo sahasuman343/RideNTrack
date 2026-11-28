@@ -31,6 +31,14 @@ type PackState = 'pending' | 'sent' | 'queued' | 'failed';
 type ComposerState = 'pending' | 'opened' | 'unavailable' | 'no_recipients';
 type ServerState = 'off' | 'pending' | 'queued' | 'sent' | 'failed';
 
+/** Ids of SOS texts already on the ride, so a new alert is not shown as sent by an older one. */
+async function sosSmsIds(rideId: string | undefined): Promise<Set<string>> {
+  if (!rideId) return new Set();
+  const { data } = await supabase.rpc('get_outbound_status', { p_ride_id: rideId });
+  const rows = (Array.isArray(data) ? data : []) as Array<{ id: string; template: string }>;
+  return new Set(rows.filter(r => r.template === 'sos_alert' || r.template === 'crash_alert').map(r => r.id));
+}
+
 export function useSosWorkflow(params: {
   ride: Ride | null;
   profile: Profile | null;
@@ -54,11 +62,16 @@ export function useSosWorkflow(params: {
   latest.current = params;
   const rideId = params.ride?.id;
   const rideStatus = params.ride?.status;
+  const userId = params.profile?.id;
+  // Outbound rows that existed before this SOS asked for texts; only newer ones count.
+  const priorSmsIds = useRef<Set<string> | null>(null);
 
   // Cache the recipient list when the ride is open with signal; read it back with none.
   useEffect(() => {
-    if (!rideId) return;
-    const key = `sos-recipients:${rideId}`;
+    setRecipients([]);
+    if (!rideId || !userId) return;
+    // Per rider: the list includes this rider's own private emergency contact.
+    const key = `sos-recipients:${userId}:${rideId}`;
     let cancelled = false;
     void getRideValue<SosRecipient[]>(key).then(cached => { if (!cancelled && cached) setRecipients(cached); });
     if (!params.online || (rideStatus !== 'planned' && rideStatus !== 'active')) return () => { cancelled = true; };
@@ -69,15 +82,17 @@ export function useSosWorkflow(params: {
       void saveRideValue(key, merged);
     });
     return () => { cancelled = true; };
-  }, [rideId, rideStatus, params.online]);
+  }, [rideId, userId, rideStatus, params.online]);
 
   // Follow the server SMS until it reports sent.
   useEffect(() => {
     if (server !== 'queued' || !rideId) return;
     const t = setInterval(() => {
       void supabase.rpc('get_outbound_status', { p_ride_id: rideId }).then(({ data }) => {
-        const rows = (Array.isArray(data) ? data : []) as Array<{ template: string; status: string; created_at: string }>;
-        const mine = rows.filter(r => (r.template === 'sos_alert' || r.template === 'crash_alert') && Date.now() - Date.parse(r.created_at) < 15 * 60_000);
+        const rows = (Array.isArray(data) ? data : []) as Array<{ id: string; user_id: string; template: string; status: string; created_at: string }>;
+        const prior = priorSmsIds.current ?? new Set<string>();
+        const mine = rows.filter(r => (r.template === 'sos_alert' || r.template === 'crash_alert')
+          && r.user_id === latest.current.profile?.id && !prior.has(r.id));
         if (mine.some(r => r.status === 'sent')) { setServer('sent'); track('sos_state', { step: 'server', state: 'sent_by_sms' }); }
         else if (mine.length && mine.every(r => r.status === 'failed')) setServer('failed');
       });
@@ -128,6 +143,8 @@ export function useSosWorkflow(params: {
     track('sos_state', { step: 'group', state: state === 'queued' ? 'waiting_for_signal' : state });
     if (outcome === 'sent' && online && serverSms) {
       setServer('pending');
+      // Once per alert: a second call for the same alert reuses its texts.
+      priorSmsIds.current ??= await sosSmsIds(latest.current.ride?.id);
       const { data, error } = await supabase.rpc('request_sos_sms', { p_alert_id: id });
       setServer(error ? 'failed' : (data as number) > 0 ? 'queued' : 'off');
     }
@@ -162,7 +179,7 @@ export function useSosWorkflow(params: {
     setSosModal(false);
     // A finished SOS resets so the next one starts clean.
     if (started) {
-      setStarted(false); setPack('pending'); setComposer('pending'); setServer('off'); alertIdRef.current = null;
+      setStarted(false); setPack('pending'); setComposer('pending'); setServer('off'); alertIdRef.current = null; priorSmsIds.current = null;
     }
   }, [started]);
 

@@ -112,6 +112,8 @@ export async function clearAllCachedTripsForUser(userId: string): Promise<void> 
   try {
     const db = await getDatabase();
     await db.runAsync('DELETE FROM trip_cache WHERE user_id = ? OR id LIKE ?', userId, `${userId}#%`);
+    // SOS recipient lists hold private emergency numbers; drop them on sign-out.
+    await db.runAsync("DELETE FROM ride_kv WHERE key LIKE 'sos-recipients:%'");
   } catch {
     /* ignore */
   }

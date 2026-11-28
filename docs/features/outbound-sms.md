@@ -44,7 +44,7 @@ template with variables.
    `DLT_TEMPLATE_<NAME>` with each MSG91 flow id.
 3. `OUTBOUND_WEBHOOK_SECRET` (random string). Create a Database Webhook on
    `outbound_messages` INSERT that POSTs to the function with header
-   `x-outbound-secret: <secret>`, and a cron (pg_cron or an external one)
+   `x-webhook-secret: <secret>`, and a cron (pg_cron or an external one)
    that POSTs `{ "sweep": true }` every minute.
 4. Test with `SMS_PROVIDER=dry_run` (the default) first, then set
    `SERVER_SMS_ENABLED=true` and turn on the `server_sms` flag.

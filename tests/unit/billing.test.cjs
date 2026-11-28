@@ -20,6 +20,8 @@ test('cancellation keeps access, expiration and refund end it', () => {
   assert.equal(billing.billingActionFor(ev({ type: 'CANCELLATION' }), NOW).kind, 'ignore');
   assert.equal(billing.billingActionFor(ev({ type: 'EXPIRATION' }), NOW).tier, 'free');
   assert.equal(billing.billingActionFor(ev({ type: 'REFUND' }), NOW).tier, 'free');
+  assert.equal(billing.billingActionFor(ev({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT' }), NOW).tier, 'free', 'store refund');
+  assert.equal(billing.billingActionFor(ev({ type: 'CANCELLATION', cancel_reason: 'UNSUBSCRIBE' }), NOW).kind, 'ignore', 'auto-renew off keeps access');
   assert.equal(billing.billingActionFor(ev({ type: 'RENEWAL', expiration_at_ms: NOW - 1000 }), NOW).tier, 'free', 'late event already expired');
 });
 

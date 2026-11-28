@@ -6,9 +6,11 @@ import { supabase } from '../lib/supabase';
 /*
  * Remote feature flags. The last answer from get_my_flags is cached so a rider
  * starting a ride in a dead zone still gets the flags they had yesterday.
+ * The cache is per account: per-user flags (betas, allowlists) never carry
+ * over to another rider who signs in on the same phone.
  */
 
-const CACHE_KEY = '@ridentrack/flags';
+const cacheKey = (userId: string) => `@ridentrack/flags:${userId}`;
 const buildOverrides = parseFlagOverrides(process.env.EXPO_PUBLIC_FLAGS);
 
 interface FlagsContextValue {
@@ -45,12 +47,17 @@ export function FeatureFlagsProvider({ userId, children }: { userId: string | nu
     const remote = data as RemoteFlag[];
     setFlags(resolveFlags(remote, buildOverrides));
     setPayloads(payloadsOf(remote));
-    void AsyncStorage.setItem(CACHE_KEY, JSON.stringify(remote)).catch(() => {});
+    void AsyncStorage.setItem(cacheKey(userId), JSON.stringify(remote)).catch(() => {});
   }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
-    void AsyncStorage.getItem(CACHE_KEY).then(raw => {
+    // Start from defaults on every account change, then load this account's cache.
+    setFlags(resolveFlags(null, buildOverrides));
+    setPayloads({});
+    void AsyncStorage.removeItem('@ridentrack/flags').catch(() => {}); // old shared key
+    if (!userId) return () => { cancelled = true; };
+    void AsyncStorage.getItem(cacheKey(userId)).then(raw => {
       if (cancelled || !raw) return;
       try {
         const cached = JSON.parse(raw) as RemoteFlag[];
@@ -60,7 +67,7 @@ export function FeatureFlagsProvider({ userId, children }: { userId: string | nu
     }).catch(() => {});
     void refreshFlags();
     return () => { cancelled = true; };
-  }, [refreshFlags]);
+  }, [userId, refreshFlags]);
 
   return <FlagsContext.Provider value={{ flags, payloads, refreshFlags }}>{children}</FlagsContext.Provider>;
 }
