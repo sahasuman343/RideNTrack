@@ -116,4 +116,13 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.release_auth_sms(text) FROM PUBLIC, anon, authenticated;
 
+-- Only the Send SMS hook (service role) may claim or release a code.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT ALL ON public.auth_sms_limits, public.auth_sms_log TO service_role;
+    GRANT EXECUTE ON FUNCTION public.claim_auth_sms(text), public.release_auth_sms(text) TO service_role;
+  END IF;
+END $$;
+
 COMMIT;
