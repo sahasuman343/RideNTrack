@@ -57,10 +57,14 @@ BEGIN
   -- Finding 9: a partial refund keeps the spot; a full refund before the ride takes the rider off it.
   IF public.apply_registration_payment('evt_r1', v_id, 'refunded', 'pay_1', 50000) <> 'partial_refund' THEN RAISE EXCEPTION 'partial refund treated as full'; END IF;
   IF NOT (SELECT is_active FROM public.ride_participants WHERE ride_id = v_ride AND user_id = 'f1600000-0000-4000-8000-000000000002') THEN RAISE EXCEPTION 'partial refund removed the rider'; END IF;
-  IF public.apply_registration_payment('evt_r2', v_id, 'refunded', 'pay_1', 150000) <> 'refunded' THEN RAISE EXCEPTION 'refund not applied'; END IF;
+  IF public.apply_registration_payment('evt_r1', v_id, 'refunded', 'pay_1', 50000) <> 'duplicate' THEN RAISE EXCEPTION 'refund retry counted twice'; END IF;
+  IF public.apply_registration_payment('evt_r1b', v_id, 'refunded', 'pay_1', 50000) <> 'partial_refund' THEN RAISE EXCEPTION 'second partial refund treated as full'; END IF;
+  -- The third partial refund brings the total to the full fee.
+  IF public.apply_registration_payment('evt_r2', v_id, 'refunded', 'pay_1', 50000) <> 'refunded' THEN RAISE EXCEPTION 'refunds did not add up to a full refund'; END IF;
   IF (SELECT is_active FROM public.ride_participants WHERE ride_id = v_ride AND user_id = 'f1600000-0000-4000-8000-000000000002') THEN RAISE EXCEPTION 'refunded rider still on the ride'; END IF;
   -- Pay again so the rest of the test has a paid rider.
   UPDATE public.ride_registrations SET status = 'pending' WHERE id = v_id;
+  DELETE FROM public.ride_registration_refunds WHERE registration_id = v_id;
   IF public.apply_registration_payment('evt_r3', v_id, 'paid', 'pay_2', 150000) <> 'paid' THEN RAISE EXCEPTION 'repayment not applied'; END IF;
 
   -- Club plan: buyer must manage the club; active plan unlocks Pro for club rides.

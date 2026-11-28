@@ -10,7 +10,10 @@ DECLARE v_next uuid;
 BEGIN
   IF OLD.role <> 'owner' THEN RETURN NULL; END IF;
   -- The whole club is being deleted, or another owner remains.
-  IF NOT EXISTS (SELECT 1 FROM public.clubs WHERE id = OLD.club_id) THEN RETURN NULL; END IF;
+  -- Lock the club so two owners deleted at the same time can't each see the
+  -- other as the remaining owner; the second waits and then sees neither.
+  PERFORM 1 FROM public.clubs WHERE id = OLD.club_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
   IF EXISTS (SELECT 1 FROM public.club_members WHERE club_id = OLD.club_id AND role = 'owner') THEN RETURN NULL; END IF;
 
   SELECT user_id INTO v_next FROM public.club_members

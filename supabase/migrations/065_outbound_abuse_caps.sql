@@ -42,6 +42,15 @@ BEGIN
   SELECT id INTO v_id FROM public.outbound_messages WHERE idempotency_key = p_idempotency_key;
   IF v_id IS NOT NULL THEN RETURN v_id; END IF;
 
+  -- Concurrent calls for the same number (or the same rider's SOS texts)
+  -- take turns, so two of them can't both see the count just under a cap.
+  PERFORM pg_advisory_xact_lock(hashtext('outbound_recipient:' || p_recipient));
+  IF v_is_sos AND p_user_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtext('outbound_sos_user:' || p_user_id::text));
+  END IF;
+  SELECT id INTO v_id FROM public.outbound_messages WHERE idempotency_key = p_idempotency_key;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
   SELECT * INTO v_limits FROM public.outbound_limits WHERE id;
   SELECT count(*) INTO v_global FROM public.outbound_messages
    WHERE created_at > now() - interval '1 day' AND status <> 'suppressed';
