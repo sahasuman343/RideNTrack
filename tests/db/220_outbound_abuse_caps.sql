@@ -8,6 +8,7 @@ SELECT ('c2200000-0000-4000-8000-00000000000' || n)::uuid, 'abuse' || n || '@exa
   FROM generate_series(1, 9) n
 ON CONFLICT (id) DO NOTHING;
 DELETE FROM public.outbound_messages;
+DELETE FROM public.outbound_deleted_tally;
 UPDATE public.outbound_limits
    SET sos_per_user_daily = 2, per_recipient_daily = 3, global_daily = 10, sos_global_reserve = 4
  WHERE id;
@@ -50,6 +51,7 @@ BEGIN
   END IF;
 END $$;
 DELETE FROM public.outbound_messages;
+DELETE FROM public.outbound_deleted_tally;
 UPDATE public.outbound_limits
    SET sos_per_user_daily = 30, per_recipient_daily = 12, global_daily = 2000, sos_global_reserve = 300
  WHERE id;
