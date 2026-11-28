@@ -43,6 +43,11 @@ Razorpay is allowed for them.
 - Razorpay webhook to `…/functions/v1/razorpay-webhook` with events
   `payment_link.paid`, `payment_link.cancelled`, `payment_link.expired`,
   `payment.failed`, `refund.processed`.
+
+**Refunds.** A full refund before the ride starts takes the rider off the ride
+(their spot frees up). Once the ride is active or completed they stay on it, so
+the pack's safety view never loses someone mid-ride. A partial refund keeps the
+spot. Refund the whole fee from the Razorpay dashboard to remove a rider.
 - **Payouts to clubs**: money lands in RideNTrack's Razorpay account. Decide the
   platform fee and set up Razorpay Route (linked accounts per club) or manual
   payouts. Refunds are done in the Razorpay dashboard; the webhook updates the app.

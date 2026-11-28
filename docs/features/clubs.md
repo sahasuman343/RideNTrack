@@ -12,7 +12,10 @@ Flag: `clubs` (on).
   for `authenticated` / `anon`. Set it with the service role:
   `update clubs set verified = true where slug = '…';`
 - **Roles**: owners manage roles; admins can remove plain members; a club always
-  keeps at least one owner. Riders own at most three clubs.
+  keeps at least one owner. If the last owner deletes their account, the
+  longest-standing admin (or member) becomes owner. Riders own at most three clubs.
+- **Privacy**: `club_role` / `is_club_admin` only answer about the caller or
+  about people in a club the caller belongs to.
 - **Rides**: the captain of a trip who is also a club admin adds it to the club
   (trip screen, Club row). A **regular ride** is a template trip plus a pattern
   ("Every Sunday", "First Sunday of the month"); "Plan 7 Jun" copies the

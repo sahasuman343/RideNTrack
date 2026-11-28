@@ -14,10 +14,20 @@ Deno.serve(async req => {
   let hook: RazorpayWebhook;
   try { hook = JSON.parse(raw); } catch { return new Response('Bad request', { status: 400 }); }
 
-  const action = registrationActionFor(hook);
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  let action = registrationActionFor(hook);
+  // A refund payload may carry no registration id in its notes; find the
+  // registration from the payment id saved when it was paid.
+  const refund = hook.payload?.refund?.entity;
+  if (action.kind === 'ignore' && action.reason === 'no_registration' && hook.event === 'refund.processed' && refund?.payment_id) {
+    const { data: reg, error: lookupError } = await admin.from('ride_registrations').select('id').eq('payment_id', refund.payment_id).maybeSingle();
+    if (lookupError) return new Response(lookupError.message, { status: 500 });
+    if (reg?.id) {
+      action = { kind: 'apply', registrationId: reg.id as string, status: 'refunded', paymentId: refund.payment_id, amountPaise: refund.amount ?? null };
+    }
+  }
   if (action.kind === 'ignore') return new Response(JSON.stringify({ ignored: action.reason }), { headers: { 'content-type': 'application/json' } });
 
-  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const { data, error } = await admin.rpc('apply_registration_payment', {
     p_event_id: webhookEventId(req.headers, hook),
     p_registration_id: action.registrationId,

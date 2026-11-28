@@ -73,3 +73,9 @@ change `LOCATION_RETENTION_DAYS` to 7–3650 only after updating the privacy not
 The function verifies the shared secret before using the service role and reports
 how many rows were deleted. Failed calls return 500 and do not silently report
 success.
+
+The same daily run also removes Storage files that belonged to deleted rides,
+deleted voice messages and deleted accounts (voice clips in `ride-voice`,
+journal photos, avatars). Migration 069 queues them in `storage_cleanup_queue`;
+the function removes up to 500 per run through the Storage API and reports
+`storage_files_removed`. Files that fail stay queued and are retried up to 5 times.

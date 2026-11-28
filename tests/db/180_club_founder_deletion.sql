@@ -32,6 +32,11 @@ DO $$ BEGIN
   IF (SELECT created_by FROM public.clubs WHERE slug = 'founder-riders') IS NOT NULL THEN RAISE EXCEPTION 'club still points at the deleted founder'; END IF;
   IF (SELECT count(*) FROM public.club_ride_series s JOIN public.clubs c ON c.id = s.club_id WHERE c.slug = 'founder-riders' AND s.created_by IS NULL) <> 1 THEN RAISE EXCEPTION 'series lost or still points at the founder'; END IF;
   IF (SELECT count(*) FROM public.club_members m JOIN public.clubs c ON c.id = m.club_id WHERE c.slug = 'founder-riders') <> 1 THEN RAISE EXCEPTION 'remaining member lost'; END IF;
+  -- Finding 8: the remaining member becomes the owner (migration 067).
+  IF (SELECT m.role FROM public.club_members m JOIN public.clubs c ON c.id = m.club_id
+       WHERE c.slug = 'founder-riders' AND m.user_id = 'f1800000-0000-4000-8000-000000000002') <> 'owner' THEN
+    RAISE EXCEPTION 'no new owner after the founder left';
+  END IF;
 END $$;
 
 -- join_club respects the clubs flag.
