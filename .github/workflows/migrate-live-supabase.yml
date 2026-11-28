@@ -1,0 +1,49 @@
+name: Supabase migrations (live)
+# Run by hand from the Actions tab. "Use workflow from" picks the branch whose
+# migrations go live: main once PR 15 is merged, or the PR 15 branch before.
+# With "apply" off it only shows what would change; with it on it applies the
+# pending migrations to live. Either way the job waits for approval in the
+# supabase-live environment first, because it gets the live credentials.
+# Take a backup before applying (docs/disaster-recovery.md).
+#
+# Environment supabase-live (Settings > Environments):
+#   required reviewer: you
+#   secrets: SUPABASE_ACCESS_TOKEN, SUPABASE_LIVE_DB_PASSWORD
+#   (environment secrets, so no other workflow or branch can read them)
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the pending migrations to LIVE (off = only show them)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: migrate-live-supabase
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: supabase-live
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_LIVE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: lpeaignvaesoeqeijrxe
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::error::Add SUPABASE_ACCESS_TOKEN and SUPABASE_LIVE_DB_PASSWORD as secrets of the supabase-live environment."
+            exit 1
+          fi
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+      - name: Show pending migrations
+        run: scripts/supabase-migrate.sh live plan
+      - name: Apply pending migrations to live
+        if: inputs.apply
+        run: scripts/supabase-migrate.sh live apply
