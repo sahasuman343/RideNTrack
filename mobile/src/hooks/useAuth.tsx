@@ -6,7 +6,7 @@ import { syncQueue } from '../services/syncQueue';
 import { clearQueuedItemsForUser } from '../lib/offlineQueue';
 import { clearAllCachedTripsForUser } from '../lib/tripCache';
 import type { Profile } from '@ridentrack/shared';
-import { registerAccount, type ReferralSource } from '@ridentrack/shared';
+import { registerAccount, sendSignInCode, sendSignUpCode, verifyPhoneCode, normaliseLoginPhone, type ReferralSource } from '@ridentrack/shared';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
@@ -18,6 +18,12 @@ interface AuthContextType {
   reloadProfile: () => Promise<void>;
   signUp: (email: string, password: string, username: string, displayName: string, referral?: { code: string | null; source: ReferralSource } | null) => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Texts a sign-in code. Returns the number in E.164 for the verify step. */
+  sendPhoneCode: (phone: string, signUp?: { username: string; displayName: string; referral?: { code: string | null; source: ReferralSource } | null }) => Promise<string>;
+  verifyPhoneSignIn: (phone: string, code: string) => Promise<void>;
+  /** Adds a number to the signed-in account; the code confirms it. */
+  startPhoneLink: (phone: string) => Promise<string>;
+  confirmPhoneLink: (phone: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   updateProfile: (updates: {
@@ -143,6 +149,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function adoptSession(data: { session?: Session | null; user?: User | null } | null) {
+    if (!data?.session) return;
+    setSession(data.session);
+    if (activeUserId.current !== (data.user?.id ?? null)) setProfile(null);
+    activeUserId.current = data.user?.id ?? null;
+    if (data.user) fetchProfile(data.user.id);
+  }
+
+  async function sendPhoneCode(phone: string, signUp?: { username: string; displayName: string; referral?: { code: string | null; source: ReferralSource } | null }) {
+    if (!signUp) return sendSignInCode(supabase, phone);
+    return sendSignUpCode(supabase, {
+      phone, username: signUp.username, displayName: signUp.displayName,
+      referralCode: signUp.referral?.code ?? null, referralSource: signUp.referral?.source ?? null,
+    });
+  }
+
+  async function verifyPhoneSignIn(phone: string, code: string) {
+    adoptSession(await verifyPhoneCode(supabase, phone, code, 'sms'));
+  }
+
+  async function startPhoneLink(phone: string) {
+    const e164 = normaliseLoginPhone(phone);
+    if (!e164) throw Object.assign(new Error('Enter a 10-digit Indian mobile number, or +country code and number.'), { code: 'phone_invalid' });
+    const { error } = await supabase.auth.updateUser({ phone: e164 });
+    if (error) throw Object.assign(new Error(error.message), { code: error.code, status: error.status });
+    return e164;
+  }
+
+  async function confirmPhoneLink(phone: string, code: string) {
+    const data = await verifyPhoneCode(supabase, phone, code, 'phone_change');
+    adoptSession(data);
+    if (!data?.session) {
+      // Refresh so session.user.phone shows the new number.
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.session) setSession(refreshed.session);
+    }
+  }
+
   async function updateProfile(updates: {
     display_name?: string;
     phone?: string | null;
@@ -209,7 +253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, profileError, reloadProfile: () => activeUserId.current ? fetchProfile(activeUserId.current) : Promise.resolve(), loading, signUp, signIn, signOut, deleteAccount, updateProfile }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, profile, profileError, reloadProfile: () => activeUserId.current ? fetchProfile(activeUserId.current) : Promise.resolve(), loading, signUp, signIn, sendPhoneCode, verifyPhoneSignIn, startPhoneLink, confirmPhoneLink, signOut, deleteAccount, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

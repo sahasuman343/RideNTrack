@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AuthFrame from '@/components/auth-frame';
-import { MIN_PASSWORD, passwordProblem, referralCodeFrom, referralSourceFrom, registerAccount, UsernameUnavailableError, type ReferralSource } from '@ridentrack/shared';
+import { MIN_PASSWORD, passwordProblem, referralCodeFrom, referralSourceFrom, registerAccount, sendSignUpCode, UsernameUnavailableError, validateNewRider, verifyPhoneCode, type ReferralSource } from '@ridentrack/shared';
+import PhoneCodeForm, { HANDLED, PHONE_LOGIN_ENABLED, SignInMethodSwitch, type SignInMethod } from '@/components/phone-code-form';
 
 export default function RegisterPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const query = use(searchParams);
@@ -23,11 +24,36 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
   const router = useRouter();
   // F17: a code from "Plan your own ride" or a shared recap link (?ref=…&src=…).
   const [inviteCode, setInviteCode] = useState(linkedCode ?? '');
+  const [method, setMethod] = useState<SignInMethod>(PHONE_LOGIN_ENABLED && first(query.method) === 'phone' ? 'phone' : 'email');
   const [inviteSource, setInviteSource] = useState<ReferralSource>(() => (linkedCode ? referralSourceFrom(first(query.src)) : 'typed'));
+
+  async function sendPhoneSignUp(phone: string) {
+    setError('');
+    setUsernameError(false);
+    const fieldErrors = validateNewRider({ username, displayName });
+    const firstError = fieldErrors.username ?? fieldErrors.displayName;
+    if (firstError) {
+      setError(firstError);
+      if (fieldErrors.username) { setUsernameError(true); usernameInput.current?.focus(); }
+      throw HANDLED;
+    }
+    try {
+      return await sendSignUpCode(supabase, { phone, username, displayName, referralCode: referralCodeFrom(inviteCode), referralSource: inviteSource });
+    } catch (cause) {
+      if (cause instanceof UsernameUnavailableError) {
+        setError(cause.message);
+        setUsernameError(true);
+        usernameInput.current?.focus();
+        throw HANDLED;
+      }
+      throw cause;
+    }
+  }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
-    if (loading) return;
+    // Phone sign-up runs from its own form below.
+    if (loading || method === 'phone') return;
     setLoading(true);
     setError('');
     setSuccessMsg('');
@@ -61,6 +87,7 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
   return (
     <AuthFrame eyebrow="Join the pack" title={<>Create your <em>account</em></>}>
 
+        {PHONE_LOGIN_ENABLED && <SignInMethodSwitch value={method} onChange={m => { setMethod(m); setError(''); setSuccessMsg(''); }} />}
         <form onSubmit={handleRegister} className="space-y-4">
           {error && (
             <div id="registration-error" role="alert" className="notice notice-error">
@@ -97,6 +124,7 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
             className="field"
             required
           />
+          {method === 'email' && <>
           <input
             type="email"
             placeholder="Email"
@@ -118,6 +146,7 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
             className="field"
             required
           />
+          </>}
           <input
             type="text"
             placeholder="Invite code (optional)"
@@ -128,6 +157,7 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
             onChange={(e) => { setInviteCode(e.target.value); setInviteSource('typed'); }}
             className="field font-mono tracking-widest uppercase"
           />
+          {method === 'email' && (
           <button
             type="submit"
             disabled={loading}
@@ -135,7 +165,21 @@ export default function RegisterPage({ searchParams }: { searchParams: Promise<{
           >
             {loading ? 'Creating account…' : 'Create account'}
           </button>
+          )}
         </form>
+        {method === 'phone' && (
+          <div className="mt-4">
+            <PhoneCodeForm
+              mode="sign_up"
+              idPrefix="register-phone"
+              sendLabel="Text me a code"
+              verifyLabel="Verify and create account"
+              onSend={sendPhoneSignUp}
+              onVerify={async (phone, code) => { await verifyPhoneCode(supabase, phone, code); router.replace('/app'); }}
+              onProblem={p => setError(p.message)}
+            />
+          </div>
+        )}
 
         <p className="mt-6 text-sm text-muted">
           Already have an account?{' '}

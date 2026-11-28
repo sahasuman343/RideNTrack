@@ -138,7 +138,8 @@ export function normalisePhone(raw: string | null | undefined, defaultCountry = 
 
 export interface SendRequest {
   to: string;
-  template: OutboundTemplate;
+  /** auth_otp is the sign-in code, sent by the Auth hook and never queued. */
+  template: OutboundTemplate | 'auth_otp';
   vars: string[];
   text: string;
   dltTemplateId: string | null;

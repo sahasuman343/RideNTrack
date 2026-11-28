@@ -468,3 +468,4 @@ export * from './tripPlanner';
 export * from './routeEditor';
 export * from './webLocationShare';
 export * from './profileForm';
+export * from './phoneAuth';

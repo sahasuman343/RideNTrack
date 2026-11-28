@@ -2,13 +2,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  changedProfileValues, fuelRangeKm, MOTORCYCLE_CATEGORIES, profileUpdateFor,
+  changedProfileValues, formatLoginPhone, fuelRangeKm, normaliseLoginPhone, verifyPhoneCode, MOTORCYCLE_CATEGORIES, profileUpdateFor,
   type Profile, type ProfileFormInput, type ProfileSection, type RiderAnalytics,
 } from '@ridentrack/shared';
 import { supabase } from '@/lib/supabase';
 import { useRequiredSession } from '@/lib/planner';
 import { useFlags } from '@/lib/flags';
 import SavedPlaces from '@/components/saved-places';
+import PhoneCodeForm, { PHONE_LOGIN_ENABLED } from '@/components/phone-code-form';
 
 const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 });
 
@@ -139,7 +140,7 @@ export default function ProfilePage() {
         <span aria-hidden="true" className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-line2 bg-raise font-mono text-lg">{initials(profile.display_name || '')}</span>
         <div className="min-w-0">
           <h1 className="display truncate text-4xl sm:text-5xl">{profile.display_name || 'Rider'}</h1>
-          <p className="mt-1 truncate text-sm text-muted">{session?.user.email}</p>
+          <p className="mt-1 truncate text-sm text-muted">{session?.user.email || formatLoginPhone(session?.user.phone)}</p>
         </div>
       </div>
 
@@ -284,6 +285,7 @@ export default function ProfilePage() {
       <section aria-labelledby="account-heading" className="mt-12 border-t border-line pt-8">
         <h2 id="account-heading" className="font-display text-xl font-semibold">Account</h2>
         <p className="mt-1 text-sm text-muted">Phone-only settings, like crash detection and the lock screen card, are in the app.</p>
+        {PHONE_LOGIN_ENABLED && <PhoneSignIn phone={session?.user.phone ?? null} hasEmail={Boolean(session?.user.email)} />}
         <div className="mt-4 flex flex-wrap gap-3">
           <button type="button" onClick={() => void signOut()} className="btn btn-ghost">Sign out</button>
           <button type="button" onClick={() => setDeleting(true)} className="btn hover:bg-raise text-danger">Delete account</button>
@@ -335,6 +337,53 @@ function DeleteAccount({ userId, onClose, onDeleted }: { userId: string; onClose
           <button type="button" disabled={busy} onClick={onClose} className="btn hover:bg-raise">Keep my account</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** An account adds a mobile number, confirmed by a texted code, and can then sign in with it. */
+function PhoneSignIn({ phone, hasEmail }: { phone: string | null; hasEmail: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [linked, setLinked] = useState(phone);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  return (
+    <div className="mt-6 panel p-5">
+      <h3 className="font-display text-lg font-semibold">Sign in with your phone</h3>
+      <p className="mt-1 text-sm text-muted">
+        {linked
+          ? `You can sign in with a code texted to ${formatLoginPhone(linked)}${hasEmail ? ', or with your email' : ''}.`
+          : 'Add your mobile number to sign in with a texted code instead of your password.'}
+      </p>
+      {message && <p role={message.error ? 'alert' : 'status'} className={'mt-3 notice ' + (message.error ? 'notice-error' : '')}>{message.text}</p>}
+      {open ? (
+        <div className="mt-4 max-w-sm">
+          <PhoneCodeForm
+            mode="sign_in"
+            idPrefix="link-phone"
+            sendLabel="Text me a code"
+            verifyLabel="Confirm number"
+            onSend={async raw => {
+              setMessage(null);
+              const e164 = normaliseLoginPhone(raw);
+              if (!e164) throw Object.assign(new Error('Enter a 10-digit Indian mobile number, or +country code and number.'), { code: 'phone_invalid' });
+              const { error } = await supabase.auth.updateUser({ phone: e164 });
+              if (error) throw Object.assign(new Error(error.message), { code: error.code, status: error.status });
+              return e164;
+            }}
+            onVerify={async (e164, code) => {
+              await verifyPhoneCode(supabase, e164, code, 'phone_change');
+              await supabase.auth.refreshSession().catch(() => {});
+              setLinked(e164);
+              setOpen(false);
+              setMessage({ text: 'Number confirmed. You can now sign in with it.' });
+            }}
+            onProblem={p => setMessage({ text: p.message, error: true })}
+          />
+          <button type="button" onClick={() => setOpen(false)} className="mt-3 text-sm text-muted hover:text-fg">Cancel</button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => { setMessage(null); setOpen(true); }} className="btn btn-ghost mt-4">{linked ? 'Change number' : 'Add mobile number'}</button>
+      )}
     </div>
   );
 }

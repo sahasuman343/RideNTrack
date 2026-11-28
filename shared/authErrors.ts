@@ -4,7 +4,9 @@
  * on the error code first and the message only as a fallback.
  */
 
-export type AuthField = 'email' | 'password' | 'username' | 'displayName' | 'inviteCode';
+import { phoneAuthProblem } from './phoneAuth';
+
+export type AuthField = 'email' | 'password' | 'username' | 'displayName' | 'inviteCode' | 'phone' | 'code';
 
 export type AuthNextStep = 'resend_confirmation' | 'go_sign_in' | 'go_register' | 'retry';
 
@@ -53,14 +55,20 @@ export function validateSignIn(input: { email: string; password: string }): Part
   return errors;
 }
 
-export function validateSignUp(input: {
-  email: string; password: string; username: string; displayName: string;
-}): Partial<Record<AuthField, string>> {
+/** Username and display name: the part of sign-up shared by email and phone. */
+export function validateNewRider(input: { username: string; displayName: string }): Partial<Record<AuthField, string>> {
   const errors: Partial<Record<AuthField, string>> = {};
   const username = input.username.trim();
   if (!username) errors.username = 'Pick a username riders will see.';
   else if (!USERNAME_RE.test(username)) errors.username = '3 to 30 letters, numbers, dots or underscores.';
   if (!input.displayName.trim()) errors.displayName = 'Enter the name your pack knows you by.';
+  return errors;
+}
+
+export function validateSignUp(input: {
+  email: string; password: string; username: string; displayName: string;
+}): Partial<Record<AuthField, string>> {
+  const errors = validateNewRider(input);
   if (!input.email.trim()) errors.email = 'Enter your email.';
   else if (!isValidEmail(input.email)) errors.email = 'That email looks incomplete.';
   if (!input.password) errors.password = 'Choose a password.';
@@ -79,6 +87,8 @@ export function authProblem(error: AuthErrorLike | null | undefined, mode: 'sign
   if (error?.name === 'UsernameUnavailableError' || code === 'username_taken') {
     return { title: 'Username taken', message: 'Someone already rides as that name. Try another one.', field: 'username', kind: 'error' };
   }
+  const phone = phoneAuthProblem(error);
+  if (phone) return phone;
   if (code === 'invalid_credentials' || has('invalid login credentials')) {
     return {
       title: "That didn't match",

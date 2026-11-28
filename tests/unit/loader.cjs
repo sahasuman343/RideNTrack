@@ -21,6 +21,8 @@ function loader(stubs = {}) {
       if (name === '@ridentrack/shared') return load('shared/types.ts');
       if (name.startsWith('.')) {
         const target = path.resolve(path.dirname(filename), name);
+        // Deno-style imports carry the .ts extension already.
+        if (/\.tsx?$/.test(target) && fs.existsSync(target)) return load(target);
         return load(fs.existsSync(target + '.ts') ? target + '.ts' : target + '.tsx');
       }
       return require(name);

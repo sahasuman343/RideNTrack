@@ -2,13 +2,13 @@ import React, { useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  authProblem, referralCodeFrom, referralSourceFrom, validateSignUp,
+  authProblem, referralCodeFrom, referralSourceFrom, validateNewRider, validateSignUp,
   MIN_PASSWORD, type AuthField, type AuthProblem,
 } from '@ridentrack/shared';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRideTheme, RidePalette } from '../../src/theme';
 import { Dialog } from '../../src/components/ui/Dialog';
-import { AuthInput, AuthProblemDialog } from '../../src/components/auth';
+import { AuthInput, AuthProblemDialog, HANDLED, PhoneCodeForm, PHONE_LOGIN_ENABLED, SignInMethodSwitch, type SignInMethod } from '../../src/components/auth';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -24,10 +24,11 @@ export default function RegisterScreen() {
   const passwordRef = useRef<TextInput>(null);
   const inviteRef = useRef<TextInput>(null);
   // F17: ridentrack://register?ref=ABC123&src=recap fills the invite code.
-  const params = useLocalSearchParams<{ ref?: string; src?: string }>();
+  const params = useLocalSearchParams<{ ref?: string; src?: string; method?: string }>();
+  const [method, setMethod] = useState<SignInMethod>(PHONE_LOGIN_ENABLED && params.method === 'phone' ? 'phone' : 'email');
   const linkedCode = referralCodeFrom(typeof params.ref === 'string' ? params.ref : null);
   const [inviteCode, setInviteCode] = useState(linkedCode ?? '');
-  const { signUp } = useAuth();
+  const { signUp, sendPhoneCode, verifyPhoneSignIn } = useAuth();
   const router = useRouter();
   const theme = useRideTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -46,16 +47,33 @@ export default function RegisterScreen() {
     else router.replace('/(auth)/login');
   }
 
+  function referral() {
+    return {
+      code: referralCodeFrom(inviteCode),
+      source: linkedCode && referralCodeFrom(inviteCode) === linkedCode ? referralSourceFrom(typeof params.src === 'string' ? params.src : null) : 'typed' as const,
+    };
+  }
+
+  async function sendSignUpCode(phone: string) {
+    const fieldErrors = validateNewRider({ username, displayName });
+    setErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length) throw HANDLED;
+    try {
+      return await sendPhoneCode(phone, { username: username.trim(), displayName: displayName.trim(), referral: referral() });
+    } catch (error: any) {
+      const p = authProblem(error, 'sign_up');
+      if (p.field === 'username' || p.field === 'displayName') { setErrors({ [p.field]: p.title }); setProblem(p); throw HANDLED; }
+      throw error;
+    }
+  }
+
   async function handleRegister() {
     const fieldErrors = validateSignUp({ email, password, username, displayName });
     setErrors(fieldErrors);
     if (Object.keys(fieldErrors).length) return;
     setLoading(true);
     try {
-      const signedIn = await signUp(email.trim(), password, username.trim(), displayName.trim(), {
-        code: referralCodeFrom(inviteCode),
-        source: linkedCode && referralCodeFrom(inviteCode) === linkedCode ? referralSourceFrom(typeof params.src === 'string' ? params.src : null) : 'typed',
-      });
+      const signedIn = await signUp(email.trim(), password, username.trim(), displayName.trim(), referral());
       if (signedIn) router.replace('/(tabs)');
       else setSentTo(email.trim());
     } catch (error: any) {
@@ -78,6 +96,7 @@ export default function RegisterScreen() {
         </View>
 
         <View style={styles.form}>
+          {PHONE_LOGIN_ENABLED && <SignInMethodSwitch value={method} onChange={setMethod} />}
           <AuthInput
             label="Username"
             icon="at-outline"
@@ -104,6 +123,7 @@ export default function RegisterScreen() {
             returnKeyType="next"
             onSubmitEditing={() => emailRef.current?.focus()}
           />
+          {method === 'email' && <>
           <AuthInput
             ref={emailRef}
             label="Email"
@@ -133,6 +153,7 @@ export default function RegisterScreen() {
             returnKeyType="next"
             onSubmitEditing={() => inviteRef.current?.focus()}
           />
+          </>}
           <AuthInput
             ref={inviteRef}
             label="Invite code (optional)"
@@ -144,18 +165,29 @@ export default function RegisterScreen() {
             autoCapitalize="characters"
             autoCorrect={false}
             maxLength={12}
-            returnKeyType="go"
-            onSubmitEditing={handleRegister}
+            returnKeyType={method === 'email' ? 'go' : 'done'}
+            onSubmitEditing={method === 'email' ? handleRegister : undefined}
           />
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonBusy]}
-            onPress={handleRegister}
-            disabled={loading}
-            accessibilityRole="button"
-            accessibilityState={{ busy: loading, disabled: loading }}
-          >
-            {loading ? <ActivityIndicator color={theme.onAccent} /> : <Text style={styles.buttonText}>Create account</Text>}
-          </TouchableOpacity>
+          {method === 'phone' ? (
+            <PhoneCodeForm
+              mode="sign_up"
+              onSend={sendSignUpCode}
+              onVerify={async (phone, code) => { await verifyPhoneSignIn(phone, code); router.replace('/(tabs)'); }}
+              onProblem={setProblem}
+              sendLabel="Text me a code"
+              verifyLabel="Verify and create account"
+            />
+          ) : (
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonBusy]}
+              onPress={handleRegister}
+              disabled={loading}
+              accessibilityRole="button"
+              accessibilityState={{ busy: loading, disabled: loading }}
+            >
+              {loading ? <ActivityIndicator color={theme.onAccent} /> : <Text style={styles.buttonText}>Create account</Text>}
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity onPress={goSignIn} style={styles.link} accessibilityRole="link">
             <Text style={styles.linkMuted}>Already riding with us? <Text style={styles.linkText}>Sign in</Text></Text>
