@@ -102,7 +102,8 @@ export function registrationActionFor(hook: RazorpayWebhook): RegistrationAction
     case 'payment.failed':
       return { kind: 'apply', registrationId: regId, status: 'failed', paymentId: payment?.id ?? null, amountPaise: null };
     case 'refund.processed':
-      return { kind: 'apply', registrationId: regId, status: 'refunded', paymentId: refund?.payment_id ?? null, amountPaise: null };
+      // The refund amount lets the database tell a partial refund from a full one.
+      return { kind: 'apply', registrationId: regId, status: 'refunded', paymentId: refund?.payment_id ?? null, amountPaise: refund?.amount ?? null };
     default:
       return { kind: 'ignore', reason: `event_${hook.event}` };
   }

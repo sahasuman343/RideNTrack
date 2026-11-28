@@ -34,6 +34,7 @@ test('webhook events map to registration changes', () => {
   assert.deepEqual(paid, { kind: 'apply', registrationId: REG, status: 'paid', paymentId: 'pay_1', amountPaise: 150000 });
   assert.equal(rzp.registrationActionFor({ event: 'payment_link.expired', payload: { payment_link: { entity: { reference_id: REG } } } }).status, 'cancelled');
   assert.equal(rzp.registrationActionFor({ event: 'refund.processed', payload: { refund: { entity: { payment_id: 'pay_1', notes: { registration_id: REG } } } } }).status, 'refunded');
+  assert.equal(rzp.registrationActionFor({ event: 'refund.processed', payload: { refund: { entity: { payment_id: 'pay_1', amount: 50000, notes: { registration_id: REG } } } } }).amountPaise, 50000);
   assert.equal(rzp.registrationActionFor({ event: 'payment_link.paid', payload: {} }).kind, 'ignore');
   assert.equal(rzp.registrationActionFor({ event: 'order.paid', payload: { payment_link: { entity: { reference_id: REG } } } }).kind, 'ignore');
 });
